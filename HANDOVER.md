@@ -31,6 +31,8 @@ git push              # 6. 收工必须 push，否则另一台机器永远看不
 - ❌ 禁止提交 `node_modules/`、`.expo/`、`dist-check/`、任何证书或密钥。
 - ✅ 提交信息用中文或英文均可，但要说清「改了什么 + 为什么」。
 
+**⚠️ 网络不通时**：`github.com` 在中国大陆常被**单独**阻断，而 `api.github.com` / `raw.githubusercontent.com` / `codeload.github.com` 仍可访问——所以「`github.com` 不通」不等于断网。完整的排查与绕过步骤（含代理端口验证、凭据助手卡死的处理）见 [`AGENTS.md` 第 0.1 节](./AGENTS.md)。
+
 ---
 
 ## 一、核心定位与最高产品原则

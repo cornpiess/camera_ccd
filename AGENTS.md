@@ -25,6 +25,43 @@ git push             # 不 push = 另一台机器/另一个 AI 永远看不到�
 - ❌ 禁止 `git push --force`（除非用户明确要求）。
 - ❌ 禁止提交 `node_modules/`、`.expo/`、`dist-check/`、证书或密钥。
 
+### 0.1 拉不动 / 推不上去时（中国大陆网络，先看这段）
+
+`github.com` 常被单独阻断，而 `api.github.com` / `raw.githubusercontent.com` / `codeload.github.com` 往往仍可访问。**只有 `github.com` 不通是正常现象**，不代表整台机器断网。
+
+遇到 `CONNECT tunnel failed`、`Connection was reset`、`schannel: failed to receive handshake`、`could not read Username` 或直接挂死时，按顺序来：
+
+**第 1 步 · 先确认代理出口是活的**（Clash 系默认 `127.0.0.1:7890`，端口不同自行替换）：
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -x http://127.0.0.1:7890 https://github.com/
+```
+
+期望 `200`。**若是 `000`，说明代理根本没连上节点——先去修代理/VPN，不要在 git 上折腾。**
+
+**第 2 步 · 让 git 显式走代理**（不动全局配置，只对单条命令生效）：
+
+```bash
+git -c http.proxy=http://127.0.0.1:7890 -c https.proxy=http://127.0.0.1:7890 pull --rebase
+```
+
+**第 3 步 · 凭据助手卡住时，绕过它**。本机装的是 GCM，但 git 的 helper 选择器有时会挂死；直接调 GCM 取凭据反而正常：
+
+```bash
+GCM=$(find "$(dirname "$(git --exec-path)")" -maxdepth 3 -name 'git-credential-manager.exe' 2>/dev/null | head -1)
+printf "protocol=https\nhost=github.com\n\n" | GCM_INTERACTIVE=never "$GCM" get
+```
+
+拿到 `username` / `password` 后，用**只对这一条命令生效**的 helper 推送：
+
+```bash
+git -c http.proxy=http://127.0.0.1:7890 -c credential.helper= -c credential.helper="$GCM" push origin main
+```
+
+> ⚠️ **不要把代理写进 `.git/config`，也不要提交任何代理或密钥配置。** 换机器 / 换网络立刻失效，还会污染仓库。
+
+> ⚠️ 若本机 shell 里存在别处注入的 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量且指向不可用的端口，它会覆盖你的显式设置。排查时先 `env | grep -i proxy` 看一眼，必要时用 `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy git ...` 清掉。
+
 ---
 
 ## 1. 四条硬红线（违反即回退）
