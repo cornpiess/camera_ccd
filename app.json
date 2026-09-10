@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Aperture",
+    "name": "Rainbow Camera",
     "slug": "aperture-camera",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -8,11 +8,12 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.example.aperturecamera",
+      "bundleIdentifier": "com.cornpiess.rainbowcamera",
       "infoPlist": {
-        "NSCameraUsageDescription": "Aperture needs the camera to compose and capture photographs.",
-        "NSPhotoLibraryAddUsageDescription": "Aperture saves finished photographs to your photo library.",
-        "NSPhotoLibraryUsageDescription": "Aperture shows your most recently captured photograph."
+        "CFBundleDisplayName": "彩虹相机",
+        "NSCameraUsageDescription": "彩虹相机需要使用相机来取景与拍照。",
+        "NSPhotoLibraryAddUsageDescription": "彩虹相机需要把拍好的照片保存到你的相册。",
+        "NSPhotoLibraryUsageDescription": "彩虹相机需要读取相册，用来显示你最近拍摄的照片。"
       }
     },
     "plugins": ["expo-dev-client", "expo-document-picker"]

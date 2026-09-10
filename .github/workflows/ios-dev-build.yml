@@ -1,0 +1,263 @@
+# iOS 开发构建 —— 在 GitHub Actions 的 macOS runner 上产出可装真机的 .ipa
+#
+# 为什么不走 EAS：EAS Build 云端配额每月 15 次 iOS，本项目「改一行 Swift 就要重出包」，
+# 额度不够用。公开仓库的 standard macOS runner 免费且不限分钟，代价是自建签名链路。
+#
+# 为什么不用 eas build --local：AGENTS.md 红线 1 禁止任何形式的 `eas build`（本意是保护
+# EAS 配额）。本 workflow 完全不依赖 EAS / Expo 登录态，红线零冲突。
+#
+# 触发方式：仅手动（workflow_dispatch）。构建有成本，不做 push 自动触发。
+
+name: iOS Dev Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 要构建的分支或 tag
+        required: false
+        default: main
+      tag:
+        description: Release tag（留空则用 dev-r<run_number>）
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-dev-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build .ipa
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      # 早失败：宁可 30 秒挂掉，也不要白等 25 分钟。前置条件见 README「CI: iOS dev builds on GitHub Actions」。
+      - name: Preflight checks
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -uo pipefail
+          fail=0
+
+          for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID; do
+            if [ -z "${!v:-}" ]; then
+              echo "::error::缺少 repository secret: $v"
+              fail=1
+            fi
+          done
+
+          BID=$(node -p "require('./app.json').expo.ios.bundleIdentifier || ''")
+          echo "bundleIdentifier = $BID"
+          case "$BID" in
+            com.example.*|"")
+              echo "::error::bundleIdentifier 是占位值「$BID」。Apple 不允许注册 com.example 前缀，请在 app.json 改成自己的反向域名（如 com.<你的标识>.rainbowcamera）"
+              fail=1
+              ;;
+          esac
+
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::前置检查未通过，终止构建。"
+            exit 1
+          fi
+          echo "前置检查通过。"
+
+      - name: Show toolchain versions
+        run: |
+          xcodebuild -version
+          node -v
+          npm -v
+          pod --version
+
+      - name: Install JS dependencies
+        run: npm ci --no-audit --fund=false
+
+      # --- 原生工程由 prebuild 现生成，不入库（.gitignore 已含 /ios/）---
+
+      - name: Generate native iOS project
+        run: npx expo prebuild --platform ios --clean --no-install
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          pod install
+
+      - name: Write App Store Connect API key
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/private_keys"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          chmod 600 "$RUNNER_TEMP/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+
+      # --- 用 API Key 做 automatic signing，Xcode 自行创建/复用分发证书与 Ad Hoc 描述文件。
+      #     Windows 上没有 keychain/证书可用，这是唯一不需要手动搬 .p12 的路径。---
+
+      - name: Archive
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          WORKSPACE=$(ls -d ios/*.xcworkspace | head -1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          echo "workspace=$WORKSPACE scheme=$SCHEME"
+          xcodebuild archive \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/private_keys/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Export Ad Hoc .ipa
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/ipa"
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>ad-hoc</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>destination</key>
+            <string>export</string>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/ipa" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/private_keys/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          ls -lh "$RUNNER_TEMP/ipa"
+
+      # --- 生成 OTA manifest：让 iPhone 用 Safari 直接装，不需要 Mac 或第三方工具 ---
+
+      - name: Generate OTA manifest
+        run: |
+          set -euo pipefail
+          IPA=$(ls "$RUNNER_TEMP/ipa"/*.ipa | head -1)
+          TAG="${{ inputs.tag }}"
+          [ -n "$TAG" ] || TAG="dev-r${{ github.run_number }}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
+          cp "$IPA" "$RUNNER_TEMP/RainbowCamera-dev.ipa"
+
+          rm -rf "$RUNNER_TEMP/unpack" && mkdir -p "$RUNNER_TEMP/unpack"
+          unzip -q "$RUNNER_TEMP/RainbowCamera-dev.ipa" -d "$RUNNER_TEMP/unpack"
+          APP_PLIST=$(ls -d "$RUNNER_TEMP/unpack/Payload"/*.app/Info.plist | head -1)
+          BID=$(plutil -extract CFBundleIdentifier raw "$APP_PLIST")
+          BVER=$(plutil -extract CFBundleShortVersionString raw "$APP_PLIST")
+          BNAME=$(plutil -extract CFBundleName raw "$APP_PLIST")
+          echo "bundle=$BID version=$BVER name=$BNAME"
+
+          IPA_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/RainbowCamera-dev.ipa"
+          cat > "$RUNNER_TEMP/manifest.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>items</key>
+            <array>
+              <dict>
+                <key>assets</key>
+                <array>
+                  <dict>
+                    <key>kind</key>
+                    <string>software-package</string>
+                    <key>url</key>
+                    <string>${IPA_URL}</string>
+                  </dict>
+                </array>
+                <key>metadata</key>
+                <dict>
+                  <key>bundle-identifier</key>
+                  <string>${BID}</string>
+                  <key>bundle-version</key>
+                  <string>${BVER}</string>
+                  <key>kind</key>
+                  <string>software</string>
+                  <key>title</key>
+                  <string>${BNAME}</string>
+                </dict>
+              </dict>
+            </array>
+          </dict>
+          </plist>
+          PLIST
+
+          echo "OTA_URL=itms-services://?action=download-manifest&url=https://github.com/${{ github.repository }}/releases/download/${TAG}/manifest.plist" >> "$GITHUB_ENV"
+
+      - name: Publish Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          NOTES="commit ${{ github.sha }} on ${{ inputs.ref }}"
+          gh release create "$TAG" \
+            --title "Dev build $TAG" \
+            --notes "$NOTES" \
+            "$RUNNER_TEMP/RainbowCamera-dev.ipa" "$RUNNER_TEMP/manifest.plist" \
+            || gh release upload "$TAG" --clobber \
+                 "$RUNNER_TEMP/RainbowCamera-dev.ipa" "$RUNNER_TEMP/manifest.plist"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RainbowCamera-dev-${{ github.run_number }}
+          path: ${{ runner.temp }}/RainbowCamera-dev.ipa
+          retention-days: 14
+
+      - name: Summary
+        run: |
+          {
+            echo "## iOS dev build $TAG"
+            echo ""
+            echo "iPhone 上用 **Safari** 打开这个链接安装（不要用微信/QQ 内置浏览器）："
+            echo ""
+            echo '```'
+            echo "$OTA_URL"
+            echo '```'
+            echo ""
+            echo "前提：这台 iPhone 的 UDID 已在 Apple Developer 账号的设备列表里登记。"
+          } >> "$GITHUB_STEP_SUMMARY"
