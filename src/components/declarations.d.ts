@@ -1,0 +1,2 @@
+// Ambient declarations placeholder
+export {};

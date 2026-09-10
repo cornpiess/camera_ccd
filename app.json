@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Aperture",
+    "slug": "aperture-camera",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "platforms": ["ios"],
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.example.aperturecamera",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Aperture needs the camera to compose and capture photographs.",
+        "NSPhotoLibraryAddUsageDescription": "Aperture saves finished photographs to your photo library.",
+        "NSPhotoLibraryUsageDescription": "Aperture shows your most recently captured photograph."
+      }
+    },
+    "plugins": ["expo-dev-client", "expo-document-picker"]
+  }
+}

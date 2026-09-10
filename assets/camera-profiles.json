@@ -1,0 +1,821 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "canon_g7x_ii",
+      "name": "Canon G7X II",
+      "aperture": {
+        "preferred": 1.8
+      },
+      "ui": {
+        "shortName": "G7X II",
+        "accent": "#C83432",
+        "dialStyle": "compact"
+      },
+      "raw": {
+        "sharpness": 0.58,
+        "detail": 0.54,
+        "localToneMap": 0.18,
+        "luminanceNoiseReduction": 0.28,
+        "colorNoiseReduction": 0.34
+      },
+      "tone": {
+        "exposure": 0.08,
+        "contrast": 1.14,
+        "blackPoint": 0.025,
+        "curve": [
+          [
+            0,
+            0.01
+          ],
+          [
+            0.25,
+            0.22
+          ],
+          [
+            0.5,
+            0.51
+          ],
+          [
+            0.75,
+            0.79
+          ],
+          [
+            1,
+            0.99
+          ]
+        ]
+      },
+      "color": {
+        "saturation": 1.08,
+        "temperature": 120,
+        "tint": 2,
+        "hueBands": {
+          "red": {
+            "hue": -2,
+            "saturation": 1.08,
+            "luminance": 1.02
+          },
+          "orange": {
+            "hue": -3,
+            "saturation": 1.06,
+            "luminance": 1.05
+          },
+          "yellow": {
+            "hue": -4,
+            "saturation": 1.03,
+            "luminance": 1.02
+          },
+          "green": {
+            "hue": 2,
+            "saturation": 0.96,
+            "luminance": 1.01
+          },
+          "cyan": {
+            "hue": -2,
+            "saturation": 1.02,
+            "luminance": 1.02
+          },
+          "blue": {
+            "hue": 1,
+            "saturation": 1.05,
+            "luminance": 0.98
+          },
+          "magenta": {
+            "hue": 2,
+            "saturation": 1.04,
+            "luminance": 1.01
+          }
+        }
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.08,
+          "size": 0.22
+        },
+        "vignette": {
+          "amount": 0.12,
+          "radius": 0.74
+        },
+        "halation": {
+          "amount": 0.02,
+          "radius": 0.18
+        }
+      }
+    },
+    {
+      "id": "ricoh_positive",
+      "name": "Ricoh Positive",
+      "aperture": {
+        "preferred": 2.8
+      },
+      "ui": {
+        "shortName": "Positive",
+        "accent": "#D5A03A",
+        "dialStyle": "snap"
+      },
+      "raw": {
+        "sharpness": 0.66,
+        "detail": 0.61,
+        "localToneMap": 0.26,
+        "luminanceNoiseReduction": 0.18,
+        "colorNoiseReduction": 0.24
+      },
+      "tone": {
+        "exposure": -0.04,
+        "contrast": 1.27,
+        "blackPoint": 0.045,
+        "curve": [
+          [
+            0,
+            0.015
+          ],
+          [
+            0.25,
+            0.18
+          ],
+          [
+            0.5,
+            0.49
+          ],
+          [
+            0.75,
+            0.83
+          ],
+          [
+            1,
+            0.985
+          ]
+        ]
+      },
+      "color": {
+        "saturation": 1.16,
+        "temperature": 180,
+        "tint": 3,
+        "hueBands": {
+          "red": {
+            "hue": -4,
+            "saturation": 1.11,
+            "luminance": 0.98
+          },
+          "orange": {
+            "hue": -6,
+            "saturation": 1.13,
+            "luminance": 1.04
+          },
+          "yellow": {
+            "hue": -8,
+            "saturation": 1.08,
+            "luminance": 1.01
+          },
+          "green": {
+            "hue": 8,
+            "saturation": 0.93,
+            "luminance": 0.97
+          },
+          "cyan": {
+            "hue": -5,
+            "saturation": 1.04,
+            "luminance": 0.98
+          },
+          "blue": {
+            "hue": -3,
+            "saturation": 1.1,
+            "luminance": 0.93
+          },
+          "magenta": {
+            "hue": 3,
+            "saturation": 1.07,
+            "luminance": 0.99
+          }
+        }
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.14,
+          "size": 0.3
+        },
+        "vignette": {
+          "amount": 0.18,
+          "radius": 0.68
+        },
+        "halation": {
+          "amount": 0.03,
+          "radius": 0.2
+        }
+      }
+    },
+    {
+      "id": "ricoh_negative",
+      "name": "Ricoh Negative",
+      "aperture": {
+        "preferred": 2.8
+      },
+      "ui": {
+        "shortName": "Negative",
+        "accent": "#748A69",
+        "dialStyle": "snap"
+      },
+      "raw": {
+        "sharpness": 0.6,
+        "detail": 0.57,
+        "localToneMap": 0.2,
+        "luminanceNoiseReduction": 0.22,
+        "colorNoiseReduction": 0.27
+      },
+      "tone": {
+        "exposure": 0.02,
+        "contrast": 1.08,
+        "blackPoint": 0.035,
+        "curve": [
+          [
+            0,
+            0.025
+          ],
+          [
+            0.25,
+            0.23
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.76
+          ],
+          [
+            1,
+            0.965
+          ]
+        ]
+      },
+      "color": {
+        "saturation": 0.94,
+        "temperature": -80,
+        "tint": -2,
+        "hueBands": {
+          "red": {
+            "hue": 3,
+            "saturation": 0.95,
+            "luminance": 1.03
+          },
+          "orange": {
+            "hue": 4,
+            "saturation": 0.97,
+            "luminance": 1.07
+          },
+          "yellow": {
+            "hue": 6,
+            "saturation": 0.9,
+            "luminance": 1.05
+          },
+          "green": {
+            "hue": -7,
+            "saturation": 0.88,
+            "luminance": 1.02
+          },
+          "cyan": {
+            "hue": 6,
+            "saturation": 0.95,
+            "luminance": 1.04
+          },
+          "blue": {
+            "hue": 5,
+            "saturation": 0.92,
+            "luminance": 1.01
+          },
+          "magenta": {
+            "hue": -3,
+            "saturation": 0.93,
+            "luminance": 1.03
+          }
+        }
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.2,
+          "size": 0.38
+        },
+        "vignette": {
+          "amount": 0.15,
+          "radius": 0.72
+        },
+        "halation": {
+          "amount": 0.04,
+          "radius": 0.25
+        }
+      }
+    },
+    {
+      "id": "leica_m9",
+      "name": "Leica M9",
+      "aperture": {
+        "preferred": 2
+      },
+      "ui": {
+        "shortName": "M9",
+        "accent": "#A51E25",
+        "dialStyle": "engraved"
+      },
+      "raw": {
+        "sharpness": 0.72,
+        "detail": 0.68,
+        "localToneMap": 0.12,
+        "luminanceNoiseReduction": 0.1,
+        "colorNoiseReduction": 0.16
+      },
+      "tone": {
+        "exposure": -0.06,
+        "contrast": 1.23,
+        "blackPoint": 0.055,
+        "curve": [
+          [
+            0,
+            0.008
+          ],
+          [
+            0.25,
+            0.19
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.82
+          ],
+          [
+            1,
+            0.992
+          ]
+        ]
+      },
+      "color": {
+        "saturation": 1.05,
+        "temperature": 90,
+        "tint": 5,
+        "hueBands": {
+          "red": {
+            "hue": -5,
+            "saturation": 1.12,
+            "luminance": 0.97
+          },
+          "orange": {
+            "hue": -2,
+            "saturation": 1.07,
+            "luminance": 1.03
+          },
+          "yellow": {
+            "hue": -3,
+            "saturation": 0.98,
+            "luminance": 1.02
+          },
+          "green": {
+            "hue": 4,
+            "saturation": 0.91,
+            "luminance": 0.98
+          },
+          "cyan": {
+            "hue": -4,
+            "saturation": 0.97,
+            "luminance": 1.01
+          },
+          "blue": {
+            "hue": 3,
+            "saturation": 1.04,
+            "luminance": 0.95
+          },
+          "magenta": {
+            "hue": -2,
+            "saturation": 1.08,
+            "luminance": 0.98
+          }
+        }
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.11,
+          "size": 0.27
+        },
+        "vignette": {
+          "amount": 0.22,
+          "radius": 0.64
+        },
+        "halation": {
+          "amount": 0.025,
+          "radius": 0.2
+        }
+      }
+    },
+    {
+      "id": "fuji_classic_chrome",
+      "name": "Fuji Classic Chrome",
+      "aperture": {
+        "preferred": 2.8
+      },
+      "ui": {
+        "shortName": "Classic Chrome",
+        "accent": "#58717A",
+        "dialStyle": "knurled"
+      },
+      "raw": {
+        "sharpness": 0.55,
+        "detail": 0.58,
+        "localToneMap": 0.14,
+        "luminanceNoiseReduction": 0.2,
+        "colorNoiseReduction": 0.25
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1.1,
+        "blackPoint": 0.04,
+        "curve": [
+          [
+            0,
+            0.02
+          ],
+          [
+            0.25,
+            0.22
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.77
+          ],
+          [
+            1,
+            0.97
+          ]
+        ]
+      },
+      "color": {
+        "saturation": 0.86,
+        "temperature": -40,
+        "tint": 1,
+        "hueBands": {
+          "red": {
+            "hue": 2,
+            "saturation": 0.92,
+            "luminance": 1.02
+          },
+          "orange": {
+            "hue": -2,
+            "saturation": 0.94,
+            "luminance": 1.05
+          },
+          "yellow": {
+            "hue": -6,
+            "saturation": 0.86,
+            "luminance": 1.03
+          },
+          "green": {
+            "hue": 7,
+            "saturation": 0.82,
+            "luminance": 0.99
+          },
+          "cyan": {
+            "hue": -8,
+            "saturation": 0.9,
+            "luminance": 1.03
+          },
+          "blue": {
+            "hue": -6,
+            "saturation": 0.88,
+            "luminance": 0.98
+          },
+          "magenta": {
+            "hue": 4,
+            "saturation": 0.91,
+            "luminance": 1.01
+          }
+        }
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.16,
+          "size": 0.32
+        },
+        "vignette": {
+          "amount": 0.1,
+          "radius": 0.78
+        },
+        "halation": {
+          "amount": 0.025,
+          "radius": 0.22
+        }
+      }
+    },
+    {
+      "id": "fuji_classic_negative",
+      "name": "Fuji Classic Negative",
+      "aperture": {
+        "preferred": 2.8
+      },
+      "ui": {
+        "shortName": "Classic Neg",
+        "accent": "#9A6E52",
+        "dialStyle": "knurled"
+      },
+      "raw": {
+        "sharpness": 0.57,
+        "detail": 0.56,
+        "localToneMap": 0.22,
+        "luminanceNoiseReduction": 0.19,
+        "colorNoiseReduction": 0.24
+      },
+      "tone": {
+        "exposure": -0.03,
+        "contrast": 1.2,
+        "blackPoint": 0.05,
+        "curve": [
+          [
+            0,
+            0.018
+          ],
+          [
+            0.25,
+            0.19
+          ],
+          [
+            0.5,
+            0.48
+          ],
+          [
+            0.75,
+            0.8
+          ],
+          [
+            1,
+            0.975
+          ]
+        ]
+      },
+      "color": {
+        "saturation": 0.97,
+        "temperature": 110,
+        "tint": -3,
+        "hueBands": {
+          "red": {
+            "hue": 5,
+            "saturation": 1.03,
+            "luminance": 0.97
+          },
+          "orange": {
+            "hue": -5,
+            "saturation": 1.02,
+            "luminance": 1.04
+          },
+          "yellow": {
+            "hue": -10,
+            "saturation": 0.91,
+            "luminance": 1.01
+          },
+          "green": {
+            "hue": 9,
+            "saturation": 0.86,
+            "luminance": 0.96
+          },
+          "cyan": {
+            "hue": -7,
+            "saturation": 1.04,
+            "luminance": 0.97
+          },
+          "blue": {
+            "hue": -5,
+            "saturation": 1.07,
+            "luminance": 0.92
+          },
+          "magenta": {
+            "hue": 6,
+            "saturation": 0.96,
+            "luminance": 0.98
+          }
+        }
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.22,
+          "size": 0.4
+        },
+        "vignette": {
+          "amount": 0.14,
+          "radius": 0.7
+        },
+        "halation": {
+          "amount": 0.05,
+          "radius": 0.28
+        }
+      }
+    },
+    {
+      "id": "hasselblad_natural",
+      "name": "Hasselblad Natural",
+      "aperture": {
+        "preferred": 2.8
+      },
+      "ui": {
+        "shortName": "Natural",
+        "accent": "#C5A86B",
+        "dialStyle": "medium-format"
+      },
+      "raw": {
+        "sharpness": 0.63,
+        "detail": 0.7,
+        "localToneMap": 0.1,
+        "luminanceNoiseReduction": 0.24,
+        "colorNoiseReduction": 0.3
+      },
+      "tone": {
+        "exposure": 0.1,
+        "contrast": 1.04,
+        "blackPoint": 0.018,
+        "curve": [
+          [
+            0,
+            0.012
+          ],
+          [
+            0.25,
+            0.245
+          ],
+          [
+            0.5,
+            0.515
+          ],
+          [
+            0.75,
+            0.765
+          ],
+          [
+            1,
+            0.99
+          ]
+        ]
+      },
+      "color": {
+        "saturation": 1.02,
+        "temperature": 60,
+        "tint": 2,
+        "hueBands": {
+          "red": {
+            "hue": 0,
+            "saturation": 1.02,
+            "luminance": 1.02
+          },
+          "orange": {
+            "hue": -1,
+            "saturation": 1.03,
+            "luminance": 1.06
+          },
+          "yellow": {
+            "hue": -2,
+            "saturation": 0.98,
+            "luminance": 1.04
+          },
+          "green": {
+            "hue": 2,
+            "saturation": 0.97,
+            "luminance": 1.03
+          },
+          "cyan": {
+            "hue": -1,
+            "saturation": 0.98,
+            "luminance": 1.04
+          },
+          "blue": {
+            "hue": 1,
+            "saturation": 1.01,
+            "luminance": 1.02
+          },
+          "magenta": {
+            "hue": -1,
+            "saturation": 1.02,
+            "luminance": 1.03
+          }
+        }
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.06,
+          "size": 0.2
+        },
+        "vignette": {
+          "amount": 0.08,
+          "radius": 0.82
+        },
+        "halation": {
+          "amount": 0.015,
+          "radius": 0.16
+        }
+      }
+    },
+    {
+      "id": "cinestill_800t",
+      "name": "CineStill 800T",
+      "aperture": {
+        "preferred": 1.48
+      },
+      "ui": {
+        "shortName": "800T",
+        "accent": "#E5533D",
+        "dialStyle": "cinema"
+      },
+      "raw": {
+        "sharpness": 0.42,
+        "detail": 0.48,
+        "localToneMap": 0.16,
+        "luminanceNoiseReduction": 0.08,
+        "colorNoiseReduction": 0.12
+      },
+      "tone": {
+        "exposure": 0.06,
+        "contrast": 1.18,
+        "blackPoint": 0.042,
+        "curve": [
+          [
+            0,
+            0.03
+          ],
+          [
+            0.25,
+            0.2
+          ],
+          [
+            0.5,
+            0.49
+          ],
+          [
+            0.75,
+            0.81
+          ],
+          [
+            1,
+            0.98
+          ]
+        ]
+      },
+      "color": {
+        "saturation": 1.12,
+        "temperature": -720,
+        "tint": 10,
+        "hueBands": {
+          "red": {
+            "hue": -7,
+            "saturation": 1.18,
+            "luminance": 1.03
+          },
+          "orange": {
+            "hue": -8,
+            "saturation": 1.12,
+            "luminance": 1.05
+          },
+          "yellow": {
+            "hue": -6,
+            "saturation": 1.04,
+            "luminance": 1.02
+          },
+          "green": {
+            "hue": 10,
+            "saturation": 0.84,
+            "luminance": 0.97
+          },
+          "cyan": {
+            "hue": -12,
+            "saturation": 1.14,
+            "luminance": 0.96
+          },
+          "blue": {
+            "hue": -8,
+            "saturation": 1.2,
+            "luminance": 0.93
+          },
+          "magenta": {
+            "hue": 8,
+            "saturation": 1.16,
+            "luminance": 0.98
+          }
+        }
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.38,
+          "size": 0.56
+        },
+        "vignette": {
+          "amount": 0.24,
+          "radius": 0.62
+        },
+        "halation": {
+          "amount": 0.42,
+          "radius": 0.58
+        }
+      }
+    }
+  ]
+}
