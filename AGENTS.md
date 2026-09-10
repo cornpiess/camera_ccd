@@ -48,7 +48,7 @@ git -c http.proxy=http://127.0.0.1:7890 -c https.proxy=http://127.0.0.1:7890 pul
 **第 3 步 · 凭据助手卡住时，绕过它**。本机装的是 GCM，但 git 的 helper 选择器有时会挂死；直接调 GCM 取凭据反而正常：
 
 ```bash
-GCM=$(find "$(dirname "$(git --exec-path)")" -maxdepth 3 -name 'git-credential-manager.exe' 2>/dev/null | head -1)
+GCM="$(dirname "$(dirname "$(git --exec-path)")")/bin/git-credential-manager.exe"
 printf "protocol=https\nhost=github.com\n\n" | GCM_INTERACTIVE=never "$GCM" get
 ```
 
