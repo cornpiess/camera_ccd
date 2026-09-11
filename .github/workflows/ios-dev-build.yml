@@ -95,10 +95,72 @@ jobs:
       - name: Generate native iOS project
         run: npx expo prebuild --platform ios --clean --no-install
 
+      # 为什么需要这一步：
+      #   Xcode 16 起，CocoaPods 生成的 Pods 工程会把 SWIFT_VERSION 设成 6.0，
+      #   而 expo-modules-core 55.0.26 的源码是 Swift 5 写法（用了 @MainActor 放在
+      #   继承子句里等 Swift 6 下非法的形式）。结果是 ExpoModulesCore 编译期满屏
+      #   "main actor-isolated ... cannot be referenced from a nonisolated context"
+      #   与 "unknown attribute 'MainActor'" 而 ARCHIVE FAILED。
+      #   这是上游 expo-modules-core 与 Xcode 16 默认值的冲突，与本仓库代码无关。
+      #
+      # 做法：在 prebuild 生成 Podfile 之后、pod install 之前，往 Podfile 追加 post_install，
+      #   把 Pods 目标（即第三方依赖）统一压回 Swift 5 语言模式。
+      #   宿主 App 自身不受影响，CameraEngine 等本仓库代码照常编译。
+      #   升级 SDK 后若上游已修，可移除本 step（会多跑几分钟，无其它代价）。
+      - name: Pin Pods Swift language mode to 5
+        run: |
+          set -euo pipefail
+          test -f ios/Podfile
+
+          # 幂等：重复执行不会叠加多段 post_install。
+          if grep -q 'CCD_FORCE_SWIFT5' ios/Podfile; then
+            echo "post_install 已存在，跳过。"
+            exit 0
+          fi
+
+          cat >> ios/Podfile <<'CCD_FORCE_SWIFT5'
+
+          # --- injected by CI: expo-modules-core 需 Swift 5 语言模式 ---
+          post_install do |installer|
+            installer.pods_project.targets.each do |target|
+              target.build_configurations.each do |config|
+                # 只在 Pods 工程内生效，不影响 RainbowCamera 主 target。
+                config.build_settings['SWIFT_VERSION'] = '5.0'
+                # 关掉 Swift 6 的严格并发检查，避免同一批源码在 Swift 5 模式下
+                # 仍被未来的默认值波及。
+                config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
+              end
+            end
+          end
+          CCD_FORCE_SWIFT5
+
+          # 自检：确认追加成功且结束标记顶格（YAML 块标量易吃掉缩进）。
+          grep -q 'CCD_FORCE_SWIFT5' ios/Podfile
+          grep -q "SWIFT_VERSION" ios/Podfile
+          echo "--- Podfile 尾部 ---"
+          tail -n 15 ios/Podfile
+
       - name: Install CocoaPods
         run: |
           cd ios
           pod install
+
+      # 证实覆写真的落到了生成的 Pods 工程里。
+      # 若这里是 6.x，说明 post_install 没生效，不要继续往下跑（省 25 分钟）。
+      - name: Verify Pods Swift version
+        run: |
+          set -euo pipefail
+          V=$(grep -m1 -o 'SWIFT_VERSION = [0-9.]*' ios/Pods/Pods.xcodeproj/project.pbxproj || true)
+          echo "Pods 工程里第一个 SWIFT_VERSION: ${V:-<未找到>}"
+          if ! grep -q 'SWIFT_VERSION = 5' ios/Pods/Pods.xcodeproj/project.pbxproj; then
+            echo "::error::post_install 未生效：Pods 工程里没有 SWIFT_VERSION = 5.x。"
+            exit 1
+          fi
+          if grep -q 'SWIFT_VERSION = 6' ios/Pods/Pods.xcodeproj/project.pbxproj; then
+            echo "::error::Pods 工程里仍存在 SWIFT_VERSION = 6，Swift 6 严格并发会导致 ExpoModulesCore 编译失败。"
+            exit 1
+          fi
+          echo "Pods 已固定为 Swift 5 语言模式。"
 
       - name: Write App Store Connect API key
         env:

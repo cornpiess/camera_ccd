@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "platforms": ["ios"],
     "userInterfaceStyle": "dark",
-    "icon": "./app_icon.png",
+    "icon": "./assets/app_icon.png",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.cornpiess.camera18",
