@@ -6,7 +6,9 @@ import CoreFoundation
 import ImageIO
 import UIKit
 
-fileprivate enum CameraEngineError: String, Error {
+// 模块内可见即可。放在 fileprivate 会连带要求所有签名里用到它的方法也降为
+// fileprivate（Swift 要求方法可见度不高于签名中类型的可见度），没有收益。
+enum CameraEngineError: String, Error {
   case noActiveView = "ERR_NO_ACTIVE_VIEW"
   case permissionDenied = "ERR_PERMISSION_DENIED"
   case photoPermissionDenied = "ERR_PHOTO_PERMISSION_DENIED"
@@ -286,12 +288,10 @@ public final class CameraEngineView: ExpoView {
       throw CameraEngineError.configurationFailed
     }
 
-    var addedInput: AVCaptureInput?
-    var addedOutput = false
     session.beginConfiguration()
     session.sessionPreset = .photo
-    if needsInput { session.addInput(input); addedInput = input }
-    if needsOutput { session.addOutput(output); addedOutput = true }
+    if needsInput { session.addInput(input) }
+    if needsOutput { session.addOutput(output) }
     output.maxPhotoQualityPrioritization = .quality
 
     // Enable Apple ProRAW capability on session output if supported on this hardware & OS
