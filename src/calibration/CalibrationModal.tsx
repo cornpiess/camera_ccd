@@ -40,7 +40,7 @@ function ActionButton({ label, onPress, disabled = false, destructive = false }:
 }
 
 export function CalibrationModal({ visible, onClose }: CalibrationModalProps): React.JSX.Element {
-  const { applyText, clearErrors, errors, importJson, loading, reload, reset } = useProfiles();
+  const { applyText, clearErrors, document, errors, exportJson, importJson, loading, reload, reset } = useProfiles();
   const [text, setText] = useState('');
   const [working, setWorking] = useState(false);
 
@@ -53,6 +53,15 @@ export function CalibrationModal({ visible, onClose }: CalibrationModalProps): R
       setWorking(false);
     }
   }, []);
+
+  // Export = load the active document into the editor below, ready to be copied out.
+  // The editor is selectable, so "long-press -> Select All -> Copy" is all it takes.
+  const handleExport = useCallback((): void => {
+    const json = exportJson();
+    if (json === null) return;
+    clearErrors();
+    setText(json);
+  }, [clearErrors, exportJson]);
 
   const close = useCallback((): void => {
     clearErrors();
@@ -80,10 +89,12 @@ export function CalibrationModal({ visible, onClose }: CalibrationModalProps): R
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <Text style={styles.help}>
             Import a profile document or paste its complete JSON below. Valid changes are saved and applied immediately.
+            Export loads the active JSON into the editor — long-press it to select all and copy.
           </Text>
 
           <View style={styles.actions}>
             <ActionButton disabled={busy} label="Import JSON" onPress={() => { void run(importJson); }} />
+            <ActionButton disabled={busy || document === null} label="Export Current JSON" onPress={handleExport} />
             <ActionButton disabled={busy} label="Reload" onPress={() => { void run(reload); }} />
             <ActionButton destructive disabled={busy} label="Reset Default" onPress={() => { void run(reset, true); }} />
           </View>

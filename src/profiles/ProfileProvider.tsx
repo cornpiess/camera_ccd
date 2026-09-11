@@ -26,6 +26,8 @@ export interface ProfilesContextValue {
   selectProfile: (profileId: string) => boolean;
   importJson: () => Promise<boolean>;
   applyText: (text: string) => Promise<boolean>;
+  /** Pretty-printed JSON of the currently active document, or null when none is loaded. */
+  exportJson: () => string | null;
   reload: () => Promise<boolean>;
   reset: () => Promise<boolean>;
   clearErrors: () => void;
@@ -160,6 +162,10 @@ export function ProfileProvider({ children }: PropsWithChildren): React.JSX.Elem
     [currentProfileId, document],
   );
 
+  const exportJson = useCallback((): string | null => {
+    return document ? JSON.stringify(document, null, 2) : null;
+  }, [document]);
+
   const value = useMemo<ProfilesContextValue>(() => ({
     profiles: document?.profiles ?? [],
     currentProfile,
@@ -170,10 +176,11 @@ export function ProfileProvider({ children }: PropsWithChildren): React.JSX.Elem
     selectProfile,
     importJson,
     applyText,
+    exportJson,
     reload: load,
     reset,
     clearErrors: () => setErrors([]),
-  }), [applyText, currentProfile, currentProfileId, document, errors, importJson, load, loading, reset, selectProfile]);
+  }), [applyText, currentProfile, currentProfileId, document, errors, exportJson, importJson, load, loading, reset, selectProfile]);
 
   return <ProfilesContext.Provider value={value}>{children}</ProfilesContext.Provider>;
 }
