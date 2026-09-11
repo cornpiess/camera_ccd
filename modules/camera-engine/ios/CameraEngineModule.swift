@@ -40,16 +40,16 @@ private extension CameraEngineError {
 /// Manages variable aperture runtime discovery and hardware control via official public APIs only.
 /// On devices without variable aperture support (or until future SDKs expose Apple public APIs),
 /// it safely and honestly reports supportsVariableAperture = false and rejects setAperture calls.
-public final class ApertureController {
-  public struct Capabilities {
-    public let supportsVariableAperture: Bool
-    public let minAperture: Double?
-    public let maxAperture: Double?
-    public let activeAperture: Double
-    public let supportedApertures: [Double]?
-    public let deviceModel: String
+final class ApertureController {
+  struct Capabilities {
+    let supportsVariableAperture: Bool
+    let minAperture: Double?
+    let maxAperture: Double?
+    let activeAperture: Double
+    let supportedApertures: [Double]?
+    let deviceModel: String
 
-    public var asDictionary: [String: Any] {
+    var asDictionary: [String: Any] {
       var dict: [String: Any] = [
         "supportsVariableAperture": supportsVariableAperture,
         "minAperture": minAperture ?? NSNull(),
@@ -69,10 +69,10 @@ public final class ApertureController {
     }
   }
 
-  public init() {}
+  init() {}
 
   /// Inspect runtime device capabilities using official public AVFoundation properties.
-  public func getCapabilities(device: AVCaptureDevice?) -> Capabilities {
+  func getCapabilities(device: AVCaptureDevice?) -> Capabilities {
     guard let device = device else {
       return Capabilities(
         supportsVariableAperture: false,
@@ -101,7 +101,7 @@ public final class ApertureController {
 
   /// Attempts to set hardware variable aperture on the active device.
   /// Rejects on unsupported devices or until verified public API exists.
-  public func setAperture(_ fStop: Double, on device: AVCaptureDevice?, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
+  func setAperture(_ fStop: Double, on device: AVCaptureDevice?, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
     guard let _ = device else {
       completion(.failure(.cameraUnavailable))
       return
@@ -119,61 +119,65 @@ public final class CameraEngineModule: Module {
   private let apertureController = ApertureController()
 
   public func definition() -> ModuleDefinition {
-    CameraEngineView.registrationHandler = { [weak self] view, isActive in
-      guard let self = self else { return }
-      if isActive {
-        self.activeView = view
-      } else if self.activeView === view {
-        self.activeView = nil
+    Name("CameraEngine")
+
+    OnCreate {
+      CameraEngineView.registrationHandler = { [weak self] view, isActive in
+        guard let self = self else { return }
+        if isActive {
+          self.activeView = view
+        } else if self.activeView === view {
+          self.activeView = nil
+        }
       }
     }
 
-    return ModuleDefinition {
-      Name("CameraEngine")
+    OnDestroy {
+      CameraEngineView.registrationHandler = nil
+    }
 
-      View(CameraEngineView.self) {
-        Prop("profile") { (view: CameraEngineView, profile: [String: Any]?) in
-          view.setProfile(profile ?? [:])
-        }
-        OnViewDidUpdateProps { view in
-          self.activeView = view
-        }
+    View(CameraEngineView.self) {
+      Prop("profile") { (view: CameraEngineView, profile: [String: Any]?) in
+        view.setProfile(profile ?? [:])
       }
+      OnViewDidUpdateProps { view in
+        self.activeView = view
+      }
+    }
 
-      AsyncFunction("startCamera") { (promise: Promise) in
-        guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
-        view.start { result in self.settle(result, promise) }
-      }
+    AsyncFunction("startCamera") { (promise: Promise) in
+      guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
+      view.start { result in self.settle(result, promise) }
+    }
 
-      AsyncFunction("stopCamera") { (promise: Promise) in
-        guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
-        view.stop { promise.resolve(nil) }
-      }
+    AsyncFunction("stopCamera") { (promise: Promise) in
+      guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
+      view.stop { promise.resolve(nil) }
+    }
 
-      AsyncFunction("capturePhoto") { (promise: Promise) in
-        guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
-        view.capture { result in self.settle(result, promise) }
-      }
+    AsyncFunction("capturePhoto") { (promise: Promise) in
+      guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
+      view.capture { result in self.settle(result, promise) }
+    }
 
-      AsyncFunction("setAperture") { (fStop: Double, promise: Promise) in
-        guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
-        view.setAperture(fStop, controller: self.apertureController) { result in
-          self.settle(result, promise)
-        }
+    AsyncFunction("setAperture") { (fStop: Double, promise: Promise) in
+      guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
+      view.setAperture(fStop, controller: self.apertureController) { result in
+        self.settle(result, promise)
       }
+    }
 
-      AsyncFunction("getCapabilities") { (promise: Promise) in
-        guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
-        view.capabilities(controller: self.apertureController) { result in
-          self.settle(result, promise)
-        }
+    AsyncFunction("getCapabilities") { (promise: Promise) in
+      guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
+      view.capabilities(controller: self.apertureController) { result in
+        self.settle(result, promise)
       }
+    }
 
-      AsyncFunction("applyProfile") { (profile: [String: Any], promise: Promise) in
-        guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
-        view.setProfile(profile)
-        DispatchQueue.main.async { promise.resolve(nil) }
-      }
+    AsyncFunction("applyProfile") { (profile: [String: Any], promise: Promise) in
+      guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
+      view.setProfile(profile)
+      DispatchQueue.main.async { promise.resolve(nil) }
     }
   }
 
@@ -285,28 +289,19 @@ public final class CameraEngineView: ExpoView {
     var addedInput: AVCaptureInput?
     var addedOutput = false
     session.beginConfiguration()
-    do {
-      session.sessionPreset = .photo
-      if needsInput { session.addInput(input); addedInput = input }
-      if needsOutput { session.addOutput(output); addedOutput = true }
-      output.maxPhotoQualityPrioritization = .quality
+    session.sessionPreset = .photo
+    if needsInput { session.addInput(input); addedInput = input }
+    if needsOutput { session.addOutput(output); addedOutput = true }
+    output.maxPhotoQualityPrioritization = .quality
 
-      // Enable Apple ProRAW capability on session output if supported on this hardware & OS
-      if #available(iOS 14.3, *), output.isAppleProRAWSupported {
-        output.isAppleProRAWEnabled = true
-      }
-
-      session.commitConfiguration()
-      camera = device
-      configured = true
-    } catch {
-      if addedOutput { session.removeOutput(output) }
-      if let addedInput = addedInput { session.removeInput(addedInput) }
-      session.commitConfiguration()
-      camera = nil
-      configured = false
-      throw CameraEngineError.configurationFailed
+    // Enable Apple ProRAW capability on session output if supported on this hardware & OS
+    if #available(iOS 14.3, *), output.isAppleProRAWSupported {
+      output.isAppleProRAWEnabled = true
     }
+
+    session.commitConfiguration()
+    camera = device
+    configured = true
   }
 
   fileprivate func capture(completion: @escaping (Result<[String: Any], CameraEngineError>) -> Void) {
@@ -322,7 +317,7 @@ public final class CameraEngineView: ExpoView {
         let rawTypes = self.output.availableRawPhotoPixelFormatTypes
         if let firstRawType = rawTypes.first {
           // Request Apple ProRAW (DNG) alongside an embedded/processed thumbnail representation
-          settings = AVCapturePhotoSettings(rawPhotoPixelFormatType: firstRawType, processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+          settings = AVCapturePhotoSettings(rawPixelFormatType: firstRawType, processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg])
         }
       }
 
@@ -330,7 +325,7 @@ public final class CameraEngineView: ExpoView {
       if settings == nil {
         let rawTypes = self.output.availableRawPhotoPixelFormatTypes
         if let firstRawType = rawTypes.first {
-          settings = AVCapturePhotoSettings(rawPhotoPixelFormatType: firstRawType, processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+          settings = AVCapturePhotoSettings(rawPixelFormatType: firstRawType, processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg])
         }
       }
 
