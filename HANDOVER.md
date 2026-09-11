@@ -63,6 +63,7 @@ git push              # 6. 收工必须 push，否则另一台机器永远看不
    - 技术栈：`Expo SDK 55` + `React Native 0.83.10` + `React 19.2.0` + `TypeScript (Strict)` + 本地 Swift Expo Module (`modules/camera-engine`)。
 2. **EAS Build 次数限制**：
    - **除非用户直接且明确说出「现在可以打包」，否则任何 AI 禁止执行 `eas build`、`npx eas build` 或 `npm run build:ios:dev`！**
+   - **日常出包不在此限**：`.github/workflows/ios-dev-build.yml`（Ad Hoc 真机包）与 `.github/workflows/ios-testflight.yml`（App Store → TestFlight）都在 GitHub Actions 上出包，**不调用 EAS、不占配额**，可随时手动触发。见 `AGENTS.md` 第 1.1 节。
    - 所有静态能验证的工作必须在本地完成；必须依赖真机或 Xcode 的工作，一律在输出中标记为：`待 EAS / 真机验证`。
 
 ---

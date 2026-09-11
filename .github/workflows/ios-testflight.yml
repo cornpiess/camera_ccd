@@ -1,0 +1,321 @@
+# iOS TestFlight —— 在 GitHub Actions 的 macOS runner 上出 App Store 包，并上传到 App Store Connect。
+#
+# 与 ios-dev-build.yml 的分工：
+#   ios-dev-build.yml → Ad Hoc 签名，只能装到 UDID 已登记的机器上（快速真机调试，秒装）
+#   本文件            → App Store 签名 + 上传 ASC，走 TestFlight 分发（**不需要登记 UDID**）
+# 两者前面的 prebuild / archive 步骤是同源的；改其中一处时记得同步另一处。
+#
+# 为什么不走 EAS：见 AGENTS.md 红线 1（EAS 免费额度 15 次/月 iOS）。本 workflow 不调用 EAS、
+# 不依赖 Expo 登录态，因此不消耗 EAS 配额，与红线 1 零冲突。
+#
+# 触发方式：仅手动（workflow_dispatch）。❌ 严禁加 push / schedule 自动触发。
+
+name: iOS TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 要构建的分支或 tag
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+jobs:
+  testflight:
+    name: Build and upload to TestFlight
+    runs-on: macos-15
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      # 早失败：宁可 30 秒挂掉，也不要白等 30 分钟再被 App Store Connect 拒。
+      # 前置条件清单见 README「CI: TestFlight」。
+      - name: Preflight checks
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -uo pipefail
+          fail=0
+
+          for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID; do
+            if [ -z "${!v:-}" ]; then
+              echo "::error::缺少 repository secret: $v"
+              fail=1
+            fi
+          done
+
+          BID=$(node -p "require('./app.json').expo.ios.bundleIdentifier || ''")
+          echo "bundleIdentifier = $BID"
+          case "$BID" in
+            com.example.*|"")
+              echo "::error::bundleIdentifier 是占位值「$BID」，Apple 不允许 com.example 前缀。"
+              fail=1
+              ;;
+          esac
+
+          # Apple 自 2026 年起要求上传到 App Store Connect 的 iOS 包必须用 Xcode 16+ 构建。
+          XV=$(xcodebuild -version | sed -n '1s/^Xcode //p')
+          XM=${XV%%.*}
+          echo "Xcode = $XV (major $XM)"
+          if [ "${XM:-0}" -lt 16 ]; then
+            echo "::error::runner 上的默认 Xcode 是 $XV，低于 Apple 要求的 16。请在 workflow 里用 xcode-select 切到 16+。"
+            fail=1
+          fi
+
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::前置检查未通过，终止构建。"
+            exit 1
+          fi
+          echo "前置检查通过。"
+
+      # export 的 method 值在 Xcode 16 变了名：app-store → app-store-connect。
+      # 两边传错都会被拒，所以按实际 Xcode 主版本决定。
+      - name: Resolve export method
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          node -v
+          npm -v
+          pod --version
+          XV=$(xcodebuild -version | sed -n '1s/^Xcode //p')
+          if [ "${XV%%.*}" -ge 16 ]; then
+            METHOD=app-store-connect
+          else
+            METHOD=app-store
+          fi
+          echo "METHOD=$METHOD" >> "$GITHUB_ENV"
+          echo "export method = $METHOD"
+
+      - name: Install JS dependencies
+        run: npm ci --no-audit --fund=false
+
+      # --- 原生工程由 prebuild 现生成，不入库（.gitignore 已含 /ios/）---
+
+      # IOS_BUILD_NUMBER 经 app.config.js 注入 ios.buildNumber。
+      # 必须递增，否则 ASC 报 "bundle version must be higher than the previously uploaded version"。
+      - name: Generate native iOS project
+        env:
+          IOS_BUILD_NUMBER: ${{ github.run_number }}
+        run: npx expo prebuild --platform ios --clean --no-install
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          pod install
+
+      # altool 默认从这个目录找 AuthKey_<KEY_ID>.p8，xcodebuild 也用同一个路径，一处写入两处可用。
+      - name: Write App Store Connect API key
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          KEY_DIR="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$KEY_DIR"
+          printf '%s\n' "$ASC_KEY_P8" > "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8"
+          chmod 600 "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8"
+          echo "ASC_KEY_PATH=$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8" >> "$GITHUB_ENV"
+
+      - name: Archive
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          WORKSPACE=$(ls -d ios/*.xcworkspace | head -1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          echo "workspace=$WORKSPACE scheme=$SCHEME"
+          xcodebuild archive \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      # destination=export：先落一个 .ipa 到磁盘，既能当 artifact 存档，也能在真正上传前
+      # 校验签名与「JS bundle 是否已内嵌」——这一步失败比上传被拒好排查得多。
+      - name: Export App Store .ipa
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/ipa"
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>${METHOD}</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>manageAppVersionAndBuildNumber</key>
+            <false/>
+            <key>destination</key>
+            <string>export</string>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/ipa" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          ls -lh "$RUNNER_TEMP/ipa"
+
+      # Release 配置必须把 JS bundle 打进 app 内，否则 TestFlight 装上去会白屏/报 "No script URL provided"。
+      # expo-dev-client 在 Release 构建里不启用启动器（只多了几个头文件），但 bundle 是否内嵌必须实测确认。
+      - name: Verify .ipa is self-contained
+        env:
+          EXPECTED_BUILD: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          IPA=$(ls "$RUNNER_TEMP/ipa"/*.ipa | head -1)
+          rm -rf "$RUNNER_TEMP/unpack" && mkdir -p "$RUNNER_TEMP/unpack"
+          unzip -q "$IPA" -d "$RUNNER_TEMP/unpack"
+          APP_DIR=$(ls -d "$RUNNER_TEMP/unpack/Payload"/*.app | head -1)
+          PLIST="$APP_DIR/Info.plist"
+
+          BID=$(plutil -extract CFBundleIdentifier raw "$PLIST")
+          BVER=$(plutil -extract CFBundleShortVersionString raw "$PLIST")
+          BBUILD=$(plutil -extract CFBundleVersion raw "$PLIST")
+          BNAME=$(plutil -extract CFBundleName raw "$PLIST")
+          BDISPLAY=$(plutil -extract CFBundleDisplayName raw "$PLIST" 2>/dev/null || echo "(none)")
+          echo "bundle=$BID version=$BVER build=$BBUILD name=$BNAME display=$BDISPLAY"
+
+          if [ "$BBUILD" != "$EXPECTED_BUILD" ]; then
+            echo "::error::CFBundleVersion=$BBUILD，但本次 run number=$EXPECTED_BUILD —— app.config.js 的 IOS_BUILD_NUMBER 注入没生效。ASC 会因 build number 未递增而拒收这个包。"
+            exit 1
+          fi
+
+          if ! ls "$APP_DIR"/*.jsbundle >/dev/null 2>&1; then
+            echo "::error::$APP_DIR 里没有任何 *.jsbundle —— JS bundle 没有内嵌，装到 TestFlight 上会白屏。检查导出用的是不是 Release 配置。"
+            ls -la "$APP_DIR" | head -40
+            exit 1
+          fi
+
+          {
+            echo "BID=$BID"
+            echo "BVER=$BVER"
+            echo "BBUILD=$BBUILD"
+            echo "BNAME=$BNAME"
+            echo "BDISPLAY=$BDISPLAY"
+            echo "IPA_PATH=$IPA"
+          } >> "$GITHUB_ENV"
+
+      # 上传分两条路，任一条成功即可：
+      #   1) xcrun altool —— 报错信息清晰，是绝大多数 CI 的实际做法；Apple 已标记 deprecated，
+      #      但在 Xcode 16 / 26 上仍可用（用 App Store Connect API Key 鉴权）。
+      #   2) xcodebuild -exportArchive + destination=upload —— Apple 原生通道，不依赖 altool 存活。
+      - name: Upload to App Store Connect
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -uo pipefail
+          if xcrun altool --upload-app --type ios --file "$IPA_PATH" \
+               --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1 | tee "$RUNNER_TEMP/altool.log"; then
+            echo "已通过 altool 上传。"
+            exit 0
+          fi
+
+          echo "::warning::altool 上传失败，改用 xcodebuild -exportArchive destination=upload 重试。"
+          tail -40 "$RUNNER_TEMP/altool.log" || true
+
+          rm -rf "$RUNNER_TEMP/upload"
+          cat > "$RUNNER_TEMP/UploadOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>${METHOD}</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>manageAppVersionAndBuildNumber</key>
+            <false/>
+            <key>destination</key>
+            <string>upload</string>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/UploadOptions.plist" \
+            -exportPath "$RUNNER_TEMP/upload" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RainbowCamera-testflight-${{ github.run_number }}
+          path: ${{ runner.temp }}/ipa/*.ipa
+          retention-days: 30
+
+      - name: Summary
+        run: |
+          {
+            echo "## TestFlight 上传完成"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| Bundle ID | \`$BID\` |"
+            echo "| 显示名 | $BDISPLAY |"
+            echo "| 版本 | $BVER (\`$BBUILD\`) |"
+            echo "| commit | \`${{ github.sha }}\` on \`${{ inputs.ref }}\` |"
+            echo ""
+            echo "### 接下来"
+            echo ""
+            echo "1. 打开 [App Store Connect](https://appstoreconnect.apple.com/) → 你的 App → **TestFlight**。"
+            echo "   构建进入 **Processing** 通常需要 5–30 分钟；Apple 会发邮件通知处理结果。"
+            echo "2. 处理完成后构建状态变 **Ready to Submit / Ready to Test**，把它加到一个测试组。"
+            echo "   - **内部测试员**（最多 100 人，必须是 App Store Connect 用户）→ 直接可测，无需审核。"
+            echo "   - **外部测试员**（最多 10,000 人，只要邮箱）→ 首个构建要过 Apple Beta 审核，通常 1–2 天。"
+            echo "3. 若构建一直卡在 Processing 或报 ITMS 错误，多半是签名/Info.plist 问题，看邮件里的具体原因。"
+          } >> "$GITHUB_STEP_SUMMARY"

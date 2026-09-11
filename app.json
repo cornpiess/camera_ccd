@@ -9,8 +9,10 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.cornpiess.rainbowcamera",
+      "buildNumber": "1",
       "infoPlist": {
         "CFBundleDisplayName": "彩虹相机",
+        "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "彩虹相机需要使用相机来取景与拍照。",
         "NSPhotoLibraryAddUsageDescription": "彩虹相机需要把拍好的照片保存到你的相册。",
         "NSPhotoLibraryUsageDescription": "彩虹相机需要读取相册，用来显示你最近拍摄的照片。"

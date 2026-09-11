@@ -70,6 +70,38 @@ Each successful run creates a GitHub Release tagged `dev-r<run number>` containi
 
 Xcode Cloud is a viable alternative if the repository ever needs to go private: Apple Developer Program membership includes 25 compute hours per month with no multiplier.
 
+## CI: TestFlight
+
+`.github/workflows/ios-testflight.yml` builds an **App Store-signed** `.ipa` on a GitHub macOS runner and uploads it to App Store Connect, so testers install through TestFlight instead of by UDID. It does not use EAS either, and it consumes no EAS quota.
+
+```powershell
+gh workflow run ios-testflight.yml -f ref=main
+```
+
+### Prerequisites
+
+The workflow fails fast if any of these are missing.
+
+1. **The same four repository secrets** as the Ad Hoc workflow — same names, same values. No new secrets are needed. The API key must be a **Team Key** with the **Admin** or **App Manager** role; an individual key can neither manage certificates nor upload builds.
+2. **An App Store Connect app record.** Uploading does not create the app. Register the explicit App ID `com.cornpiess.rainbowcamera` at developer.apple.com → Certificates, Identifiers & Profiles → Identifiers, then create the app in App Store Connect → Apps → **+** → New App. The bundle ID must match `app.json` exactly.
+3. **Active agreements.** App Store Connect → Business → Agreements must have no pending agreement; uploads are rejected while one is unsigned.
+4. **An app icon.** Not enforced by the workflow, but a build without one is hard to identify in TestFlight and cannot pass App Store review.
+
+**No UDID registration is needed** — that is the main advantage over the Ad Hoc workflow.
+
+### Build numbers
+
+`CFBundleVersion` comes from `ios.buildNumber` in `app.json`, overridden in CI with `${{ github.run_number }}` through `app.config.js`. App Store Connect rejects an upload whose build number is not higher than the previous one, so the run number keeps it monotonic. `CFBundleShortVersionString` still comes from `expo.version`.
+
+### After the upload
+
+The build appears under TestFlight → Builds as **Processing** for 5–30 minutes. Then:
+
+- **Internal testers** (up to 100, must be App Store Connect users) — test immediately, no review.
+- **External testers** (up to 10,000, email address only) — the first build needs Apple Beta App Review, usually 1–2 days.
+
+Export compliance is pre-answered by `ITSAppUsesNonExemptEncryption: false` in `app.json`, so there is no per-build questionnaire. The `.ipa` is also kept as a workflow artifact for 30 days.
+
 ## Calibration
 
 On the camera screen, long-press with three fingers for about two seconds. Import a JSON file from Files, paste JSON, reload the saved override, or reset to bundled defaults. A valid import is stored in the app Documents directory as `camera-profiles.override.json` and applies immediately. Invalid data shows a validation error and does not replace the active configuration.

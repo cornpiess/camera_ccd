@@ -80,14 +80,22 @@ git -c http.proxy=http://127.0.0.1:7890 -c credential.helper= -c credential.help
 
 ### 1.1 日常出包：走 GitHub Actions，不占 EAS 配额
 
-`.github/workflows/ios-dev-build.yml` 在 GitHub 的 macOS runner 上直接 `expo prebuild` + `xcodebuild` 出 `.ipa`，
-**不调用 EAS、不依赖 Expo 登录态，因此不消耗 EAS 配额**——它是红线 1 的替代路径，不是例外。
+`.github/workflows/ios-dev-build.yml` 与 `.github/workflows/ios-testflight.yml` 在 GitHub 的 macOS runner 上直接
+`expo prebuild` + `xcodebuild` 出 `.ipa`，**都不调用 EAS、不依赖 Expo 登录态，因此不消耗 EAS 配额**——它们是红线 1 的替代路径，不是例外。
+
+| workflow | 签名 | 分发 | 独有前置条件 |
+|---|---|---|---|
+| `ios-dev-build.yml` | Ad Hoc | GitHub Release + OTA `itms-services://` | 目标 iPhone 的 **UDID 已登记** |
+| `ios-testflight.yml` | App Store | 上传 App Store Connect → **TestFlight** | ASC 里**已建好 App 记录**、协议已生效 |
+
+两者前面的 prebuild / archive 步骤是同源的，**改其中一处必须同步另一处**。
 
 - **触发方式只有 `workflow_dispatch`（手动）**。❌ **严禁给它加 `push` / `schedule` 自动触发**：构建成本高，出包必须由用户显式发起，这条与红线 1 的精神一致。
-- **前置条件**（缺任何一项 workflow 会在 30 秒内 preflight 失败）：仓库为 public、`app.json` 的 `bundleIdentifier` 不是 `com.example.*`、4 个 repository secrets 已配置、目标 iPhone 的 UDID 已登记。详见 `README.md` 的 `CI: iOS dev builds on GitHub Actions`。
+- **通用前置条件**（缺任何一项会在 30 秒内 preflight 失败）：仓库为 public、`app.json` 的 `bundleIdentifier` 不是 `com.example.*`、4 个 repository secrets 已配置、runner 默认 Xcode **≥ 16**（Apple 自 2026 年起要求构建后上传 ASC 的 iOS 包必须用 Xcode 16+）。两个 workflow 各自的独有前置条件见上表，完整清单见 `README.md` 的 `CI:` 两节。
 - **密钥只放 GitHub Secrets**：`ASC_KEY_ID` / `ASC_ISSUER_ID` / `ASC_KEY_P8`（含私钥）/ `APPLE_TEAM_ID`。**任何情况下都不得把它们写进仓库、日志或记忆文件**。
 - **签名机制**：用 App Store Connect API Key + `-allowProvisioningUpdates`，让 Xcode 在云端自行创建/复用分发证书与 Ad Hoc 描述文件。**不要在 CI 里改成手动搬 `.p12` + keychain**——那是给有 Mac 的自托管 runner 用的，本环境（Windows）做不了。
-- **产物与装机**：每次成功构建创建一个 `dev-r<序号>` Release（含 `.ipa` + OTA `manifest.plist`），run summary 里给出 `itms-services://` 链接，iPhone 用 **Safari** 打开即装（微信/QQ 内置浏览器不支持）。
+- **产物与装机**：Ad Hoc 走 `dev-r<序号>` Release（含 `.ipa` + OTA `manifest.plist`），run summary 给出 `itms-services://` 链接，iPhone 用 **Safari** 打开即装（微信/QQ 内置浏览器不支持）；TestFlight 走 ASC 上传，构建 Processing 5–30 分钟后可分发给测试员。
+- **`CFBundleVersion` 由 `app.config.js` 注入**（`IOS_BUILD_NUMBER` ← `github.run_number`），因为 ASC 要求每次上传的 build number 严格递增。改 `app.json` 的 `ios.*` 时别绕过这层包装。
 
 ### 1.2 改 CI workflow 后的验证义务
 
@@ -95,7 +103,7 @@ GitHub Actions 的 workflow 只能靠实跑验证，但**能静态验的部分�
 
 ```bash
 # YAML 结构 + shell 语法（本机即可跑，两项都过了再提交）
-node -e "const Y=require('yaml'),fs=require('fs');const d=Y.parse(fs.readFileSync('.github/workflows/ios-dev-build.yml','utf8'));console.log('YAML OK',d.jobs.build.steps.length)"
+node -e "const Y=require('yaml'),fs=require('fs');for(const f of ['.github/workflows/ios-dev-build.yml','.github/workflows/ios-testflight.yml']){const d=Y.parse(fs.readFileSync(f,'utf8'));const j=d.jobs[Object.keys(d.jobs)[0]];console.log(f,'YAML OK, steps =',j.steps.length)}"
 ```
 
 要点：`run: |` 块里的 heredoc，**结束标记（如 `PLIST`）在 YAML 块标量处理后必须落在行首**，否则 shell 语法静默错误。新增/修改 heredoc 时逐个用 `bash -n` 过一遍。
@@ -160,6 +168,8 @@ npm run verify      # = typecheck + lint + doctor，三项必须全绿
 5. **仓库已公开，`.workbuddy/memory/*.md` 也在库里**——那些文件是被 git 跟踪的，写进去就等于发到网上。落笔前先自问「这句能让全网看吗」，**绝不写密钥、token、密码、真实个人信息**。
 6. **CI 里的 `npm ci` 按 `package-lock.json` 锁定的源下载**，而当前 lock 的 `resolved` 指向 `registry.npmmirror.com`。海外 runner 上若拉包失败或极慢，**不要在本机重新生成 lock 文件**（两台机器的 npm 源不同，会来回翻动 lock，把 diff 搞成噪声）；先在 workflow 里排查或临时指定 registry。
 7. **改 CI workflow 时，别把密钥写进 workflow 文件或日志**。`ASC_KEY_P8` 是含私钥的完整 `.p8`，只在 step 内通过 `env: ${{ secrets.XXX }}` 注入并写到磁盘临时路径，**不要 `echo` 出来**。公开仓库的 workflow 文件本身对所有人可见。
+8. **TestFlight 上传要求 App Store Connect 里已有 App 记录**：`ios-testflight.yml` 只负责构建与上传，**不会创建 App**。首次跑之前必须先在 ASC 建好 `com.cornpiess.rainbowcamera` 的 App 记录，否则要到上传阶段（约 30 分钟后）才报 `No suitable application records were found`，无法在 preflight 提前发现。
+9. **`ExportOptions.plist` 的 `method` 值随 Xcode 版本变名**：Xcode 16 起 `app-store` → **`app-store-connect`**、`ad-hoc` → `release-testing`、`development` → `debugging`（旧名仍作为 deprecated 别名可用）。两个 workflow 都按 `xcodebuild -version` 的主版本决定用哪个，改这段别写死。
 
 ---
 
