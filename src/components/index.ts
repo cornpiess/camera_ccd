@@ -7,3 +7,5 @@ export * from './ThumbnailPreview';
 export * from './TopBar';
 export * from './ThreeFingerGestureDetector';
 export * from './CameraStateViews';
+export * from './CameraSelector';
+export * from './FocusIndicator';

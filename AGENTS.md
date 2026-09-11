@@ -164,11 +164,11 @@ npm run verify      # = typecheck + lint + doctor，三项必须全绿
 1. `didFinishProcessingPhoto` 里 `if expectedPhotoCount > 1 && !isRaw { return }` 必须在 `guard error == nil` **之前**。
 2. 拍摄 Promise 必须有兜底（原生 `didAcceptAnyPhoto` + JS 20s 超时），否则快门会永久卡死。
 3. `App.tsx` 的 `previewPanResponder` 必须保留 `onPanResponderStart` 里的多指守卫——`onPanResponderGrant` 的同类守卫是**死代码**，第 2、3 指落下时它不会重跑。
-4. 八台相机的风格只改 `assets/camera-profiles.json`。**改 JSON 后必须验证 `tone.curve` 恰好 5 个点**——原生 `toneCurve` 要求 5 点，否则静默丢弃整条曲线（当前 `validation.ts` 只校验 `>= 2`，保护不足）。
+4. 八台相机的风格只改 `assets/camera-profiles.json`。**改 JSON 后必须验证 `tone.curve` 恰好 5 个点**——原生 `toneCurve` 要求 5 点，否则静默丢弃整条曲线（`validation.ts` 已强制恰好 5 点且首点 x=0、末点 x=1，非法曲线在校验层直接报错，不再放行）。
 5. **仓库已公开，`.workbuddy/memory/*.md` 也在库里**——那些文件是被 git 跟踪的，写进去就等于发到网上。落笔前先自问「这句能让全网看吗」，**绝不写密钥、token、密码、真实个人信息**。
 6. **CI 里的 `npm ci` 按 `package-lock.json` 锁定的源下载**，而当前 lock 的 `resolved` 指向 `registry.npmmirror.com`。海外 runner 上若拉包失败或极慢，**不要在本机重新生成 lock 文件**（两台机器的 npm 源不同，会来回翻动 lock，把 diff 搞成噪声）；先在 workflow 里排查或临时指定 registry。
 7. **改 CI workflow 时，别把密钥写进 workflow 文件或日志**。`ASC_KEY_P8` 是含私钥的完整 `.p8`，只在 step 内通过 `env: ${{ secrets.XXX }}` 注入并写到磁盘临时路径，**不要 `echo` 出来**。公开仓库的 workflow 文件本身对所有人可见。
-8. **TestFlight 上传要求 App Store Connect 里已有 App 记录**：`ios-testflight.yml` 只负责构建与上传，**不会创建 App**。首次跑之前必须先在 ASC 建好 `com.cornpiess.rainbowcamera` 的 App 记录，否则要到上传阶段（约 30 分钟后）才报 `No suitable application records were found`，无法在 preflight 提前发现。
+8. **TestFlight 上传要求 App Store Connect 里已有 App 记录**：`ios-testflight.yml` 只负责构建与上传，**不会创建 App**。首次跑之前必须先在 ASC 建好与 `app.json` 的 `bundleIdentifier` 一致的 App 记录（当前为 `com.cornpiess.camera18`），否则要到上传阶段（约 30 分钟后）才报 `No suitable application records were found`，无法在 preflight 提前发现。
 9. **`ExportOptions.plist` 的 `method` 值随 Xcode 版本变名**：Xcode 16 起 `app-store` → **`app-store-connect`**、`ad-hoc` → `release-testing`、`development` → `debugging`（旧名仍作为 deprecated 别名可用）。两个 workflow 都按 `xcodebuild -version` 的主版本决定用哪个，改这段别写死。
 
 ---

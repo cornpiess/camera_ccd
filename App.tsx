@@ -5,6 +5,7 @@ import {
   StatusBar,
   Animated,
   Dimensions,
+  AppState,
   Platform,
   PanResponder,
   Text,
@@ -37,6 +38,9 @@ import {
   ApertureControl,
   ProfileOverlay,
   RadialProfileSelector,
+  CameraSelector,
+  FocusIndicator,
+  type FocusPoint,
   ThreeFingerGestureDetector,
   PermissionRequestView,
   CameraLoadingView,
@@ -62,12 +66,14 @@ const CAPTURE_TIMEOUT_MS = 20_000;
 function deriveVariableApertures(minAperture: number, maxAperture: number): number[] {
   const min = Math.min(minAperture, maxAperture);
   const max = Math.max(minAperture, maxAperture);
+  // Keep two decimals so real hardware stops like ƒ/1.48 are never rewritten into
+  // fabricated values (ƒ/1.5 exists only in rounding, not in the lens).
   if (min >= max) {
-    return [Number(min.toFixed(1))];
+    return [Number(min.toFixed(2))];
   }
 
   const stops = new Set<number>();
-  stops.add(Number(min.toFixed(1)));
+  stops.add(Number(min.toFixed(2)));
 
   const kStart = Math.ceil(6 * Math.log2(min));
   const kEnd = Math.floor(6 * Math.log2(max));
@@ -80,7 +86,7 @@ function deriveVariableApertures(minAperture: number, maxAperture: number): numb
     }
   }
 
-  stops.add(Number(max.toFixed(1)));
+  stops.add(Number(max.toFixed(2)));
   return Array.from(stops).sort((a, b) => a - b);
 }
 
@@ -130,6 +136,9 @@ function CameraAppScreen(): React.JSX.Element {
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
   const [latestThumbnail, setLatestThumbnail] = useState<string | null>(null);
 
+  // Tracks whether the native session started successfully (used by the AppState recovery path)
+  const cameraRunningRef = useRef<boolean>(false);
+
   // Flash curtain effect
   const shutterFlashAnim = useRef(new Animated.Value(0)).current;
 
@@ -156,6 +165,12 @@ function CameraAppScreen(): React.JSX.Element {
   const [isCalibrationOpen, setIsCalibrationOpen] = useState<boolean>(false);
 
   // -------------------------------------------------------------
+  // 4b. Formal Camera Selector (top-badge entry) & Tap-to-Focus states
+  // -------------------------------------------------------------
+  const [isSelectorOpen, setIsSelectorOpen] = useState<boolean>(false);
+  const [focusIndicator, setFocusIndicator] = useState<FocusPoint | null>(null);
+
+  // -------------------------------------------------------------
   // 5. Radial Profile Selector State (Long-press on empty preview)
   // -------------------------------------------------------------
   const [isRadialOpen, setIsRadialOpen] = useState<boolean>(false);
@@ -164,6 +179,7 @@ function CameraAppScreen(): React.JSX.Element {
 
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchStartPosRef = useRef<Point | null>(null);
+  const touchStartTimeRef = useRef<number>(0);
   const isRadialOpenRef = useRef<boolean>(false);
   const currentTouchRef = useRef<Point | null>(null);
   const profilesRef = useRef(profiles);
@@ -180,6 +196,7 @@ function CameraAppScreen(): React.JSX.Element {
 
       // Await startCamera and catch errors rather than swallowing
       await CameraEngine.startCamera();
+      cameraRunningRef.current = true;
       setIsCameraRunning(true);
 
       // Query hardware capabilities
@@ -212,6 +229,7 @@ function CameraAppScreen(): React.JSX.Element {
         setAvailableApertures([]);
       }
     } catch (err: unknown) {
+      cameraRunningRef.current = false;
       if (isPermissionDeniedError(err)) {
         setPermissionDenied(true);
       } else {
@@ -227,8 +245,23 @@ function CameraAppScreen(): React.JSX.Element {
   useEffect(() => {
     initializeCameraSession();
     return () => {
+      cameraRunningRef.current = false;
       CameraEngine.stopCamera().catch(() => {});
     };
+  }, [initializeCameraSession]);
+
+  // -------------------------------------------------------------
+  // 6b. Foreground recovery: iOS suspends/interrupts the capture session while
+  // backgrounded (or during a call); startCamera is idempotent, so re-running the
+  // full init on return restores preview, capabilities and error states.
+  // -------------------------------------------------------------
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && cameraRunningRef.current) {
+        void initializeCameraSession();
+      }
+    });
+    return () => subscription.remove();
   }, [initializeCameraSession]);
 
   // -------------------------------------------------------------
@@ -352,6 +385,35 @@ function CameraAppScreen(): React.JSX.Element {
     }
   };
 
+  /**
+   * Tap-to-Focus: a quick, low-movement release sets the AF/AE point of interest and
+   * shows a lightweight indicator. Screen coords are mapped through the aspect-fill
+   * preview into normalized video coords (photo preset renders a 4:3 portrait frame,
+   * so narrow screens crop the sides); the native layer converts them to the device's
+   * landscape sensor space.
+   */
+  const handleTapToFocus = useCallback(
+    (pageX: number, pageY: number) => {
+      if (!isCameraRunning) return;
+      setFocusIndicator({ x: pageX, y: pageY, key: Date.now() });
+
+      const screenAspect = SCREEN_WIDTH / SCREEN_HEIGHT;
+      const videoAspect = 3 / 4;
+      let nx = pageX / SCREEN_WIDTH;
+      let ny = pageY / SCREEN_HEIGHT;
+      if (screenAspect < videoAspect) {
+        nx = (nx - 0.5) * (screenAspect / videoAspect) + 0.5;
+      } else {
+        ny = (ny - 0.5) * (videoAspect / screenAspect) + 0.5;
+      }
+      CameraEngine.setFocusPoint(
+        Math.min(1, Math.max(0, nx)),
+        Math.min(1, Math.max(0, ny)),
+      ).catch(() => {});
+    },
+    [isCameraRunning],
+  );
+
   const handleSelectProfile = useCallback(
     (profile: CameraProfile) => {
       selectProfile(profile.id);
@@ -429,6 +491,7 @@ function CameraAppScreen(): React.JSX.Element {
 
           touchStartPosRef.current = { x: pageX, y: pageY };
           currentTouchRef.current = { x: pageX, y: pageY };
+          touchStartTimeRef.current = Date.now();
           cancelLongPressTimer();
 
           // 350ms hold threshold to activate radial selector
@@ -457,13 +520,24 @@ function CameraAppScreen(): React.JSX.Element {
         },
         onPanResponderRelease: (evt: GestureResponderEvent) => {
           const { pageX, pageY } = evt.nativeEvent;
+          // Snapshot BEFORE finalizeRadialSelection clears the touch bookkeeping.
+          const start = touchStartPosRef.current;
+          const moved = start ? Math.hypot(pageX - start.x, pageY - start.y) : Infinity;
+          const elapsed = Date.now() - touchStartTimeRef.current;
+          const wasRadialOpen = isRadialOpenRef.current;
+
           finalizeRadialSelection(pageX, pageY);
+
+          // Quick, steady release = tap-to-focus (the radial gesture never opened).
+          if (!wasRadialOpen && moved <= 15 && elapsed < 350) {
+            handleTapToFocus(pageX, pageY);
+          }
         },
         onPanResponderTerminate: () => {
           finalizeRadialSelection();
         },
       }),
-    [finalizeRadialSelection]
+    [finalizeRadialSelection, handleTapToFocus]
   );
 
   // -------------------------------------------------------------
@@ -537,15 +611,21 @@ function CameraAppScreen(): React.JSX.Element {
           {/* Lightweight JSON-derived preview overlay */}
           <ProfileOverlay profile={activeProfile} />
 
+          {/* Tap-to-focus indicator (visual only) */}
+          <FocusIndicator point={focusIndicator} />
+
           {/* Empty preview touch area for original preview responder */}
           <View
             style={styles.viewfinderTouchArea}
             {...previewPanResponder.panHandlers}
           />
 
-          {/* 2. Top Bar: Current simulated camera profile name ONLY */}
+          {/* 2. Top Bar: current simulated camera name; tapping opens the formal Camera Selector */}
           <View style={styles.topControlsContainer} pointerEvents="box-none">
-            <TopBar profileName={activeProfile?.name} />
+            <TopBar
+              profileName={activeProfile?.name}
+              onPress={() => setIsSelectorOpen(true)}
+            />
           </View>
 
           {/* Transient Error Banner while running (does not unmount camera) */}
@@ -608,6 +688,15 @@ function CameraAppScreen(): React.JSX.Element {
             currentTouch={currentTouchPoint}
             profiles={profiles}
             activeProfileId={activeProfile?.id}
+          />
+
+          {/* 7b. Formal Camera Selector (tap the top camera badge) */}
+          <CameraSelector
+            visible={isSelectorOpen}
+            profiles={profiles}
+            activeProfileId={activeProfile?.id}
+            onSelectProfile={handleSelectProfile}
+            onClose={() => setIsSelectorOpen(false)}
           />
 
           {/* 8. Hardware & Lens Calibration Modal (Triggered by 3-finger ~2s hold) */}

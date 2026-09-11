@@ -25,7 +25,10 @@ const profile = (v: unknown, i: number, e: string[]): void => {
     unknownKeys(tone, ['exposure','contrast','blackPoint','curve'], `${p}.tone`, e);
     ['exposure','contrast','blackPoint'].forEach(k => { if (typeof tone[k] !== 'number' || !Number.isFinite(tone[k])) e.push(`${p}.tone.${k} must be a finite number`); });
     const curve = tone.curve;
-    if (!Array.isArray(curve) || curve.length < 2) e.push(`${p}.tone.curve must contain at least two [x, y] points`); else {
+    if (!Array.isArray(curve) || curve.length !== 5) e.push(`${p}.tone.curve must contain exactly five [x, y] points (the native tone-curve renderer requires exactly five)`);
+    else {
+      if (Array.isArray(curve[0]) && curve[0][0] !== 0) e.push(`${p}.tone.curve[0][0] must be 0 so the curve starts at black`);
+      if (Array.isArray(curve[4]) && curve[4][0] !== 1) e.push(`${p}.tone.curve[4][0] must be 1 so the curve ends at white`);
       let last = -Infinity;
       curve.forEach((point, j) => {
         if (!Array.isArray(point) || point.length !== 2 || point.some(n => typeof n !== 'number' || !Number.isFinite(n))) { e.push(`${p}.tone.curve[${j}] must be a finite [x, y] tuple`); return; }

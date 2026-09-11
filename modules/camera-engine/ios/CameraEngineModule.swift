@@ -169,6 +169,18 @@ public final class CameraEngineModule: Module {
       }
     }
 
+    AsyncFunction("setFocusPoint") { (x: Double, y: Double, promise: Promise) in
+      guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
+      view.setFocusPoint(x: x, y: y) { result in
+        DispatchQueue.main.async {
+          switch result {
+          case .success: promise.resolve(nil)
+          case .failure(let error): promise.reject(error.rawValue, error.message)
+          }
+        }
+      }
+    }
+
     AsyncFunction("getCapabilities") { (promise: Promise) in
       guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
       view.capabilities(controller: self.apertureController) { result in
@@ -307,24 +319,18 @@ public final class CameraEngineView: ExpoView {
   fileprivate func capture(completion: @escaping (Result<[String: Any], CameraEngineError>) -> Void) {
     sessionQueue.async {
       guard self.session.isRunning else { completion(.failure(.notRunning)); return }
-      CameraTempFiles.removeOlderFiles()
+      CameraTempFiles.removeUntrackedFiles()
 
-      // RAW / ProRAW priority:
-      // Check whether Apple ProRAW or a RAW pixel format is available on this AVCapturePhotoOutput.
+      // ProRAW is the preferred internal negative: request DNG only when the output truly
+      // supports and has Apple ProRAW enabled. Devices without ProRAW must NOT be forced onto
+      // plain Bayer RAW — they fall through to Apple's processed JPEG so the automatic
+      // photography pipeline stays intact.
       var settings: AVCapturePhotoSettings?
 
       if #available(iOS 14.3, *), self.output.isAppleProRAWSupported && self.output.isAppleProRAWEnabled {
         let rawTypes = self.output.availableRawPhotoPixelFormatTypes
         if let firstRawType = rawTypes.first {
-          // Request Apple ProRAW (DNG) alongside an embedded/processed thumbnail representation
-          settings = AVCapturePhotoSettings(rawPixelFormatType: firstRawType, processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg])
-        }
-      }
-
-      // If ProRAW is not supported or not enabled, try standard Bayer RAW if available
-      if settings == nil {
-        let rawTypes = self.output.availableRawPhotoPixelFormatTypes
-        if let firstRawType = rawTypes.first {
+          // Request Apple ProRAW (DNG) alongside a companion processed representation
           settings = AVCapturePhotoSettings(rawPixelFormatType: firstRawType, processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg])
         }
       }
@@ -357,6 +363,29 @@ public final class CameraEngineView: ExpoView {
         return
       }
       controller.setAperture(fStop, on: device, completion: completion)
+    }
+  }
+
+  /// Tap-to-focus: move the AF/AE point of interest, then keep the continuous auto modes so the
+  /// system resumes full automatic photography around the chosen point.
+  fileprivate func setFocusPoint(x: Double, y: Double, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
+    sessionQueue.async {
+      guard let device = self.camera, device.isActive else {
+        completion(.failure(.notRunning))
+        return
+      }
+      do {
+        try device.lockForConfiguration()
+        defer { device.unlockForConfiguration() }
+        let point = CGPoint(x: CGFloat(min(max(x, 0), 1)), y: CGFloat(min(max(y, 0), 1)))
+        if device.isFocusPointOfInterestSupported { device.focusPointOfInterest = point }
+        if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
+        if device.isExposurePointOfInterestSupported { device.exposurePointOfInterest = point }
+        if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+        completion(.success(()))
+      } catch {
+        completion(.failure(.configurationFailed))
+      }
     }
   }
 
@@ -403,13 +432,17 @@ private enum CameraTempFiles {
             directory.appendingPathComponent("camera-engine-thumb-\(UUID().uuidString).jpg"))
   }
 
-  static func keep(_ urls: [URL]) { lock.lock(); current = Set(urls); lock.unlock() }
+  /// Track the newest displayed generation and delete only the generation it replaces, so the
+  /// thumbnail currently shown in the UI never loses its file while a new capture is in flight.
+  static func keep(_ urls: [URL]) {
+    lock.lock(); let stale = current; current = Set(urls); lock.unlock()
+    remove(stale.subtracting(urls))
+  }
   static func remove(_ urls: [URL]) { urls.forEach { try? FileManager.default.removeItem(at: $0) } }
-  static func removeOlderFiles() {
-    lock.lock(); let kept = current; current.removeAll(); lock.unlock()
+  static func removeUntrackedFiles() {
+    lock.lock(); let kept = current; lock.unlock()
     let files = (try? FileManager.default.contentsOfDirectory(at: FileManager.default.temporaryDirectory, includingPropertiesForKeys: nil)) ?? []
     remove(files.filter { $0.lastPathComponent.hasPrefix("camera-engine-") && !kept.contains($0) })
-    remove(Array(kept))
   }
 }
 
@@ -453,6 +486,11 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     // cannot race the asynchronous render started below.
     completionLock.lock(); didAcceptPhoto = true; completionLock.unlock()
 
+    // Real capture metadata (EXIF exposure data, timestamps, lens info) must be captured on the
+    // delegate thread and carried into the render, or the saved JPEG would lose every shooting
+    // property. Never fabricate hardware EXIF — these values describe the actual iPhone capture.
+    let captureMetadata = photo.metadata
+
     Self.processingQueue.async { [self] in
       guard !hasCompleted else { return }
 
@@ -487,15 +525,14 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
 
       image = image.cropped(to: extent)
       let context = Self.sharedContext
-      guard let jpeg = context.jpegRepresentation(of: image, colorSpace: colorSpace, options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.95]) else {
-        finish(.failure(.processingFailed))
-        return
-      }
 
       let (fileURL, thumbURL) = CameraTempFiles.makeURLs()
       completionLock.lock(); generatedURLs = [fileURL, thumbURL]; completionLock.unlock()
 
       do {
+        guard let jpeg = Self.jpegRepresentation(image, metadata: captureMetadata, colorSpace: colorSpace, quality: 0.95) else {
+          throw CameraEngineError.processingFailed
+        }
         try jpeg.write(to: fileURL, options: .atomic)
         let scale = min(CGFloat(1), CGFloat(512) / max(extent.width, extent.height))
         let thumb = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
@@ -549,6 +586,39 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
 
   private var didAcceptAnyPhoto: Bool {
     completionLock.lock(); defer { completionLock.unlock() }; return didAcceptPhoto
+  }
+
+  // Rendered pixels are already upright, so the original orientation tag is replaced with "1"
+  // while every other real capture property (EXIF exposure data, timestamps, lens info) is
+  // carried over untouched. CIContext.jpegRepresentation would drop all of it.
+  private static func jpegRepresentation(_ image: CIImage, metadata: [AnyHashable: Any]?, colorSpace: CGColorSpace, quality: Double) -> Data? {
+    guard let cgImage = sharedContext.createCGImage(image, from: image.extent, format: CIFormat.RGBA8, colorSpace: colorSpace) else { return nil }
+    let output = NSMutableData()
+    guard let destination = CGImageDestinationCreateWithData(output, "public.jpeg" as CFString, 1, nil) else { return nil }
+
+    var properties = cfProperties(metadata)
+    properties[kCGImageDestinationLossyCompressionQuality] = quality
+    properties[kCGImagePropertyOrientation] = 1
+    var exif = cfProperties(properties[kCGImagePropertyExifDictionary])
+    exif.removeValue(forKey: kCGImagePropertyExifPixelXDimension)
+    exif.removeValue(forKey: kCGImagePropertyExifPixelYDimension)
+    properties[kCGImagePropertyExifDictionary] = exif
+    var tiff = cfProperties(properties[kCGImagePropertyTIFFDictionary])
+    tiff.removeValue(forKey: kCGImagePropertyTIFFOrientation)
+    properties[kCGImagePropertyTIFFDictionary] = tiff
+
+    CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+    guard CGImageDestinationFinalize(destination) else { return nil }
+    return output as Data
+  }
+
+  private static func cfProperties(_ value: Any?) -> [CFString: Any] {
+    guard let dict = value as? [AnyHashable: Any] else { return [:] }
+    var result: [CFString: Any] = [:]
+    for (key, item) in dict {
+      if let cfKey = key as? CFString { result[cfKey] = item }
+    }
+    return result
   }
 
   private func requestPhotoLibraryAddAuthorization(completion: @escaping (Bool) -> Void) {
@@ -715,7 +785,9 @@ private enum ProfileRenderer {
     }
     let vignetteAmount = number(vignette, "amount", 0, 0...1)
     if vignetteAmount > 0 {
-      let radius = number(vignette, "radius", 0.75, 0...1) * Double(min(image.extent.width, image.extent.height)) * 0.5
+      // CIVignette's inputRadius is a normalized scale (~0.5–2 useful); the JSON value is a 0–1
+      // fraction where larger = falloff starts farther from the center = weaker vignette.
+      let radius = 0.5 + number(vignette, "radius", 0.75, 0...1)
       image = filter("CIVignette", image, [kCIInputIntensityKey: vignetteAmount * 2.0, kCIInputRadiusKey: radius])
     }
     let halationAmount = number(halation, "amount", 0, 0...1)

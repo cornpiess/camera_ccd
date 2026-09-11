@@ -25,9 +25,11 @@ export const ApertureControl: React.FC<ApertureControlProps> = ({
 }: ApertureControlProps) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Format aperture number cleanly e.g. 1.8 -> ƒ/1.8, 4 -> ƒ/4
+  // Format aperture numbers exactly as the hardware reports them, e.g. 1.48 -> ƒ/1.48,
+  // 1.8 -> ƒ/1.8, 4 -> ƒ/4. Never round a real stop into one that does not exist.
   const formatAperture = (val: number) => {
-    return val % 1 === 0 ? `ƒ/${val.toFixed(0)}` : `ƒ/${val.toFixed(1)}`;
+    const rounded = Number(val.toFixed(2));
+    return `ƒ/${Number.isInteger(rounded) ? rounded.toFixed(0) : String(rounded)}`;
   };
 
   /**
@@ -75,13 +77,18 @@ export const ApertureControl: React.FC<ApertureControlProps> = ({
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.scrollContent}
           >
-            {availableApertures.map((val) => {
+            {availableApertures.map((val, index) => {
               const isSelected = Math.abs(val - currentAperture) < 0.05;
+              // Sorted ascending, so the last entry is the smallest aperture — the stop
+              // where a real optical starburst is most likely. ✦ is only a hint, never
+              // a software effect.
+              const isSmallestAperture = index === availableApertures.length - 1;
               return (
                 <TouchableOpacity
                   key={val}
                   activeOpacity={0.7}
                   onPress={() => handleSelectAperture(val)}
+                  accessibilityLabel={`${isSmallestAperture ? 'Starburst more likely. ' : ''}Aperture ${formatAperture(val)}`}
                   style={[styles.dialItem, isSelected && styles.dialItemSelected]}
                 >
                   <View
@@ -96,7 +103,7 @@ export const ApertureControl: React.FC<ApertureControlProps> = ({
                       isSelected && styles.dialItemTextSelected,
                     ]}
                   >
-                    {formatAperture(val)}
+                    {isSmallestAperture ? '✦ ' : ''}{formatAperture(val)}
                   </Text>
                 </TouchableOpacity>
               );
@@ -121,9 +128,7 @@ export const ApertureControl: React.FC<ApertureControlProps> = ({
         >
           <Text style={styles.variableApertureSymbol}>ƒ</Text>
           <Text style={styles.variableApertureValue}>
-            {currentAperture % 1 === 0
-              ? currentAperture.toFixed(0)
-              : currentAperture.toFixed(1)}
+            {formatAperture(currentAperture).replace('ƒ/', '')}
           </Text>
           <View style={styles.variableDialHint}>
             <View style={styles.miniTick} />

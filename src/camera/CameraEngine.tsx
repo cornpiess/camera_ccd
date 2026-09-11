@@ -53,6 +53,8 @@ type NativeCameraEngine = {
   stopCamera(): Promise<void>;
   capturePhoto(): Promise<CapturedPhoto>;
   setAperture(fStop: number): Promise<void>;
+  /** Normalized (0..1) tap position in the video frame; keeps AF/AE continuous around that point. */
+  setFocusPoint(x: number, y: number): Promise<void>;
   getCapabilities(): Promise<CameraCapabilities>;
   applyProfile(profile: CameraProfile): Promise<void>;
 };
@@ -72,6 +74,7 @@ export const startCamera = (): Promise<boolean> => typed(NativeModule.startCamer
 export const stopCamera = (): Promise<void> => typed(NativeModule.stopCamera());
 export const capturePhoto = (): Promise<CapturedPhoto> => typed(NativeModule.capturePhoto());
 export const setAperture = (fStop: number): Promise<void> => typed(NativeModule.setAperture(fStop));
+export const setFocusPoint = (x: number, y: number): Promise<void> => typed(NativeModule.setFocusPoint(x, y));
 export const getCapabilities = (): Promise<CameraCapabilities> => typed(NativeModule.getCapabilities());
 export const applyProfile = (profile: CameraProfile): Promise<void> => typed(NativeModule.applyProfile(profile));
 
@@ -81,6 +84,7 @@ export const CameraEngine = {
   stopCamera,
   capturePhoto,
   setAperture,
+  setFocusPoint,
   getCapabilities,
   applyProfile,
 } as const;
@@ -90,6 +94,7 @@ export type CameraEngineHandle = {
   stopCamera: typeof stopCamera;
   capturePhoto: typeof capturePhoto;
   setAperture: typeof setAperture;
+  setFocusPoint: typeof setFocusPoint;
   getCapabilities: typeof getCapabilities;
   applyProfile: typeof applyProfile;
 };
@@ -115,6 +120,7 @@ export const CameraEngineView = forwardRef<CameraEngineHandle, CameraEngineViewP
     stopCamera,
     capturePhoto,
     setAperture,
+    setFocusPoint,
     getCapabilities,
     applyProfile,
   }), []);

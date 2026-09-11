@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   SafeAreaView,
+  TouchableOpacity,
   Platform,
   StatusBar,
 } from 'react-native';
@@ -13,12 +14,15 @@ export interface TopBarProps {
   readonly profileName?: string;
   readonly cameraInfo?: CameraInfo;
   readonly cameraName?: string;
+  /** When provided, the camera badge becomes the formal Camera Selection entry point. */
+  readonly onPress?: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
   profileName,
   cameraInfo,
   cameraName,
+  onPress,
 }: TopBarProps) => {
   const displayName = profileName ?? cameraName ?? cameraInfo?.name ?? '';
 
@@ -27,11 +31,20 @@ export const TopBar: React.FC<TopBarProps> = ({
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
-        <View style={styles.cameraNameBadge}>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={`Current camera ${displayName}. Tap to switch camera.`}
+          accessibilityState={{ expanded: false }}
+          activeOpacity={0.75}
+          disabled={!onPress}
+          onPress={onPress}
+          style={styles.cameraNameBadge}
+        >
           <Text style={styles.cameraNameTitle} numberOfLines={1}>
             {displayName.toUpperCase()}
           </Text>
-        </View>
+          {onPress ? <Text style={styles.chevron}>⌄</Text> : null}
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -52,6 +65,7 @@ const styles = StyleSheet.create({
     height: 52,
   },
   cameraNameBadge: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(20, 20, 24, 0.65)',
@@ -67,5 +81,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.1,
   },
+  chevron: {
+    color: 'rgba(255, 255, 255, 0.75)',
+    fontSize: 13,
+    fontWeight: '700',
+    marginLeft: 6,
+    marginTop: -2,
+  },
 });
-

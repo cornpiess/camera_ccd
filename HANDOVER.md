@@ -103,11 +103,13 @@ camera/
         ├── declarations.d.ts         # 空占位 (待清理)
         ├── ThreeFingerGestureDetector.tsx  # ★ 三指长按手势的唯一实现
         ├── RadialProfileSelector.tsx # 环形相机轮盘 + 几何工具 (getClampedCenter / computeRadialSector)
+        ├── CameraSelector.tsx        # ★ 正式 Camera Selection 主入口 (点顶部相机徽章弹出列表)
+        ├── FocusIndicator.tsx        # ★ Tap-to-Focus 轻量对焦框 (纯视觉，AF/AE 在原生层完成)
         ├── ApertureControl.tsx       # 光圈调节器 (可变光圈可用；否则显示 Fixed ƒ/x 并锁定)
         ├── ShutterButton.tsx         # 物理风格两段式快门按钮
         ├── ThumbnailPreview.tsx      # 左下角成片缩略图 (直读生成图，不滥查相册)
         ├── ProfileOverlay.tsx        # 取景器实时色彩风格近似遮罩
-        ├── TopBar.tsx                # 顶部状态信息 (相机名、固定/可变光圈标签)
+        ├── TopBar.tsx                # 顶部相机徽章；带 onPress 时是 Camera Selector 的入口
         └── CameraStateViews.tsx      # 三种启动态：PermissionRequestView / CameraLoadingView / CameraErrorView
 ```
 
