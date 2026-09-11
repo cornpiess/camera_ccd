@@ -370,7 +370,7 @@ public final class CameraEngineView: ExpoView {
   /// system resumes full automatic photography around the chosen point.
   fileprivate func setFocusPoint(x: Double, y: Double, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
     sessionQueue.async {
-      guard let device = self.camera, device.isActive else {
+      guard let device = self.camera, device.isConnected else {
         completion(.failure(.notRunning))
         return
       }
@@ -436,7 +436,7 @@ private enum CameraTempFiles {
   /// thumbnail currently shown in the UI never loses its file while a new capture is in flight.
   static func keep(_ urls: [URL]) {
     lock.lock(); let stale = current; current = Set(urls); lock.unlock()
-    remove(stale.subtracting(urls))
+    remove(Array(stale.subtracting(urls)))
   }
   static func remove(_ urls: [URL]) { urls.forEach { try? FileManager.default.removeItem(at: $0) } }
   static func removeUntrackedFiles() {
@@ -616,7 +616,9 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     guard let dict = value as? [AnyHashable: Any] else { return [:] }
     var result: [CFString: Any] = [:]
     for (key, item) in dict {
-      if let cfKey = key as? CFString { result[cfKey] = item }
+      // Cast through String: a conditional downcast straight to the CF type is a hard error
+      // under Swift 6, and String bridges to CFString unconditionally.
+      if let stringKey = key as? String { result[stringKey as CFString] = item }
     }
     return result
   }
