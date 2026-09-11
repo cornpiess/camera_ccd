@@ -6,9 +6,10 @@
     "orientation": "portrait",
     "platforms": ["ios"],
     "userInterfaceStyle": "dark",
+    "icon": "./app_icon.png",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.cornpiess.rainbowcamera",
+      "bundleIdentifier": "com.cornpiess.camera18",
       "buildNumber": "1",
       "infoPlist": {
         "CFBundleDisplayName": "彩虹相机",

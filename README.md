@@ -2,11 +2,9 @@
 
 Minimal iOS camera: choose a camera profile, adjust a real aperture when a future/public iOS API reports support, and capture. This project requires an Expo Development Build; Expo Go cannot load its local Swift camera module.
 
-The app's home-screen name is **彩虹相机** (`ios.infoPlist.CFBundleDisplayName`); the ASCII name `Rainbow Camera` is what Xcode uses for the product and scheme. Bundle identifier: `com.cornpiess.rainbowcamera`.
+The app's home-screen name is **彩虹相机** (`ios.infoPlist.CFBundleDisplayName`); the ASCII name `Rainbow Camera` is what Xcode uses for the product and scheme. Bundle identifier: `com.cornpiess.camera18`.
 
 ## Windows development
-
-First replace the sample `ios.bundleIdentifier` in `app.json` with an identifier owned by your Apple team, then run:
 
 ```powershell
 npm install
@@ -43,7 +41,7 @@ The workflow fails fast with a clear error if any of these are missing.
 
 1. **The repository must be public.** macOS runners consume minutes at a **10x multiplier**. On a private repository that leaves only ~200 macOS minutes per month (2,000 ÷ 10) — roughly 8 builds, fewer than the EAS Free plan. Public repositories get standard GitHub-hosted runners, including macOS, for free with no minute limit.
 
-2. **Replace the placeholder bundle identifier.** `app.json` currently has `com.example.aperturecamera`. Apple does not allow registering the `com.example` prefix, so change it to a reverse-DNS identifier you control.
+2. **The bundle identifier must be one you control.** `app.json` currently has `com.cornpiess.camera18`. Apple does not allow registering the `com.example` prefix, so a reverse-DNS identifier owned by your Apple team is required.
 
 3. **Add four repository secrets** (Settings → Secrets and variables → Actions):
 
@@ -83,7 +81,7 @@ gh workflow run ios-testflight.yml -f ref=main
 The workflow fails fast if any of these are missing.
 
 1. **The same four repository secrets** as the Ad Hoc workflow — same names, same values. No new secrets are needed. The API key must be a **Team Key** with the **Admin** or **App Manager** role; an individual key can neither manage certificates nor upload builds.
-2. **An App Store Connect app record.** Uploading does not create the app. Register the explicit App ID `com.cornpiess.rainbowcamera` at developer.apple.com → Certificates, Identifiers & Profiles → Identifiers, then create the app in App Store Connect → Apps → **+** → New App. The bundle ID must match `app.json` exactly.
+2. **An App Store Connect app record.** Uploading does not create the app. Register the explicit App ID `com.cornpiess.camera18` at developer.apple.com → Certificates, Identifiers & Profiles → Identifiers, then create the app in App Store Connect → Apps → **+** → New App. The bundle ID must match `app.json` exactly.
 3. **Active agreements.** App Store Connect → Business → Agreements must have no pending agreement; uploads are rejected while one is unsigned.
 4. **An app icon.** Not enforced by the workflow, but a build without one is hard to identify in TestFlight and cannot pass App Store review.
 
