@@ -380,15 +380,25 @@ public final class CameraEngineView: ExpoView {
 
   private static func currentDeviceOrientation() -> AVCaptureVideoOrientation? {
     let deviceOrientation = UIDevice.current.orientation
-    guard deviceOrientation.isValidInterfaceOrientation else { return .portrait }
+    // During a physical rotation the OS briefly reports faceUp / unknown. Returning a
+    // fallback here made the connection orientation oscillate portrait ↔ landscape and
+    // the viewfinder twitch — invalid orientations must be IGNORED, keeping the last
+    // stable one until the rotation settles.
+    guard deviceOrientation.isValidInterfaceOrientation else { return nil }
     // AVCaptureVideoOrientation shares its raw values with UIDeviceOrientation.
     return AVCaptureVideoOrientation(rawValue: deviceOrientation.rawValue)
   }
 
   private static func setOrientation(on videoOutput: AVCaptureVideoDataOutput, photoOutput: AVCapturePhotoOutput) {
     guard let orientation = currentDeviceOrientation() else { return }
-    videoOutput.connection(with: .video)?.videoOrientation = orientation
-    photoOutput.connection(with: .video)?.videoOrientation = orientation
+    // Only touch the connection when the orientation actually changed — every
+    // re-assignment causes a visible glitch in the preview feed.
+    if let current = videoOutput.connection(with: .video)?.videoOrientation, current != orientation {
+      videoOutput.connection(with: .video)?.videoOrientation = orientation
+    }
+    if let current = photoOutput.connection(with: .video)?.videoOrientation, current != orientation {
+      photoOutput.connection(with: .video)?.videoOrientation = orientation
+    }
   }
 
   private static func applyAutoModes(to device: AVCaptureDevice) {
