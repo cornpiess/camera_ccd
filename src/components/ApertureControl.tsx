@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  PanResponder,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 
@@ -52,6 +53,38 @@ export const ApertureControl: React.FC<ApertureControlProps> = ({
   };
 
   /* -------------------------------------------------------------
+     Swipe-to-adjust on the collapsed badge (GOAL 9: 左右滑动调节).
+     Values are mirrored into refs so the PanResponder closures never
+     act on stale render state. Swipe direction follows the dial
+     metaphor: drag right = stop toward ƒ/4 (smaller aperture),
+     drag left = stop toward ƒ/1.4 (larger aperture).
+     ------------------------------------------------------------- */
+  const apertureStateRef = useRef({ current: currentAperture, stops: availableApertures });
+  apertureStateRef.current = { current: currentAperture, stops: availableApertures };
+
+  const swipePanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_evt, g) =>
+          Math.abs(g.dx) > 18 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+        onPanResponderRelease: (_evt, g) => {
+          const { current, stops } = apertureStateRef.current;
+          if (stops.length <= 1) return;
+          const index = stops.findIndex((v) => Math.abs(v - current) < 0.05);
+          const currentIndex = index >= 0 ? index : 0;
+          const step = g.dx > 0 ? 1 : -1;
+          const next = stops[Math.min(stops.length - 1, Math.max(0, currentIndex + step))];
+          if (next !== undefined && Math.abs(next - current) >= 0.05) {
+            Haptics.selectionAsync().catch(() => {});
+            onApertureChange?.(next);
+          }
+        },
+      }),
+    [onApertureChange],
+  );
+
+  /* -------------------------------------------------------------
      CASE 1: Fixed Aperture Fallback (Non-interactive)
      ------------------------------------------------------------- */
   if (!isVariableAperture || availableApertures.length <= 1) {
@@ -70,6 +103,11 @@ export const ApertureControl: React.FC<ApertureControlProps> = ({
   /* -------------------------------------------------------------
      CASE 2: Variable Aperture Ring / Dial
      ------------------------------------------------------------- */
+  // ✦ on the collapsed badge when the current stop is inside the profile's
+  // starburst zone. Hint only — the starburst itself is optical, never software.
+  const isInStarZone =
+    typeof starZone === 'number' && Number.isFinite(starZone) && currentAperture >= starZone - 0.05;
+
   return (
     <View style={styles.container}>
       {/* Expanded Variable Dial */}
@@ -126,22 +164,25 @@ export const ApertureControl: React.FC<ApertureControlProps> = ({
           </TouchableOpacity>
         </View>
       ) : (
-        /* Collapsed Aperture Badge (Tappable to expand) */
-        <TouchableOpacity
-          activeOpacity={0.75}
-          onPress={toggleExpanded}
-          style={styles.variableBadge}
-        >
-          <Text style={styles.variableApertureSymbol}>ƒ</Text>
-          <Text style={styles.variableApertureValue}>
-            {formatAperture(currentAperture).replace('ƒ/', '')}
-          </Text>
-          <View style={styles.variableDialHint}>
-            <View style={styles.miniTick} />
-            <View style={[styles.miniTick, styles.miniTickCenter]} />
-            <View style={styles.miniTick} />
-          </View>
-        </TouchableOpacity>
+        /* Collapsed Aperture Badge (swipe to adjust; tap to expand the precise dial) */
+        <View {...swipePanResponder.panHandlers}>
+          <TouchableOpacity
+            activeOpacity={0.75}
+            onPress={toggleExpanded}
+            style={styles.variableBadge}
+          >
+            <Text style={styles.variableApertureSymbol}>ƒ</Text>
+            {isInStarZone ? <Text style={styles.starZoneGlyph}>✦</Text> : null}
+            <Text style={styles.variableApertureValue}>
+              {formatAperture(currentAperture).replace('ƒ/', '')}
+            </Text>
+            <View style={styles.variableDialHint}>
+              <View style={styles.miniTick} />
+              <View style={[styles.miniTick, styles.miniTickCenter]} />
+              <View style={styles.miniTick} />
+            </View>
+          </TouchableOpacity>
+        </View>
       )}
     </View>
   );
@@ -202,6 +243,12 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     fontWeight: '700',
     marginRight: 2,
+  },
+  starZoneGlyph: {
+    color: '#FFCC00',
+    fontSize: 12,
+    fontWeight: '700',
+    marginRight: 3,
   },
   variableApertureValue: {
     color: '#FFFFFF',
