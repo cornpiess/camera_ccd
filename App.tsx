@@ -6,6 +6,7 @@ import {
   Animated,
   Dimensions,
   AppState,
+  Linking,
   Platform,
   PanResponder,
   Text,
@@ -17,11 +18,12 @@ import * as Haptics from 'expo-haptics';
 // Native camera module wrapper & native APIs
 import {
   CameraEngine,
-  CameraEngineView,
   CameraEngineError,
+  CameraEngineView,
   type CapturedPhoto,
   type CameraCapabilities,
 } from './src/camera/CameraEngine';
+import { loadCameraState, rememberAperture, saveCameraState, type CameraState } from './src/camera/cameraStateStore';
 
 // Profile management provider
 import { ProfileProvider, useProfiles } from './src/profiles/ProfileProvider';
@@ -51,6 +53,46 @@ import {
 } from './src/components';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+/**
+ * Top inset of the viewfinder touch area (styles.viewfinderTouchArea). Tap-to-focus layer
+ * coordinates are computed relative to the full-screen preview view, so the offset must be
+ * removed before normalizing.
+ */
+const VIEWFINDER_TOP_INSET = 80;
+
+/**
+ * Capture lifecycle the UI can distinguish without a native event channel:
+ * idle → capturing (press → native promise settles) → idle | failed.
+ * Processing/Save phases still live inside 'capturing' on purpose — splitting them
+ * further would require a native event bridge, deliberately not added yet.
+ */
+type CapturePhase = 'idle' | 'capturing' | 'failed';
+
+/**
+ * User-language error messages (Iteration 4: never expose AVCapture error domains).
+ */
+const FRIENDLY_ERROR_MESSAGES: Record<string, string> = {
+  ERR_PHOTO_PERMISSION_DENIED: "Couldn't save the photo — allow photo access in Settings.",
+  ERR_CAPTURE_BUSY: 'Still processing the previous photo — one moment.',
+  ERR_CAPTURE_FAILED: "Couldn't capture — try again.",
+  ERR_PROCESSING_FAILED: "Couldn't process the photo.",
+  ERR_SAVE_FAILED: "Couldn't save the photo — check your storage.",
+  ERR_NOT_RUNNING: 'Camera is restarting — try again.',
+  ERR_APERTURE_UNSUPPORTED: 'Variable aperture is not available on this device.',
+  ERR_PERMISSION_DENIED: 'Camera access is required — allow it in Settings.',
+  ERR_CAMERA_UNAVAILABLE: 'Camera unavailable.',
+};
+
+function resolveErrorMessage(err: unknown): string {
+  if (err instanceof CameraEngineError) {
+    return FRIENDLY_ERROR_MESSAGES[err.code] ?? err.message;
+  }
+  const record = err as { code?: string; message?: string } | null;
+  const mapped = record?.code ? FRIENDLY_ERROR_MESSAGES[record.code] : undefined;
+  if (mapped) return mapped;
+  return err instanceof Error ? err.message : 'Something went wrong — try again.';
+}
 
 /**
  * Hard ceiling for a single capture round-trip. ProRAW development plus JPEG
@@ -114,7 +156,7 @@ function CameraAppScreen(): React.JSX.Element {
   // -------------------------------------------------------------
   // 1. Profile State exclusively via useProfiles() JSON state
   // -------------------------------------------------------------
-  const { profiles, currentProfile, selectProfile, errors: profileErrors } = useProfiles();
+  const { profiles, currentProfile, currentProfileId, selectProfile, errors: profileErrors } = useProfiles();
   const activeProfile = currentProfile ?? profiles[0] ?? null;
 
   // -------------------------------------------------------------
@@ -133,11 +175,28 @@ function CameraAppScreen(): React.JSX.Element {
   const capabilitiesRef = useRef<CameraCapabilities | null>(null);
 
   // Photo Capture & Preview states
-  const [isCapturing, setIsCapturing] = useState<boolean>(false);
+  const [capturePhase, setCapturePhase] = useState<CapturePhase>('idle');
   const [latestThumbnail, setLatestThumbnail] = useState<string | null>(null);
 
   // Tracks whether the native session started successfully (used by the AppState recovery path)
   const cameraRunningRef = useRef<boolean>(false);
+
+  // Persisted camera memory: last profile + per-profile last user-chosen aperture.
+  // Loaded async once on mount; restore happens after both profiles and state are ready.
+  const cameraStateRef = useRef<CameraState>({ lastProfileId: null, lastApertures: {} });
+  const [cameraStateLoaded, setCameraStateLoaded] = useState(false);
+  const restoreAttemptedRef = useRef(false);
+  useEffect(() => {
+    let mounted = true;
+    loadCameraState().then((state) => {
+      if (!mounted) return;
+      cameraStateRef.current = state;
+      setCameraStateLoaded(true);
+    }).catch(() => setCameraStateLoaded(true));
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Flash curtain effect
   const shutterFlashAnim = useRef(new Animated.Value(0)).current;
@@ -292,12 +351,17 @@ function CameraAppScreen(): React.JSX.Element {
       try {
         await CameraEngine.applyProfile(activeProfile as unknown as Record<string, unknown>);
 
-        // If variable aperture is supported, clamp preferred aperture and update
-        if (supportsVariableAperture && activeProfile.aperture?.preferred != null) {
-          const preferred = activeProfile.aperture.preferred;
-          const min = capabilitiesRef.current?.minAperture ?? availableApertures[0] ?? preferred;
-          const max = capabilitiesRef.current?.maxAperture ?? availableApertures[availableApertures.length - 1] ?? preferred;
-          const clamped = Math.min(Math.max(preferred, min), max);
+        // Aperture memory (Iteration 4): the JSON preferredAperture is only the first-touch
+        // default — a user's last chosen f-stop for this profile wins.
+        const target =
+          cameraStateRef.current.lastApertures[activeProfile.id] ??
+          activeProfile.aperture?.preferred;
+
+        // If variable aperture is supported, clamp the target and update
+        if (supportsVariableAperture && target != null) {
+          const min = capabilitiesRef.current?.minAperture ?? availableApertures[0] ?? target;
+          const max = capabilitiesRef.current?.maxAperture ?? availableApertures[availableApertures.length - 1] ?? target;
+          const clamped = Math.min(Math.max(target, min), max);
 
           await CameraEngine.setAperture(clamped);
           if (isMounted) {
@@ -307,8 +371,7 @@ function CameraAppScreen(): React.JSX.Element {
         }
       } catch (err: unknown) {
         if (isMounted) {
-          const msg = err instanceof Error ? err.message : 'Failed to apply camera profile';
-          showTransientError(msg);
+          showTransientError(resolveErrorMessage(err));
         }
       }
     };
@@ -325,6 +388,20 @@ function CameraAppScreen(): React.JSX.Element {
       showTransientError(profileErrors.join('\n'));
     }
   }, [profileErrors, showTransientError]);
+
+  // -------------------------------------------------------------
+  // 7b. Camera memory restore: once profiles are available, restore the
+  // last used Camera Character exactly once per launch.
+  // -------------------------------------------------------------
+  useEffect(() => {
+    if (restoreAttemptedRef.current || profiles.length === 0 || !cameraStateLoaded) return;
+    restoreAttemptedRef.current = true;
+    const stored = cameraStateRef.current.lastProfileId;
+    if (stored && stored !== currentProfileId && profiles.some((p) => p.id === stored)) {
+      selectProfile(stored);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profiles, cameraStateLoaded]);
 
   // -------------------------------------------------------------
   // 8. Hardware Actions: Aperture, Photo Capture
@@ -345,19 +422,24 @@ function CameraAppScreen(): React.JSX.Element {
     setActiveAperture(clamped);
     try {
       await CameraEngine.setAperture(clamped);
+      // Persist the user's explicit choice for this profile (GOAL: aperture memory).
+      if (activeProfile) {
+        cameraStateRef.current.lastApertures[activeProfile.id] = clamped;
+        rememberAperture(activeProfile.id, clamped);
+      }
     } catch (err: unknown) {
       setCurrentAperture(previous);
       setActiveAperture(previous);
-      const msg = err instanceof Error ? err.message : 'Failed to set aperture';
-      showTransientError(msg);
+      showTransientError(resolveErrorMessage(err));
     }
   };
 
   const handleCapturePhoto = async () => {
-    if (isCapturing) return;
-    setIsCapturing(true);
+    if (capturePhase === 'capturing') return;
+    setCapturePhase('capturing');
 
-    // Visual white flash curtain
+    // Immediate shutter feedback: white flash + haptic fire on press, while the photo
+    // processes in the background. Preview never blocks.
     Animated.sequence([
       Animated.timing(shutterFlashAnim, {
         toValue: 1,
@@ -382,17 +464,23 @@ function CameraAppScreen(): React.JSX.Element {
           );
         }),
       ]);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      setCapturePhase('idle');
       if (result?.thumbnailUri) {
         setLatestThumbnail(result.thumbnailUri);
       } else if (result?.fileUri) {
         setLatestThumbnail(result.fileUri);
       }
+      if (result?.processingFallback) {
+        showTransientError('Camera DNA processing failed — the original photo was saved.');
+      }
     } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : 'Capture failed';
-      showTransientError(errorMsg);
+      showTransientError(resolveErrorMessage(err));
+      setCapturePhase('failed');
+      // The failure state decays; the shutter is immediately usable again.
+      setTimeout(() => setCapturePhase((phase) => (phase === 'failed' ? 'idle' : phase)), 2500);
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
-      setIsCapturing(false);
     }
   };
 
@@ -408,36 +496,29 @@ function CameraAppScreen(): React.JSX.Element {
 
   /**
    * Tap-to-Focus: a quick, low-movement release sets the AF/AE point of interest and
-   * shows a lightweight indicator. Screen coords are mapped through the aspect-fill
-   * preview into normalized video coords (photo preset renders a 4:3 portrait frame,
-   * so narrow screens crop the sides); the native layer converts them to the device's
-   * landscape sensor space.
+   * shows a lightweight indicator. The tap is sent as a point normalized to the preview
+   * layer; the native side converts it with captureDevicePointConverted, which stays
+   * correct under aspect-fill on every device (no hand-rolled aspect math here).
    */
   const handleTapToFocus = useCallback(
     (pageX: number, pageY: number) => {
       if (!isCameraRunning) return;
       setFocusIndicator({ x: pageX, y: pageY, key: Date.now() });
 
-      const screenAspect = SCREEN_WIDTH / SCREEN_HEIGHT;
-      const videoAspect = 3 / 4;
-      let nx = pageX / SCREEN_WIDTH;
-      let ny = pageY / SCREEN_HEIGHT;
-      if (screenAspect < videoAspect) {
-        nx = (nx - 0.5) * (screenAspect / videoAspect) + 0.5;
-      } else {
-        ny = (ny - 0.5) * (videoAspect / screenAspect) + 0.5;
-      }
-      CameraEngine.setFocusPoint(
-        Math.min(1, Math.max(0, nx)),
-        Math.min(1, Math.max(0, ny)),
-      ).catch(() => {});
+      const nx = Math.min(1, Math.max(0, pageX / SCREEN_WIDTH));
+      const ny = Math.min(1, Math.max(0, (pageY - VIEWFINDER_TOP_INSET) / SCREEN_HEIGHT));
+      CameraEngine.setFocusPoint(nx, ny).catch(() => {});
     },
     [isCameraRunning],
   );
 
   const handleSelectProfile = useCallback(
     (profile: CameraProfile) => {
-      selectProfile(profile.id);
+      const ok = selectProfile(profile.id);
+      if (ok) {
+        cameraStateRef.current.lastProfileId = profile.id;
+        saveCameraState({ lastProfileId: profile.id });
+      }
     },
     [selectProfile]
   );
@@ -682,15 +763,24 @@ function CameraAppScreen(): React.JSX.Element {
 
             {/* Bottom Actions Row: Recent Thumbnail & Shutter Button */}
             <View style={styles.bottomActionRow}>
-              {/* 5. Lower-left Recent Photo Thumbnail (Display Only) */}
+              {/* 5. Lower-left Recent Photo Thumbnail (tap opens the photo library) */}
               <View style={styles.thumbnailSlot}>
-                <ThumbnailPreview uri={latestThumbnail} />
+                <ThumbnailPreview
+                  uri={latestThumbnail}
+                  onPress={
+                    latestThumbnail
+                      ? () => {
+                          Linking.openURL('photos-redirect://').catch(() => {});
+                        }
+                      : undefined
+                  }
+                />
               </View>
 
               {/* 4. Centered Shutter Button */}
               <View style={styles.shutterSlot}>
                 <ShutterButton
-                  isCapturing={isCapturing}
+                  isCapturing={capturePhase === 'capturing'}
                   onPress={handleCapturePhoto}
                 />
               </View>

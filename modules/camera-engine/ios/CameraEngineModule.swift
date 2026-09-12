@@ -16,6 +16,7 @@ enum CameraEngineError: String, Error {
   case configurationFailed = "ERR_CONFIGURATION_FAILED"
   case notRunning = "ERR_NOT_RUNNING"
   case captureFailed = "ERR_CAPTURE_FAILED"
+  case captureBusy = "ERR_CAPTURE_BUSY"
   case processingFailed = "ERR_PROCESSING_FAILED"
   case saveFailed = "ERR_SAVE_FAILED"
   case apertureUnsupported = "ERR_APERTURE_UNSUPPORTED"
@@ -31,6 +32,7 @@ private extension CameraEngineError {
     case .configurationFailed: return "The capture session could not be configured."
     case .notRunning: return "The camera is not running."
     case .captureFailed: return "The camera did not produce photo data."
+    case .captureBusy: return "Still processing the previous photo — try again in a moment."
     case .processingFailed: return "The image profile could not be rendered."
     case .saveFailed: return "The photo could not be saved to the photo library."
     case .apertureUnsupported: return "Variable aperture is not available through a supported public API on this device."
@@ -220,6 +222,10 @@ public final class CameraEngineView: ExpoView {
   private var profile: [String: Any] = [:]
   private var camera: AVCaptureDevice?
   private var configured = false
+  // Session-lifecycle bookkeeping (accessed only on sessionQueue): interruption and
+  // runtime errors must self-heal instead of leaving a permanently frozen preview.
+  private var sessionShouldRun = false
+  private var interruptionObservers: [NSObjectProtocol] = []
   private var captureDelegates: [Int64: PhotoCaptureDelegate] = [:]
   private lazy var previewLayer: AVCaptureVideoPreviewLayer = {
     let layer = AVCaptureVideoPreviewLayer(session: session)
@@ -230,6 +236,13 @@ public final class CameraEngineView: ExpoView {
   public required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
     layer.addSublayer(previewLayer)
+    let center = NotificationCenter.default
+    interruptionObservers.append(center.addObserver(
+      forName: .AVCaptureSessionInterruptionEnded, object: session, queue: nil
+    ) { [weak self] _ in self?.resumeIfNeeded() })
+    interruptionObservers.append(center.addObserver(
+      forName: .AVCaptureSessionRuntimeError, object: session, queue: nil
+    ) { [weak self] _ in self?.resumeIfNeeded() })
     Self.registrationHandler?(self, true)
   }
 
@@ -239,6 +252,7 @@ public final class CameraEngineView: ExpoView {
   }
 
   deinit {
+    interruptionObservers.forEach(NotificationCenter.default.removeObserver)
     Self.registrationHandler?(self, false)
   }
 
@@ -262,6 +276,7 @@ public final class CameraEngineView: ExpoView {
         do {
           if !self.configured { try self.configureSession() }
           if !self.session.isRunning { self.session.startRunning() }
+          self.sessionShouldRun = true
           completion(.success(true))
         } catch let error as CameraEngineError { completion(.failure(error)) }
         catch { completion(.failure(.configurationFailed)) }
@@ -271,8 +286,18 @@ public final class CameraEngineView: ExpoView {
 
   fileprivate func stop(completion: @escaping () -> Void) {
     sessionQueue.async {
+      self.sessionShouldRun = false
       if self.session.isRunning { self.session.stopRunning() }
       completion()
+    }
+  }
+
+  /// Self-heal after system interruptions / runtime errors: restart the session only
+  /// when the app still wants it running (GOAL: never a permanent frozen preview).
+  fileprivate func resumeIfNeeded() {
+    sessionQueue.async {
+      guard self.sessionShouldRun, self.configured, !self.session.isRunning else { return }
+      self.session.startRunning()
     }
   }
 
@@ -324,6 +349,14 @@ public final class CameraEngineView: ExpoView {
       guard self.session.isRunning else { completion(.failure(.notRunning)); return }
       CameraTempFiles.removeUntrackedFiles()
 
+      // Iteration 4: rapid shutter presses must not pile up unbounded ProRAW buffers.
+      // A small in-flight cap keeps memory flat; the user gets an honest busy signal
+      // instead of a crash or silent queue growth.
+      guard self.captureDelegates.count < 3 else {
+        completion(.failure(.captureBusy))
+        return
+      }
+
       // ProRAW is the preferred internal negative: request DNG only when the output truly
       // supports and has Apple ProRAW enabled. Devices without ProRAW must NOT be forced onto
       // plain Bayer RAW — they fall through to Apple's processed JPEG so the automatic
@@ -349,6 +382,11 @@ public final class CameraEngineView: ExpoView {
       }
 
       photoSettings.photoQualityPrioritization = .balanced
+      // Shutter fidelity: only enable fast capture prioritization when the runtime
+      // reports support (capability first) — minimizes shutter lag without forcing it.
+      if self.output.isFastCapturePrioritizationSupported {
+        photoSettings.isFastCapturePrioritizationEnabled = true
+      }
       let id = photoSettings.uniqueID
       let delegate = PhotoCaptureDelegate(profile: self.profileSnapshot()) { [weak self] result in
         self?.sessionQueue.async { self?.captureDelegates.removeValue(forKey: id) }
@@ -369,21 +407,29 @@ public final class CameraEngineView: ExpoView {
     }
   }
 
-  /// Tap-to-focus: move the AF/AE point of interest, then keep the continuous auto modes so the
-  /// system resumes full automatic photography around the chosen point.
+  /// Tap-to-focus: the JS layer sends the tap as a point normalized to the preview layer
+  /// (0..1); converting through AVCaptureVideoPreviewLayer.captureDevicePointConverted keeps
+  /// the mapping correct under aspect-fill on every device. Continuous AF/AE stay active.
   fileprivate func setFocusPoint(x: Double, y: Double, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
     sessionQueue.async {
       guard let device = self.camera, device.isConnected else {
         completion(.failure(.notRunning))
         return
       }
+      let bounds = self.previewLayer.bounds
+      guard bounds.width > 0, bounds.height > 0 else {
+        completion(.failure(.notRunning))
+        return
+      }
+      let layerPoint = CGPoint(x: CGFloat(min(max(x, 0), 1)) * bounds.width,
+                               y: CGFloat(min(max(y, 0), 1)) * bounds.height)
+      let devicePoint = self.previewLayer.captureDevicePointConverted(fromLayerPoint: layerPoint)
       do {
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
-        let point = CGPoint(x: CGFloat(min(max(x, 0), 1)), y: CGFloat(min(max(y, 0), 1)))
-        if device.isFocusPointOfInterestSupported { device.focusPointOfInterest = point }
+        if device.isFocusPointOfInterestSupported { device.focusPointOfInterest = devicePoint }
         if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
-        if device.isExposurePointOfInterestSupported { device.exposurePointOfInterest = point }
+        if device.isExposurePointOfInterestSupported { device.exposurePointOfInterest = devicePoint }
         if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
         completion(.success(()))
       } catch {
@@ -410,6 +456,7 @@ public final class CameraEngineView: ExpoView {
       var caps = controller.getCapabilities(device: device).asDictionary
       caps["supportsRAW"] = rawSupported
       caps["supportsProRAW"] = proRaw
+      caps["isReadyForCapture"] = canQueryOutput && self.output.isReadyForCapture
 
       completion(.success(caps))
     }
@@ -461,6 +508,10 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
   private var didAcceptPhoto = false
   private var generatedURLs: [URL] = []
   private var expectedPhotoCount = 1
+  // Safety net (Iteration 4): in dual-format captures the companion Apple-processed photo is
+  // retained so a Camera DNA / RAW pipeline failure can still save the capture. Photos must
+  // never silently disappear. Guarded by completionLock.
+  private var companionData: Data?
 
   init(profile: [String: Any], completion: @escaping (Result<[String: Any], CameraEngineError>) -> Void) {
     self.profile = profile
@@ -476,7 +527,14 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     // we care about BEFORE inspecting its error, otherwise a failed companion
     // processed photo would abort an otherwise healthy RAW capture.
     let isRaw = photo.isRawPhoto
-    if expectedPhotoCount > 1 && !isRaw { return }
+    if expectedPhotoCount > 1 && !isRaw {
+      // Previously this callback was dropped entirely, so a failed RAW render lost the
+      // whole capture even though a healthy processed photo existed. Keep it as fallback.
+      if error == nil, let data = photo.fileDataRepresentation() {
+        completionLock.lock(); companionData = data; completionLock.unlock()
+      }
+      return
+    }
 
     // ponytail: a RAW failure still aborts the capture instead of falling back to the
     // companion processed JPEG; that fallback is a product decision, not implemented.
@@ -499,10 +557,21 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
 
       // 1. RAW / ProRAW First vs Processed Fallback
       var renderedCIImage: CIImage?
+      var usedFallback = false
 
       if isRaw {
         // Core Image official RAW rendering pipeline via CIRAWFilter
         renderedCIImage = ProfileRenderer.renderRaw(data: photoData, profile: profile)
+      }
+
+      // Trust rule: if the Camera DNA / RAW pipeline failed but a companion processed
+      // photo exists, save it untouched and report the fallback to the caller.
+      if renderedCIImage == nil {
+        completionLock.lock(); let companion = companionData; completionLock.unlock()
+        if let companion = companion {
+          renderedCIImage = CIImage(data: companion, options: [.applyOrientationProperty: true])
+          usedFallback = renderedCIImage != nil
+        }
       }
 
       // Fallback: if not RAW or CIRAWFilter fails to initialize from data, load standard processed CIImage
@@ -568,7 +637,8 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
           self.finish(.success([
             "fileUri": fileURL.absoluteString,
             "thumbnailUri": thumbURL.absoluteString,
-            "assetLocalIdentifier": localIdentifier ?? NSNull()
+            "assetLocalIdentifier": localIdentifier ?? NSNull(),
+            "processingFallback": usedFallback
           ]))
         }
       }

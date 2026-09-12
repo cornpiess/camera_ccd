@@ -178,7 +178,7 @@ PhotoKit (add-only) 写入相册，界面缩略图立即可见
 
 5. **相机 Profile 渲染一致性**：**禁止** 针对 Leica、Fuji、Ricoh 分别编写 `switch-case` 原生代码，所有 8 台相机必须共用 `ProfileRenderer.apply`，其风格完全由 JSON 矩阵定义。
 
-6. **刻意未做的事**（标注了 `ponytail:` 注释，不是遗漏）：RAW 拍摄失败时**不**回退到伴生的 processed JPEG。这是产品决策——宁可失败也不悄悄降级画质。要改需先与用户确认。
+6. **（Iteration 4 已修订）RAW 拍摄失败时的安全网**：旧行为是「RAW 失败即整张失败，不回退伴生 processed JPEG」（当时的产品决策）。按 Iteration 4「照片绝不静默消失」原则已改为：伴生 processed 图保留在 `companionData`，RAW/Camera DNA 管线失败时保存 Apple 原图并通过 `processingFallback` 标记告知用户。**不要改回静默丢弃**；若未来要收紧，必须先与用户确认。
 
 ---
 

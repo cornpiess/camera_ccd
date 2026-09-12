@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import {
   Image,
+  TouchableOpacity,
   View,
   StyleSheet,
   Animated,
@@ -9,11 +10,14 @@ import {
 export interface ThumbnailPreviewProps {
   uri?: string | null;
   size?: number;
+  /** When provided and a photo exists, the thumbnail opens the photo library. */
+  onPress?: () => void;
 }
 
 export const ThumbnailPreview: React.FC<ThumbnailPreviewProps> = ({
   uri,
   size = 48,
+  onPress,
 }: ThumbnailPreviewProps) => {
   const bounceAnim = useRef(new Animated.Value(1)).current;
 
@@ -36,36 +40,55 @@ export const ThumbnailPreview: React.FC<ThumbnailPreviewProps> = ({
     }
   }, [uri, bounceAnim]);
 
+  const image = (
+    <View
+      style={[
+        styles.container,
+        { width: size, height: size, borderRadius: size * 0.22 },
+      ]}
+    >
+      {uri ? (
+        <Image
+          source={{ uri }}
+          style={[
+            styles.image,
+            { width: size, height: size, borderRadius: size * 0.22 },
+          ]}
+        />
+      ) : (
+        <View
+          style={[
+            styles.placeholder,
+            { width: size, height: size, borderRadius: size * 0.22 },
+          ]}
+        >
+          {/* Minimalist gallery placeholder icon */}
+          <View style={styles.placeholderIconOuter}>
+            <View style={styles.placeholderIconInner} />
+          </View>
+        </View>
+      )}
+    </View>
+  );
+
+  if (uri && onPress) {
+    return (
+      <Animated.View style={{ transform: [{ scale: bounceAnim }] }}>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Open the photo library"
+          activeOpacity={0.75}
+          onPress={onPress}
+        >
+          {image}
+        </TouchableOpacity>
+      </Animated.View>
+    );
+  }
+
   return (
     <Animated.View style={{ transform: [{ scale: bounceAnim }] }} pointerEvents="none">
-      <View
-        style={[
-          styles.container,
-          { width: size, height: size, borderRadius: size * 0.22 },
-        ]}
-      >
-        {uri ? (
-          <Image
-            source={{ uri }}
-            style={[
-              styles.image,
-              { width: size, height: size, borderRadius: size * 0.22 },
-            ]}
-          />
-        ) : (
-          <View
-            style={[
-              styles.placeholder,
-              { width: size, height: size, borderRadius: size * 0.22 },
-            ]}
-          >
-            {/* Minimalist gallery placeholder icon */}
-            <View style={styles.placeholderIconOuter}>
-              <View style={styles.placeholderIconInner} />
-            </View>
-          </View>
-        )}
-      </View>
+      {image}
     </Animated.View>
   );
 };

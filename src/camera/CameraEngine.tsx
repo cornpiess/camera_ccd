@@ -13,6 +13,8 @@ export type CameraCapabilities = {
   deviceModel: string;
   supportsRAW: boolean;
   supportsProRAW: boolean;
+  /** Whether the photo output can accept a capture right now. */
+  isReadyForCapture?: boolean;
   /** Compatibility alias for activeAperture. */
   activeLensAperture: number;
   /** Compatibility alias for deviceModel. */
@@ -26,6 +28,8 @@ export type CapturedPhoto = {
   thumbnailUri: string;
   /** Photos asset identifier when supplied by PhotoKit. */
   assetLocalIdentifier: string | null;
+  /** True when Camera DNA processing failed and the untouched Apple-processed photo was saved instead. */
+  processingFallback?: boolean | null;
 };
 
 export type CameraEngineErrorCode =
@@ -36,6 +40,7 @@ export type CameraEngineErrorCode =
   | 'ERR_CONFIGURATION_FAILED'
   | 'ERR_NOT_RUNNING'
   | 'ERR_CAPTURE_FAILED'
+  | 'ERR_CAPTURE_BUSY'
   | 'ERR_PROCESSING_FAILED'
   | 'ERR_SAVE_FAILED'
   | 'ERR_APERTURE_UNSUPPORTED'
