@@ -83,8 +83,8 @@ installDiagLog();
 const STATUS_BAR_HEIGHT = Platform.OS === 'ios' ? 47 : (StatusBar.currentHeight ?? 24);
 /** Status bar + the camera capsule. */
 const TOP_BAND = Math.round(STATUS_BAR_HEIGHT + 70);
-/** Minimum room the control stack needs; the finder band never shrinks below it. */
-const MIN_BOTTOM_BAND = 232;
+/** Minimum room for the hero aperture ring + shutter row. */
+const MIN_BOTTOM_BAND = 200;
 
 interface FinderRect {
   readonly left: number;
@@ -148,37 +148,6 @@ function resolveErrorMessage(err: unknown): string {
 const CAPTURE_TIMEOUT_MS = 20_000;
 
 /**
- * Derive discrete 1/3-stop variable aperture values from capability min/max.
- * Formula: N = 2^(k/6), with k integer.
- */
-function deriveVariableApertures(minAperture: number, maxAperture: number): number[] {
-  const min = Math.min(minAperture, maxAperture);
-  const max = Math.max(minAperture, maxAperture);
-  // Keep two decimals so real hardware stops like ƒ/1.48 are never rewritten into
-  // fabricated values (ƒ/1.5 exists only in rounding, not in the lens).
-  if (min >= max) {
-    return [Number(min.toFixed(2))];
-  }
-
-  const stops = new Set<number>();
-  stops.add(Number(min.toFixed(2)));
-
-  const kStart = Math.ceil(6 * Math.log2(min));
-  const kEnd = Math.floor(6 * Math.log2(max));
-
-  for (let k = kStart; k <= kEnd; k++) {
-    const val = Math.pow(2, k / 6);
-    const rounded = Math.round(val * 10) / 10;
-    if (rounded > min + 0.05 && rounded < max - 0.05) {
-      stops.add(rounded);
-    }
-  }
-
-  stops.add(Number(max.toFixed(2)));
-  return Array.from(stops).sort((a, b) => a - b);
-}
-
-/**
  * Check whether an error is a permission denied failure.
  */
 function isPermissionDeniedError(err: unknown): boolean {
@@ -227,11 +196,13 @@ function CameraAppScreen(): React.JSX.Element {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isCameraRunning, setIsCameraRunning] = useState<boolean>(false);
 
-  // Aperture hardware capability states
+  // Aperture hardware capability states — the control is CONTINUOUS (无极): the underlying
+  // API (iOS 27 setExposureModeCustom(lensAperture:)) takes an arbitrary f-number inside
+  // [minAperture, maxAperture]; recommended stops are hints, not limits.
   const [supportsVariableAperture, setSupportsVariableAperture] = useState<boolean>(false);
   const [activeAperture, setActiveAperture] = useState<number>(1.8);
   const [currentAperture, setCurrentAperture] = useState<number>(1.8);
-  const [availableApertures, setAvailableApertures] = useState<number[]>([]);
+  const [apertureRange, setApertureRange] = useState<{ min: number; max: number } | null>(null);
   const capabilitiesRef = useRef<CameraCapabilities | null>(null);
 
   // Rear lens inventory → derived focal stops for the dial (13/26/35/52 on dual, 13…192 on Pro).
@@ -268,6 +239,8 @@ function CameraAppScreen(): React.JSX.Element {
 
   // Flash curtain effect
   const shutterFlashAnim = useRef(new Animated.Value(0)).current;
+  // Throttle for aperture-memory persistence during continuous ring drags.
+  const lastAperturePersistRef = useRef<number>(0);
 
   // -------------------------------------------------------------
   // 3. Transient Error Overlay (Running Errors: profile/apply/aperture/capture/save)
@@ -298,7 +271,8 @@ function CameraAppScreen(): React.JSX.Element {
    * Depth/bokeh is never faked (red line 4). Toggle off in the calibration panel.
    */
   const [apertureDemoMode, setApertureDemoMode] = useState<boolean>(true);
-  const DEMO_APERTURES = useMemo(() => [1.48, 1.8, 2, 2.8, 4], []);
+  /** Continuous demo range for fixed-lens devices (like a fast compact: ƒ/1.48–ƒ/4). */
+  const DEMO_APERTURE_RANGE = useMemo(() => ({ min: 1.48, max: 4 }), []);
 
   // -------------------------------------------------------------
   // 4b. Formal Camera Selector (top-badge entry) & Tap-to-Focus states
@@ -371,22 +345,24 @@ function CameraAppScreen(): React.JSX.Element {
           setCurrentAperture(aperture);
 
           if (variable) {
-            if (Array.isArray(capabilities.supportedApertures) && capabilities.supportedApertures.length > 0) {
-              setAvailableApertures([...capabilities.supportedApertures].sort((a, b) => a - b));
-            } else if (capabilities.minAperture != null && capabilities.maxAperture != null) {
-              setAvailableApertures(deriveVariableApertures(capabilities.minAperture, capabilities.maxAperture));
+            if (capabilities.minAperture != null && capabilities.maxAperture != null) {
+              setApertureRange({ min: capabilities.minAperture, max: capabilities.maxAperture });
+            } else if (Array.isArray(capabilities.supportedApertures) && capabilities.supportedApertures.length > 1) {
+              // Degenerate report without a range: synthesize one from the suggested stops.
+              const stops = [...capabilities.supportedApertures].sort((a, b) => a - b);
+              setApertureRange({ min: stops[0]!, max: stops[stops.length - 1]! });
             } else {
-              setAvailableApertures([]);
+              setApertureRange(null);
             }
           } else {
-            setAvailableApertures([]);
+            setApertureRange(null);
           }
         }
       } catch {
         setSupportsVariableAperture(false);
         setActiveAperture(1.8);
         setCurrentAperture(1.8);
-        setAvailableApertures([]);
+        setApertureRange(null);
       }
 
       // Rear lens list → derive the focal-stop ladder for the dial.
@@ -472,14 +448,17 @@ function CameraAppScreen(): React.JSX.Element {
   const apertureVisual = useMemo(
     () => {
       const demo = !supportsVariableAperture && apertureDemoMode;
+      const range = supportsVariableAperture
+        ? (apertureRange ?? { min: capabilitiesRef.current?.minAperture ?? null, max: capabilitiesRef.current?.maxAperture ?? null })
+        : (demo ? DEMO_APERTURE_RANGE : { min: null, max: null });
       return apertureVisualFactors(
         currentAperture,
         supportsVariableAperture || demo,
-        supportsVariableAperture ? capabilitiesRef.current?.minAperture : (demo ? DEMO_APERTURES[0] : null),
-        supportsVariableAperture ? capabilitiesRef.current?.maxAperture : (demo ? DEMO_APERTURES[DEMO_APERTURES.length - 1] : null),
+        range.min,
+        range.max,
       );
     },
-    [currentAperture, supportsVariableAperture, apertureDemoMode, DEMO_APERTURES, availableApertures],
+    [currentAperture, supportsVariableAperture, apertureDemoMode, DEMO_APERTURE_RANGE, apertureRange],
   );
   const effectiveProfile = useMemo(
     () => (activeProfile ? applyApertureVisual(activeProfile as unknown as Record<string, unknown>, apertureVisual) : null),
@@ -502,8 +481,8 @@ function CameraAppScreen(): React.JSX.Element {
 
         // If variable aperture is supported, clamp the target and update
         if (supportsVariableAperture && target != null) {
-          const min = capabilitiesRef.current?.minAperture ?? availableApertures[0] ?? target;
-          const max = capabilitiesRef.current?.maxAperture ?? availableApertures[availableApertures.length - 1] ?? target;
+          const min = capabilitiesRef.current?.minAperture ?? apertureRange?.min ?? target;
+          const max = capabilitiesRef.current?.maxAperture ?? apertureRange?.max ?? target;
           const clamped = Math.min(Math.max(target, min), max);
 
           await CameraEngine.setAperture(clamped);
@@ -523,7 +502,7 @@ function CameraAppScreen(): React.JSX.Element {
     return () => {
       isMounted = false;
     };
-  }, [effectiveProfile, activeProfile, isCameraRunning, supportsVariableAperture, availableApertures, showTransientError]);
+  }, [effectiveProfile, activeProfile, isCameraRunning, supportsVariableAperture, apertureRange, showTransientError]);
 
   // Profile validation/import/reload errors shown as transient overlay while running
   useEffect(() => {
@@ -560,8 +539,8 @@ function CameraAppScreen(): React.JSX.Element {
       setActiveAperture(aperture);
       return;
     }
-    const min = capabilitiesRef.current?.minAperture ?? availableApertures[0] ?? aperture;
-    const max = capabilitiesRef.current?.maxAperture ?? availableApertures[availableApertures.length - 1] ?? aperture;
+    const min = capabilitiesRef.current?.minAperture ?? apertureRange?.min ?? aperture;
+    const max = capabilitiesRef.current?.maxAperture ?? apertureRange?.max ?? aperture;
     const clamped = Math.min(Math.max(aperture, min), max);
     const previous = currentAperture;
 
@@ -571,10 +550,15 @@ function CameraAppScreen(): React.JSX.Element {
     setActiveAperture(clamped);
     try {
       await CameraEngine.setAperture(clamped);
-      // Persist the user's explicit choice for this profile (GOAL: aperture memory).
+      // Persist the user's choice, throttled: the continuous ring fires many updates
+      // per drag, and each persistence is a read-modify-write of the state file.
       if (activeProfile) {
         cameraStateRef.current.lastApertures[activeProfile.id] = clamped;
-        rememberAperture(activeProfile.id, clamped);
+        const now = Date.now();
+        if (now - lastAperturePersistRef.current > 1500) {
+          lastAperturePersistRef.current = now;
+          rememberAperture(activeProfile.id, clamped);
+        }
       }
     } catch (err: unknown) {
       setCurrentAperture(previous);
@@ -605,9 +589,9 @@ function CameraAppScreen(): React.JSX.Element {
           capabilitiesRef.current = caps;
           const variable = Boolean(caps.supportsVariableAperture);
           setSupportsVariableAperture(variable);
-          setAvailableApertures(variable && Array.isArray(caps.supportedApertures) && caps.supportedApertures.length > 0
-            ? [...caps.supportedApertures].sort((a, b) => a - b)
-            : []);
+          setApertureRange(variable && caps.minAperture != null && caps.maxAperture != null
+            ? { min: caps.minAperture, max: caps.maxAperture }
+            : null);
           if (variable && activeProfile) {
             // Returning to the variable lens: restore the user's remembered f-stop.
             const target = cameraStateRef.current.lastApertures[activeProfile.id] ?? activeProfile.aperture?.preferred;
@@ -999,26 +983,41 @@ function CameraAppScreen(): React.JSX.Element {
             </View>
           )}
 
-          {/* Bottom control stack, top → bottom: focal circles → aperture bar → shutter. */}
-          {isCameraRunning && !permissionOverlayVisible && (
-            <View style={[styles.bottomControlsContainer, { backgroundColor: skin.chrome }]} pointerEvents="box-none">
-              {/* Focal-length circles: 13 / 26 / 35 … mm lens switching */}
+          {/* Focal-length circles live INSIDE the viewfinder (system-camera style):
+              small chips hugging the finder's bottom edge; the bottom band below is
+              reserved for the hero aperture ring. box-none so only chips take touches. */}
+          {isCameraRunning && !permissionOverlayVisible && focalStops.length > 0 && (
+            <View
+              style={[
+                styles.focalInFinder,
+                { left: finder.left, width: finder.width, top: finder.top + finder.height - 62 },
+              ]}
+              pointerEvents="box-none"
+            >
               <FocalCircleRow
                 stops={focalStops}
                 currentFocalMm={currentFocalMm}
                 accent={skin.accent}
                 onSelectFocal={(stop) => { void handleSelectFocal(stop); }}
               />
+            </View>
+          )}
 
-              {/* Aperture bar: iris glyph + mechanical ring wheel.
-                  Demo mode lets fixed-lens devices test the ring (visual only). */}
+          {/* Bottom control stack: the hero aperture ring + shutter row. */}
+          {isCameraRunning && !permissionOverlayVisible && (
+            <View style={[styles.bottomControlsContainer, { backgroundColor: skin.chrome }]} pointerEvents="box-none">
+              {/* Aperture ring: continuous (无极) — iris glyph + 1/3-stop scale + thin
+                  centered accent pointer. Demo mode on fixed lenses is visual-only. */}
               <ApertureBar
-                availableApertures={
+                minAperture={
                   supportsVariableAperture
-                    ? availableApertures
-                    : apertureDemoMode
-                      ? DEMO_APERTURES
-                      : []
+                    ? (apertureRange?.min ?? capabilitiesRef.current?.minAperture ?? 1.8)
+                    : DEMO_APERTURE_RANGE.min
+                }
+                maxAperture={
+                  supportsVariableAperture
+                    ? (apertureRange?.max ?? capabilitiesRef.current?.maxAperture ?? 4)
+                    : DEMO_APERTURE_RANGE.max
                 }
                 currentAperture={currentAperture}
                 isVariableAperture={supportsVariableAperture || apertureDemoMode}
@@ -1157,6 +1156,11 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '600',
+  },
+  focalInFinder: {
+    position: 'absolute',
+    alignItems: 'center',
+    zIndex: 15,
   },
   topControlsContainer: {
     position: 'absolute',

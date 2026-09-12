@@ -131,11 +131,18 @@ export function CalibrationModal({ visible, onClose, apertureDemoMode = false, o
             textAlignVertical="top"
             value={text}
           />
-          <ActionButton
-            disabled={busy || text.trim() === ''}
-            label="Apply Pasted JSON"
-            onPress={() => { void run(() => applyText(text)); }}
-          />
+          <View style={styles.editorActions}>
+            <ActionButton
+              disabled={busy || text.trim() === ''}
+              label="Apply Pasted JSON"
+              onPress={() => { void run(() => applyText(text)); }}
+            />
+            <ActionButton
+              disabled={busy || text === ''}
+              label="Clear"
+              onPress={() => { setText(''); clearErrors(); }}
+            />
+          </View>
 
           {busy ? <ActivityIndicator accessibilityLabel="Loading profiles" style={styles.progress} /> : null}
           {errors.length > 0 ? (
@@ -188,6 +195,7 @@ const styles = StyleSheet.create({
   destructiveText: { color: '#ffb6b6' },
   label: { color: '#e8e9ed', fontSize: 15, fontWeight: '600', marginTop: 4 },
   editor: { minHeight: 260, borderColor: '#3b3e45', borderWidth: 1, borderRadius: 10, backgroundColor: '#17191d', color: '#f4f4f5', fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }), fontSize: 13, lineHeight: 19, padding: 12 },
+  editorActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   progress: { marginVertical: 8 },
   errorBox: { borderRadius: 9, borderWidth: 1, borderColor: '#8b4444', backgroundColor: '#30191c', padding: 12, gap: 5 },
   errorTitle: { color: '#ffc1c1', fontWeight: '700', marginBottom: 2 },

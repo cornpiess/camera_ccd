@@ -12,3 +12,4 @@ export * from './CameraStateViews';
 export * from './CameraSelector';
 export * from './FocusIndicator';
 export * from './StartupErrorBoundary';
+export * from './IrisGlyph';

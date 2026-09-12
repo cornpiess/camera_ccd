@@ -5,13 +5,15 @@ import { AccessibilityInfo, StyleSheet, View, type StyleProp, type ViewStyle } f
 // so importing it unconditionally would crash any build whose native side predates this
 // dependency (e.g. loading new JS through Metro into the dev-r2 dev client). If anything
 // fails to resolve we run in fallback mode forever — never at the cost of a launch crash.
-let GlassViewImpl: React.ComponentType<{
+export type SafeGlassViewProps = {
   glassEffectStyle?: 'clear' | 'regular' | 'none';
   tintColor?: string;
   isInteractive?: boolean;
   colorScheme?: 'auto' | 'light' | 'dark';
   style?: StyleProp<ViewStyle>;
-}> | null = null;
+};
+
+let GlassViewImpl: React.ComponentType<SafeGlassViewProps> | null = null;
 let availabilityHelpers: { isGlassEffectAPIAvailable: () => boolean; isLiquidGlassAvailable: () => boolean } | null = null;
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -24,6 +26,21 @@ try {
 } catch {
   GlassViewImpl = null;
   availabilityHelpers = null;
+}
+
+/**
+ * The platform GlassView, resolved through the guarded require above — for call sites that
+ * want to use the material DIRECTLY per the Liquid Glass spec (one GlassView = one surface,
+ * content as plain siblings; no extra background layers). Renders null when the native side
+ * is unavailable, so callers can apply their own fallback.
+ */
+export function SafeGlassView(props: SafeGlassViewProps): React.JSX.Element | null {
+  if (!GlassViewImpl) return null;
+  return <GlassViewImpl {...props} />;
+}
+
+export function isGlassAvailable(): boolean {
+  return GlassViewImpl !== null && availabilityHelpers !== null && availabilityHelpers.isGlassEffectAPIAvailable();
 }
 
 /**

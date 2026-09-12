@@ -13,13 +13,13 @@ export interface FocalCircleRowProps {
   readonly onSelectFocal: (stop: FocalStop) => void;
 }
 
-const CIRCLE_SIZE = 46;
+const CIRCLE_SIZE = 36;
 
 /**
- * Focal-length selector: a row of circles (13 / 26 / 35 … mm). The engaged stop is a
- * solid circle in the camera's skin accent with auto-contrast text; the rest are dim
- * glass circles. Sits between the viewfinder and the aperture bar, mirroring the system
- * camera's control stack.
+ * Focal-length selector: a row of circles (13 / 26 / 35 … mm), INSIDE the viewfinder near
+ * its bottom edge — system-camera placement and size. The engaged stop is a solid circle
+ * in the camera's skin accent with auto-contrast text; the rest are translucent dark
+ * chips that stay legible over the picture.
  */
 export const FocalCircleRow: React.FC<FocalCircleRowProps> = ({ stops, currentFocalMm, accent, onSelectFocal }) => {
   if (stops.length === 0) return null;
@@ -59,21 +59,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 14,
+    gap: 10,
+    padding: 4,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.22)',
   },
   circle: {
     width: CIRCLE_SIZE,
     height: CIRCLE_SIZE,
     borderRadius: CIRCLE_SIZE / 2,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.28)',
-    backgroundColor: 'rgba(30, 30, 30, 0.45)',
+    borderColor: 'rgba(255, 255, 255, 0.32)',
+    backgroundColor: 'rgba(24, 24, 26, 0.55)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   label: {
-    color: 'rgba(255, 255, 255, 0.85)',
-    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.88)',
+    fontSize: 13,
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },

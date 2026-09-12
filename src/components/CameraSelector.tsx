@@ -3,7 +3,7 @@ import { Animated, Dimensions, Pressable, StyleSheet, Text, View } from 'react-n
 import * as Haptics from 'expo-haptics';
 import type { CameraProfile } from '../profiles/types';
 import { markerGlyph, profileDisplayName } from './types';
-import { GlassCard } from './GlassCard';
+import { SafeGlassView, isGlassAvailable } from './GlassCard';
 import { ProfileConfigModal } from '../calibration/ProfileConfigModal';
 
 export interface CameraSelectorProps {
@@ -144,7 +144,17 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
           ]}
           pointerEvents={visible ? 'auto' : 'none'}
         >
-          <GlassCard borderRadius={20} isInteractive style={styles.panel}>
+          {/* Liquid Glass spec: the panel is ONE GlassView surface — the material IS the
+              background. Content sits as a plain sibling on top; no secondary background,
+              no border layers stacked over the glass. */}
+          <View style={styles.panelClip}>
+            <SafeGlassView
+              glassEffectStyle="regular"
+              isInteractive
+              colorScheme="dark"
+              style={styles.panelGlass}
+            />
+            {!isGlassAvailable() ? <View style={[styles.panelGlass, styles.panelFallback]} /> : null}
             <Animated.View
               style={[styles.content, { opacity: contentOpacity, transform: [{ scale: contentScale }] }]}
             >
@@ -191,7 +201,7 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                 );
               })}
             </Animated.View>
-          </GlassCard>
+          </View>
         </Animated.View>
       </View>
 
@@ -229,12 +239,21 @@ const styles = StyleSheet.create({
     shadowRadius: 24,
     elevation: 12,
   },
-  panel: {
-    height: '100%',
-    paddingVertical: 6,
+  panelClip: {
+    flex: 1,
+    borderRadius: 20,
+    overflow: 'hidden',
+  },
+  panelGlass: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 20,
+  },
+  panelFallback: {
+    backgroundColor: 'rgba(24, 24, 28, 0.9)',
   },
   content: {
     flex: 1,
+    paddingVertical: 6,
   },
   row: {
     flexDirection: 'row',
