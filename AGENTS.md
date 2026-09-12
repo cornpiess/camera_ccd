@@ -94,6 +94,7 @@ git -c http.proxy=http://127.0.0.1:7890 -c credential.helper= -c credential.help
 - **通用前置条件**（缺任何一项会在 30 秒内 preflight 失败）：仓库为 public、`app.json` 的 `bundleIdentifier` 不是 `com.example.*`、4 个 repository secrets 已配置、runner 默认 Xcode **≥ 16**（Apple 自 2026 年起要求构建后上传 ASC 的 iOS 包必须用 Xcode 16+）。两个 workflow 各自的独有前置条件见上表，完整清单见 `README.md` 的 `CI:` 两节。
 - **密钥只放 GitHub Secrets**：`ASC_KEY_ID` / `ASC_ISSUER_ID` / `ASC_KEY_P8`（含私钥）/ `APPLE_TEAM_ID`。**任何情况下都不得把它们写进仓库、日志或记忆文件**。
 - **签名机制**：用 App Store Connect API Key + `-allowProvisioningUpdates`，让 Xcode 在云端自行创建/复用分发证书与 Ad Hoc 描述文件。**不要在 CI 里改成手动搬 `.p12` + keychain**——那是给有 Mac 的自托管 runner 用的，本环境（Windows）做不了。
+- **证书数量上限（2026-09-12 实际踩坑，TestFlight run 9）**：Apple 账号的证书额度很小（个人账号 Development 通常 2 张、Distribution 3 张），CI 每次云端签名都可能新签一张，连跑几次构建就会打满。打满后 Archive 报 `Your account has reached the maximum number of certificates. To create a new one, you must choose a certificate to revoke.`（连带 `No profiles for … were found`）。**这不是代码问题，workflow 修不了**：必须到 [developer.apple.com → Certificates](https://developer.apple.com/account/resources/certificates/list) 手动吊销旧的重复证书（保留每类最新一张），然后重跑 workflow 即可。频繁出包遇到 Archive 签名失败时先查这个。
 - **产物与装机**：Ad Hoc 走 `dev-r<序号>` Release（含 `.ipa` + OTA `manifest.plist`），run summary 给出 `itms-services://` 链接，iPhone 用 **Safari** 打开即装（微信/QQ 内置浏览器不支持）；TestFlight 走 ASC 上传，构建 Processing 5–30 分钟后可分发给测试员。
 - **`CFBundleVersion` 由 `app.config.js` 注入**（`IOS_BUILD_NUMBER` ← `github.run_number`），因为 ASC 要求每次上传的 build number 严格递增。改 `app.json` 的 `ios.*` 时别绕过这层包装。
 
