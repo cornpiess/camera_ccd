@@ -649,6 +649,7 @@ function CameraAppScreen(): React.JSX.Element {
               isVariableAperture={supportsVariableAperture}
               availableApertures={availableApertures}
               activeAperture={activeAperture}
+              starZone={activeProfile?.aperture?.starZone}
             />
 
             {/* Bottom Actions Row: Recent Thumbnail & Shutter Button */}

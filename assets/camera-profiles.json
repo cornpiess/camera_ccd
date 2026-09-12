@@ -5,7 +5,8 @@
       "id": "canon_g7x_ii",
       "name": "Canon G7X II",
       "aperture": {
-        "preferred": 1.8
+        "preferred": 1.8,
+        "starZone": 4
       },
       "ui": {
         "shortName": "G7X II",
@@ -44,7 +45,8 @@
             1,
             0.99
           ]
-        ]
+        ],
+        "exposureBias": 0
       },
       "color": {
         "saturation": 1.08,
@@ -86,7 +88,8 @@
             "saturation": 1.04,
             "luminance": 1.01
           }
-        }
+        },
+        "lut": null
       },
       "texture": {
         "grain": {
@@ -107,7 +110,8 @@
       "id": "ricoh_positive",
       "name": "Ricoh Positive",
       "aperture": {
-        "preferred": 2.8
+        "preferred": 2.8,
+        "starZone": 4
       },
       "ui": {
         "shortName": "Positive",
@@ -146,7 +150,8 @@
             1,
             0.985
           ]
-        ]
+        ],
+        "exposureBias": 0
       },
       "color": {
         "saturation": 1.16,
@@ -188,7 +193,8 @@
             "saturation": 1.07,
             "luminance": 0.99
           }
-        }
+        },
+        "lut": null
       },
       "texture": {
         "grain": {
@@ -209,7 +215,8 @@
       "id": "ricoh_negative",
       "name": "Ricoh Negative",
       "aperture": {
-        "preferred": 2.8
+        "preferred": 2.8,
+        "starZone": 4
       },
       "ui": {
         "shortName": "Negative",
@@ -248,7 +255,8 @@
             1,
             0.965
           ]
-        ]
+        ],
+        "exposureBias": 0
       },
       "color": {
         "saturation": 0.94,
@@ -290,7 +298,8 @@
             "saturation": 0.93,
             "luminance": 1.03
           }
-        }
+        },
+        "lut": null
       },
       "texture": {
         "grain": {
@@ -311,7 +320,8 @@
       "id": "leica_m9",
       "name": "Leica M9",
       "aperture": {
-        "preferred": 2
+        "preferred": 2,
+        "starZone": 4
       },
       "ui": {
         "shortName": "M9",
@@ -350,7 +360,8 @@
             1,
             0.992
           ]
-        ]
+        ],
+        "exposureBias": 0
       },
       "color": {
         "saturation": 1.05,
@@ -392,7 +403,8 @@
             "saturation": 1.08,
             "luminance": 0.98
           }
-        }
+        },
+        "lut": null
       },
       "texture": {
         "grain": {
@@ -413,7 +425,8 @@
       "id": "fuji_classic_chrome",
       "name": "Fuji Classic Chrome",
       "aperture": {
-        "preferred": 2.8
+        "preferred": 2.8,
+        "starZone": 4
       },
       "ui": {
         "shortName": "Classic Chrome",
@@ -452,7 +465,8 @@
             1,
             0.97
           ]
-        ]
+        ],
+        "exposureBias": 0
       },
       "color": {
         "saturation": 0.86,
@@ -494,7 +508,8 @@
             "saturation": 0.91,
             "luminance": 1.01
           }
-        }
+        },
+        "lut": null
       },
       "texture": {
         "grain": {
@@ -515,7 +530,8 @@
       "id": "fuji_classic_negative",
       "name": "Fuji Classic Negative",
       "aperture": {
-        "preferred": 2.8
+        "preferred": 2.8,
+        "starZone": 4
       },
       "ui": {
         "shortName": "Classic Neg",
@@ -554,7 +570,8 @@
             1,
             0.975
           ]
-        ]
+        ],
+        "exposureBias": 0
       },
       "color": {
         "saturation": 0.97,
@@ -596,7 +613,8 @@
             "saturation": 0.96,
             "luminance": 0.98
           }
-        }
+        },
+        "lut": null
       },
       "texture": {
         "grain": {
@@ -617,7 +635,8 @@
       "id": "hasselblad_natural",
       "name": "Hasselblad Natural",
       "aperture": {
-        "preferred": 2.8
+        "preferred": 2.8,
+        "starZone": 4
       },
       "ui": {
         "shortName": "Natural",
@@ -656,7 +675,8 @@
             1,
             0.99
           ]
-        ]
+        ],
+        "exposureBias": 0
       },
       "color": {
         "saturation": 1.02,
@@ -698,7 +718,8 @@
             "saturation": 1.02,
             "luminance": 1.03
           }
-        }
+        },
+        "lut": null
       },
       "texture": {
         "grain": {
@@ -719,7 +740,8 @@
       "id": "cinestill_800t",
       "name": "CineStill 800T",
       "aperture": {
-        "preferred": 1.48
+        "preferred": 1.48,
+        "starZone": 2.8
       },
       "ui": {
         "shortName": "800T",
@@ -758,7 +780,8 @@
             1,
             0.98
           ]
-        ]
+        ],
+        "exposureBias": 0
       },
       "color": {
         "saturation": 1.12,
@@ -800,7 +823,8 @@
             "saturation": 1.16,
             "luminance": 0.98
           }
-        }
+        },
+        "lut": null
       },
       "texture": {
         "grain": {

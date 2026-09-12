@@ -14,6 +14,8 @@ export interface ApertureControlProps {
   isVariableAperture: boolean;
   availableApertures?: readonly number[];
   activeAperture?: number;
+  /** f-number from the active profile's JSON above which real starburst is more likely (✦ hint). */
+  starZone?: number;
 }
 
 export const ApertureControl: React.FC<ApertureControlProps> = ({
@@ -22,6 +24,7 @@ export const ApertureControl: React.FC<ApertureControlProps> = ({
   isVariableAperture,
   availableApertures = [],
   activeAperture,
+  starZone,
 }: ApertureControlProps) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -79,16 +82,19 @@ export const ApertureControl: React.FC<ApertureControlProps> = ({
           >
             {availableApertures.map((val, index) => {
               const isSelected = Math.abs(val - currentAperture) < 0.05;
-              // Sorted ascending, so the last entry is the smallest aperture — the stop
-              // where a real optical starburst is most likely. ✦ is only a hint, never
-              // a software effect.
-              const isSmallestAperture = index === availableApertures.length - 1;
+              // ✦ marks stops where a REAL optical starburst is more likely. The threshold
+              // comes from the profile JSON (starZone); without it only the smallest
+              // available stop is marked. This is a hint, never a software effect.
+              const zone = typeof starZone === 'number' && Number.isFinite(starZone) ? starZone : null;
+              const isStarZone = zone !== null
+                ? val >= zone - 0.05
+                : index === availableApertures.length - 1;
               return (
                 <TouchableOpacity
                   key={val}
                   activeOpacity={0.7}
                   onPress={() => handleSelectAperture(val)}
-                  accessibilityLabel={`${isSmallestAperture ? 'Starburst more likely. ' : ''}Aperture ${formatAperture(val)}`}
+                  accessibilityLabel={`${isStarZone ? 'Starburst more likely. ' : ''}Aperture ${formatAperture(val)}`}
                   style={[styles.dialItem, isSelected && styles.dialItemSelected]}
                 >
                   <View
@@ -103,7 +109,7 @@ export const ApertureControl: React.FC<ApertureControlProps> = ({
                       isSelected && styles.dialItemTextSelected,
                     ]}
                   >
-                    {isSmallestAperture ? '✦ ' : ''}{formatAperture(val)}
+                    {isStarZone ? '✦ ' : ''}{formatAperture(val)}
                   </Text>
                 </TouchableOpacity>
               );
