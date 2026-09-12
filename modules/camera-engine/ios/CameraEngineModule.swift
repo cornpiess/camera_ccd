@@ -494,7 +494,7 @@ public final class CameraEngineView: ExpoView {
       // Landscape-held captures must stay landscape in the photo library: rotate the capture
       // connection to the physical device orientation so buffers arrive already upright and
       // the saved JPEG needs no EXIF rotation fix-up.
-      if let videoConnection = output.connection(with: .video) {
+      if let videoConnection = self.output.connection(with: .video) {
         if let orientation = CameraEngineView.currentDeviceOrientation() {
           videoConnection.videoOrientation = orientation
         }
@@ -673,7 +673,7 @@ public final class CameraEngineView: ExpoView {
 /// AVCaptureVideoDataOutput → CIImage → CameraDNARenderer(.preview) → MTKView.
 /// One shared renderer with the capture path; no React Native–side per-frame work.
 extension CameraEngineView: AVCaptureVideoDataOutputSampleBufferDelegate {
-  func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+  public func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
     guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
     var image = CIImage(cvPixelBuffer: pixelBuffer)
     let profile = profileSnapshot()
@@ -698,9 +698,18 @@ extension CameraEngineView: AVCaptureVideoDataOutputSampleBufferDelegate {
 // MARK: - WYSIWYG Preview Display (MTKView, no custom Metal shader)
 /// Core Image renders the latest filtered frame straight into the drawable texture.
 private final class PreviewRenderer: NSObject, MTKViewDelegate {
+  // MTKView does not expose a command queue; the renderer owns one on the shared device.
+  // Optional only because the property initializes before the Metal-availability check —
+  // draw() is reached solely through the MTKView path, which implies a device exists.
+  private let commandQueue: MTLCommandQueue?
   private let lock = NSLock()
   private var pendingImage: CIImage?
   private var currentExtentStorage = CGRect.zero
+
+  override init() {
+    self.commandQueue = CameraEngineGPU.metalDevice?.makeCommandQueue()
+    super.init()
+  }
 
   /// Extent of the most recently enqueued frame (letterbox mapping input).
   var currentExtent: CGRect {
@@ -725,7 +734,7 @@ private final class PreviewRenderer: NSObject, MTKViewDelegate {
 
     guard let image = image,
           let drawable = view.currentDrawable,
-          let commandBuffer = view.commandQueue?.makeCommandBuffer() else { return }
+          let commandBuffer = commandQueue?.makeCommandBuffer() else { return }
 
     let drawableSize = view.drawableSize
     guard drawableSize.width > 1, drawableSize.height > 1 else { return }
