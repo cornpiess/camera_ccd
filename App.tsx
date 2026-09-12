@@ -730,7 +730,7 @@ function CameraAppScreen(): React.JSX.Element {
                 ? 'Camera access is currently disabled. Enable it in Settings — the camera is only used for the viewfinder and photos.'
                 : 'Camera 18 simulates classic film cameras. The camera is used for the live viewfinder; photos are saved with add-only photo access.'
             }
-            primaryLabel={denied ? 'Open Settings' : 'Enable Camera'}
+            primaryLabel={denied ? 'Open Settings' : 'Continue'}
             onRequestPermission={
               denied
                 ? () => {

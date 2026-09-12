@@ -12,7 +12,7 @@ import * as Haptics from 'expo-haptics';
 interface PermissionRequestViewProps {
   onRequestPermission: () => void;
   statusMessage?: string;
-  /** Label of the primary action button (defaults to "Enable Camera"). */
+  /** Label of the primary action button (defaults to the neutral "Continue"). */
   primaryLabel?: string;
   /** Optional secondary action (e.g. "Open Settings" / "Retry") shown under the primary button. */
   secondaryLabel?: string;
@@ -22,7 +22,9 @@ interface PermissionRequestViewProps {
 export const PermissionRequestView: React.FC<PermissionRequestViewProps> = ({
   onRequestPermission,
   statusMessage = 'Camera 18 simulates classic film cameras. It needs the camera for the viewfinder and photo access (add-only) to save your shots.',
-  primaryLabel = 'Enable Camera',
+  // Neutral CTA label: App Store review rejects copy that steers users into enabling
+  // permissions ("Enable Camera" was rejected once) — keep it neutral ("Continue").
+  primaryLabel = 'Continue',
   secondaryLabel,
   onSecondary,
 }: PermissionRequestViewProps) => {
