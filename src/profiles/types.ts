@@ -9,7 +9,19 @@ export interface ApertureSettings {
    */
   readonly starZone?: number;
 }
-export interface ProfileUi { readonly shortName: string; readonly accent: string; readonly dialStyle: string }
+export interface ProfileUi {
+  readonly shortName: string;
+  /** Light accent color (≈5% of the visual budget); never a brand color, never large fills. */
+  readonly accent: string;
+  readonly dialStyle: string;
+  /** Personality keyword for micro-motion / copy tone. Appearance-only, never interaction. */
+  readonly personality?: string;
+  readonly labelStyle?: string;
+  /** Abstract selection marker glyph: dot | line | diamond | ring. */
+  readonly markerStyle?: string;
+  /** 0..1 — how strongly the accent may tint the glass around this camera. Default 0.06. */
+  readonly glassTintStrength?: number;
+}
 export interface RawAdjustments {
   readonly sharpness: number;
   readonly detail: number;
@@ -46,7 +58,14 @@ export interface TextureSettings {
 }
 export interface CameraProfile {
   readonly id: string;
+  /** User-visible production name. Describes the photographic feel, never a third-party brand. */
   readonly name: string;
+  readonly displayName?: string;
+  /**
+   * Development-only calibration metadata (e.g. the real target camera). The validator strips
+   * this at runtime, so it can never reach production state or the UI.
+   */
+  readonly developmentReference?: { readonly target?: string; readonly note?: string };
   readonly aperture: ApertureSettings;
   readonly ui: ProfileUi;
   readonly raw: RawAdjustments;

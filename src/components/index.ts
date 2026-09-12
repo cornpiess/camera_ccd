@@ -1,4 +1,5 @@
 export * from './types';
+export * from './GlassCard';
 export * from './RadialProfileSelector';
 export * from './ProfileOverlay';
 export * from './ApertureControl';

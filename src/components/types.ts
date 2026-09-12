@@ -26,3 +26,23 @@ export interface CameraInfo {
   position: 'back';
 }
 
+
+/**
+ * Abstract selection-marker glyphs (GOAL: no real-camera product imagery, no logos —
+ * each camera item is an abstract shape + its own name).
+ */
+export const MARKER_GLYPHS: Record<string, string> = {
+  dot: '●',
+  line: '▬',
+  diamond: '◇',
+  ring: '○',
+};
+
+export function markerGlyph(style?: string): string {
+  return (style && MARKER_GLYPHS[style]) || '●';
+}
+
+/** Production display name of a profile (displayName falls back to name). */
+export function profileDisplayName(profile: { readonly displayName?: string; readonly name: string }): string {
+  return profile.displayName ?? profile.name;
+}

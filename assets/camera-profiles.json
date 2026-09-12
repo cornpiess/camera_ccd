@@ -2,16 +2,20 @@
   "schemaVersion": 1,
   "profiles": [
     {
-      "id": "canon_g7x_ii",
-      "name": "Canon G7X II",
+      "id": "warm_portrait",
+      "name": "Warm Portrait",
       "aperture": {
         "preferred": 1.8,
         "starZone": 4
       },
       "ui": {
-        "shortName": "G7X II",
-        "accent": "#C83432",
-        "dialStyle": "compact"
+        "shortName": "Warm",
+        "accent": "#D9B98A",
+        "dialStyle": "compact",
+        "personality": "soft",
+        "markerStyle": "dot",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
       },
       "raw": {
         "sharpness": 0.58,
@@ -104,19 +108,27 @@
           "amount": 0.02,
           "radius": 0.18
         }
+      },
+      "displayName": "Warm Portrait",
+      "developmentReference": {
+        "target": "Canon G7 X II"
       }
     },
     {
-      "id": "ricoh_positive",
-      "name": "Ricoh Positive",
+      "id": "street_positive",
+      "name": "Street Positive",
       "aperture": {
         "preferred": 2.8,
         "starZone": 4
       },
       "ui": {
         "shortName": "Positive",
-        "accent": "#D5A03A",
-        "dialStyle": "snap"
+        "accent": "#C7A163",
+        "dialStyle": "snap",
+        "personality": "crisp",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
       },
       "raw": {
         "sharpness": 0.66,
@@ -209,19 +221,27 @@
           "amount": 0.03,
           "radius": 0.2
         }
+      },
+      "displayName": "Street Positive",
+      "developmentReference": {
+        "target": "Ricoh Positive"
       }
     },
     {
-      "id": "ricoh_negative",
-      "name": "Ricoh Negative",
+      "id": "street_negative",
+      "name": "Street Negative",
       "aperture": {
         "preferred": 2.8,
         "starZone": 4
       },
       "ui": {
         "shortName": "Negative",
-        "accent": "#748A69",
-        "dialStyle": "snap"
+        "accent": "#7FA0A6",
+        "dialStyle": "snap",
+        "personality": "cool",
+        "markerStyle": "diamond",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
       },
       "raw": {
         "sharpness": 0.6,
@@ -314,19 +334,27 @@
           "amount": 0.04,
           "radius": 0.25
         }
+      },
+      "displayName": "Street Negative",
+      "developmentReference": {
+        "target": "Ricoh Negative"
       }
     },
     {
-      "id": "leica_m9",
-      "name": "Leica M9",
+      "id": "ccd_classic",
+      "name": "CCD Classic",
       "aperture": {
         "preferred": 2,
         "starZone": 4
       },
       "ui": {
-        "shortName": "M9",
-        "accent": "#A51E25",
-        "dialStyle": "engraved"
+        "shortName": "CCD",
+        "accent": "#A6ABB0",
+        "dialStyle": "engraved",
+        "personality": "classic",
+        "markerStyle": "ring",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
       },
       "raw": {
         "sharpness": 0.72,
@@ -419,19 +447,27 @@
           "amount": 0.025,
           "radius": 0.2
         }
+      },
+      "displayName": "CCD Classic",
+      "developmentReference": {
+        "target": "Leica M9"
       }
     },
     {
-      "id": "fuji_classic_chrome",
-      "name": "Fuji Classic Chrome",
+      "id": "muted_chrome",
+      "name": "Muted Chrome",
       "aperture": {
         "preferred": 2.8,
         "starZone": 4
       },
       "ui": {
-        "shortName": "Classic Chrome",
-        "accent": "#58717A",
-        "dialStyle": "knurled"
+        "shortName": "Chrome",
+        "accent": "#8C979C",
+        "dialStyle": "knurled",
+        "personality": "restrained",
+        "markerStyle": "dot",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
       },
       "raw": {
         "sharpness": 0.55,
@@ -524,19 +560,27 @@
           "amount": 0.025,
           "radius": 0.22
         }
+      },
+      "displayName": "Muted Chrome",
+      "developmentReference": {
+        "target": "Fuji Classic Chrome"
       }
     },
     {
-      "id": "fuji_classic_negative",
-      "name": "Fuji Classic Negative",
+      "id": "retro_negative",
+      "name": "Retro Negative",
       "aperture": {
         "preferred": 2.8,
         "starZone": 4
       },
       "ui": {
-        "shortName": "Classic Neg",
-        "accent": "#9A6E52",
-        "dialStyle": "knurled"
+        "shortName": "Retro",
+        "accent": "#97A06A",
+        "dialStyle": "knurled",
+        "personality": "nostalgic",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
       },
       "raw": {
         "sharpness": 0.57,
@@ -629,19 +673,27 @@
           "amount": 0.05,
           "radius": 0.28
         }
+      },
+      "displayName": "Retro Negative",
+      "developmentReference": {
+        "target": "Fuji Classic Negative"
       }
     },
     {
-      "id": "hasselblad_natural",
-      "name": "Hasselblad Natural",
+      "id": "natural_tone",
+      "name": "Natural Tone",
       "aperture": {
         "preferred": 2.8,
         "starZone": 4
       },
       "ui": {
         "shortName": "Natural",
-        "accent": "#C5A86B",
-        "dialStyle": "medium-format"
+        "accent": "#CBBFA8",
+        "dialStyle": "medium-format",
+        "personality": "clean",
+        "markerStyle": "diamond",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
       },
       "raw": {
         "sharpness": 0.63,
@@ -734,19 +786,27 @@
           "amount": 0.015,
           "radius": 0.16
         }
+      },
+      "displayName": "Natural Tone",
+      "developmentReference": {
+        "target": "Hasselblad Natural"
       }
     },
     {
-      "id": "cinestill_800t",
-      "name": "CineStill 800T",
+      "id": "tungsten_800",
+      "name": "Tungsten 800",
       "aperture": {
         "preferred": 1.48,
         "starZone": 2.8
       },
       "ui": {
         "shortName": "800T",
-        "accent": "#E5533D",
-        "dialStyle": "cinema"
+        "accent": "#B49BC8",
+        "dialStyle": "cinema",
+        "personality": "cinematic",
+        "markerStyle": "ring",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
       },
       "raw": {
         "sharpness": 0.42,
@@ -839,6 +899,10 @@
           "amount": 0.42,
           "radius": 0.58
         }
+      },
+      "displayName": "Tungsten 800",
+      "developmentReference": {
+        "target": "CineStill 800T"
       }
     }
   ]

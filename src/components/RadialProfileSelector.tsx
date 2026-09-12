@@ -9,6 +9,8 @@ import {
 import * as Haptics from 'expo-haptics';
 import type { CameraProfile } from '../profiles/types';
 import type { Point } from './types';
+import { profileDisplayName } from './types';
+import { GlassCard } from './GlassCard';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -222,7 +224,8 @@ export const RadialProfileSelector: React.FC<RadialProfileSelectorProps> = ({
             const isHighlighted = highlightedIndex === i;
             const isCurrentlyActive = profile.id === activeProfileId;
             const accent = profile.ui?.accent || '#FFFFFF';
-            const shortName = profile.ui?.shortName || profile.name.slice(0, 4).toUpperCase();
+            const shortName = profile.ui?.shortName || profileDisplayName(profile).slice(0, 4).toUpperCase();
+            const displayNameLabel = profileDisplayName(profile);
 
             return (
               <View
@@ -238,26 +241,28 @@ export const RadialProfileSelector: React.FC<RadialProfileSelectorProps> = ({
                   },
                 ]}
               >
-                <View
-                  style={[
-                    styles.nodeDisc,
-                    isCurrentlyActive && styles.nodeDiscActiveBorder,
-                    isHighlighted && [
-                      styles.nodeDiscHighlighted,
-                      { borderColor: accent },
-                    ],
-                  ]}
+                <GlassCard
+                  borderRadius={ITEM_SIZE / 2}
+                  style={styles.nodeGlass}
                 >
-                  <Text
+                  <View
                     style={[
-                      styles.nodeShortText,
-                      isHighlighted && styles.nodeShortTextHighlighted,
-                      { color: isHighlighted ? accent : '#E0E0E0' },
+                      styles.nodeInner,
+                      isCurrentlyActive && styles.nodeInnerActiveBorder,
+                      isHighlighted && styles.nodeInnerHighlighted,
                     ]}
                   >
-                    {shortName}
-                  </Text>
-                </View>
+                    <Text
+                      style={[
+                        styles.nodeShortText,
+                        isHighlighted && styles.nodeShortTextHighlighted,
+                        { color: isHighlighted ? accent : '#E0E0E0' },
+                      ]}
+                    >
+                      {shortName}
+                    </Text>
+                  </View>
+                </GlassCard>
 
                 {/* Profile label */}
                 <Text
@@ -267,7 +272,7 @@ export const RadialProfileSelector: React.FC<RadialProfileSelectorProps> = ({
                     isHighlighted && styles.nodeLabelHighlighted,
                   ]}
                 >
-                  {profile.name}
+                  {displayNameLabel}
                 </Text>
               </View>
             );
@@ -281,7 +286,7 @@ export const RadialProfileSelector: React.FC<RadialProfileSelectorProps> = ({
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    backgroundColor: 'rgba(0, 0, 0, 0.22)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -307,7 +312,7 @@ const styles = StyleSheet.create({
     width: CENTER_CANCEL_RADIUS * 2,
     height: CENTER_CANCEL_RADIUS * 2,
     borderRadius: CENTER_CANCEL_RADIUS,
-    backgroundColor: 'rgba(20, 20, 20, 0.85)',
+    backgroundColor: 'rgba(20, 20, 20, 0.55)',
     borderWidth: 1.5,
     borderColor: 'rgba(255, 255, 255, 0.3)',
     justifyContent: 'center',
@@ -342,31 +347,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  nodeDisc: {
+  nodeGlass: {
     width: ITEM_SIZE,
     height: ITEM_SIZE,
-    borderRadius: ITEM_SIZE / 2,
-    backgroundColor: 'rgba(25, 25, 28, 0.88)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
-    alignItems: 'center',
-    justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 5,
     elevation: 4,
   },
-  nodeDiscActiveBorder: {
+  nodeInner: {
+    flex: 1,
+    borderRadius: ITEM_SIZE / 2,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nodeInnerActiveBorder: {
     borderColor: '#007AFF',
     borderWidth: 2,
   },
-  nodeDiscHighlighted: {
-    backgroundColor: 'rgba(40, 40, 45, 0.98)',
+  nodeInnerHighlighted: {
     borderWidth: 2.5,
-    shadowOpacity: 0.6,
-    shadowRadius: 10,
-    elevation: 8,
   },
   nodeShortText: {
     fontSize: 13,

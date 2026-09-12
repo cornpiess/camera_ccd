@@ -8,6 +8,7 @@ import {
   PanResponder,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { GlassCard } from './GlassCard';
 
 export interface ApertureControlProps {
   currentAperture: number;
@@ -91,11 +92,13 @@ export const ApertureControl: React.FC<ApertureControlProps> = ({
     const displayVal = activeAperture ?? 1.8;
     return (
       <View style={styles.container} pointerEvents="none">
-        <View style={styles.fixedBadge}>
-          <Text style={styles.fixedApertureText}>
-            Fixed {formatAperture(displayVal)}
-          </Text>
-        </View>
+        <GlassCard borderRadius={16}>
+          <View style={styles.fixedBadgeInner}>
+            <Text style={styles.fixedApertureText}>
+              Fixed {formatAperture(displayVal)}
+            </Text>
+          </View>
+        </GlassCard>
       </View>
     );
   }
@@ -112,12 +115,13 @@ export const ApertureControl: React.FC<ApertureControlProps> = ({
     <View style={styles.container}>
       {/* Expanded Variable Dial */}
       {isExpanded ? (
-        <View style={styles.expandedDialContainer}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.scrollContent}
-          >
+        <GlassCard borderRadius={24} isInteractive style={styles.expandedDialOuter}>
+          <View style={styles.expandedDialInner}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.scrollContent}
+            >
             {availableApertures.map((val, index) => {
               const isSelected = Math.abs(val - currentAperture) < 0.05;
               // ✦ marks stops where a REAL optical starburst is more likely. The threshold
@@ -162,26 +166,29 @@ export const ApertureControl: React.FC<ApertureControlProps> = ({
           >
             <Text style={styles.collapseButtonText}>DONE</Text>
           </TouchableOpacity>
-        </View>
+          </View>
+        </GlassCard>
       ) : (
         /* Collapsed Aperture Badge (swipe to adjust; tap to expand the precise dial) */
         <View {...swipePanResponder.panHandlers}>
-          <TouchableOpacity
-            activeOpacity={0.75}
-            onPress={toggleExpanded}
-            style={styles.variableBadge}
-          >
-            <Text style={styles.variableApertureSymbol}>ƒ</Text>
-            {isInStarZone ? <Text style={styles.starZoneGlyph}>✦</Text> : null}
-            <Text style={styles.variableApertureValue}>
-              {formatAperture(currentAperture).replace('ƒ/', '')}
-            </Text>
-            <View style={styles.variableDialHint}>
-              <View style={styles.miniTick} />
-              <View style={[styles.miniTick, styles.miniTickCenter]} />
-              <View style={styles.miniTick} />
-            </View>
-          </TouchableOpacity>
+          <GlassCard borderRadius={18} isInteractive>
+            <TouchableOpacity
+              activeOpacity={0.75}
+              onPress={toggleExpanded}
+              style={styles.variableBadgeInner}
+            >
+              <Text style={styles.variableApertureSymbol}>ƒ</Text>
+              {isInStarZone ? <Text style={styles.starZoneGlyph}>✦</Text> : null}
+              <Text style={styles.variableApertureValue}>
+                {formatAperture(currentAperture).replace('ƒ/', '')}
+              </Text>
+              <View style={styles.variableDialHint}>
+                <View style={styles.miniTick} />
+                <View style={[styles.miniTick, styles.miniTickCenter]} />
+                <View style={styles.miniTick} />
+              </View>
+            </TouchableOpacity>
+          </GlassCard>
         </View>
       )}
     </View>
@@ -194,15 +201,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginVertical: 4,
   },
-  fixedBadge: {
+  fixedBadgeInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(25, 25, 28, 0.75)',
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    paddingVertical: 7,
   },
   fixedApertureText: {
     color: '#E6E6E6',
@@ -223,19 +226,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.6,
   },
-  variableBadge: {
+  variableBadgeInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(28, 28, 32, 0.85)',
     paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
+    paddingVertical: 8,
   },
   variableApertureSymbol: {
     color: '#FFCC00',
@@ -272,16 +267,14 @@ const styles = StyleSheet.create({
     height: 10,
     backgroundColor: '#FFCC00',
   },
-  expandedDialContainer: {
+  expandedDialOuter: {
+    maxWidth: '92%',
+  },
+  expandedDialInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(18, 18, 22, 0.92)',
-    borderRadius: 24,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-    maxWidth: '92%',
   },
   scrollContent: {
     alignItems: 'center',

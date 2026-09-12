@@ -2,6 +2,8 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import type { CameraProfile } from '../profiles/types';
+import { markerGlyph, profileDisplayName } from './types';
+import { GlassCard } from './GlassCard';
 
 export interface CameraSelectorProps {
   readonly visible: boolean;
@@ -13,8 +15,8 @@ export interface CameraSelectorProps {
 
 /**
  * The formal Camera Selection entry point (the radial ring is only a shortcut for
- * expert users): a minimal drop-down list under the top camera badge. Tap a camera
- * to switch, tap the backdrop to dismiss.
+ * expert users): a Liquid Glass strip under the top camera badge. Each item is an
+ * abstract marker glyph + its own production name — no real-camera imagery, no logos.
  */
 export const CameraSelector: React.FC<CameraSelectorProps> = ({
   visible,
@@ -53,30 +55,39 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
         style={styles.backdrop}
         onPress={onClose}
       />
-      <Animated.View style={[styles.panel, { opacity, transform: [{ translateY }] }]}>
-        {profiles.slice(0, 8).map((profile) => {
-          const isActive = profile.id === activeProfileId;
-          const accent = profile.ui?.accent || '#FFFFFF';
-          const shortName = profile.ui?.shortName || profile.name.slice(0, 4).toUpperCase();
-          return (
-            <Pressable
-              key={profile.id}
-              accessibilityRole="button"
-              accessibilityState={{ selected: isActive }}
-              onPress={() => handleSelect(profile)}
-              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-            >
-              <View style={[styles.accentDot, { backgroundColor: accent }]} />
-              <Text style={[styles.rowName, isActive && styles.rowNameActive]} numberOfLines={1}>
-                {profile.name}
-              </Text>
-              <Text style={[styles.rowShort, isActive && { color: accent }]} numberOfLines={1}>
-                {shortName}
-              </Text>
-              {isActive ? <Text style={styles.check}>✓</Text> : null}
-            </Pressable>
-          );
-        })}
+      <Animated.View style={[styles.panelPosition, { opacity, transform: [{ translateY }] }]}>
+        <GlassCard borderRadius={20} isInteractive style={styles.panel}>
+          {profiles.slice(0, 8).map((profile) => {
+            const isActive = profile.id === activeProfileId;
+            const accent = profile.ui?.accent || '#FFFFFF';
+            const displayName = profileDisplayName(profile);
+            return (
+              <Pressable
+                key={profile.id}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isActive }}
+                accessibilityLabel={`${displayName}${isActive ? ', selected' : ''}`}
+                onPress={() => handleSelect(profile)}
+                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              >
+                <Text
+                  style={[
+                    styles.rowGlyph,
+                    { color: isActive ? accent : 'rgba(255, 255, 255, 0.55)' },
+                  ]}
+                >
+                  {markerGlyph(profile.ui?.markerStyle)}
+                </Text>
+                <Text style={[styles.rowName, isActive && styles.rowNameActive]} numberOfLines={1}>
+                  {displayName}
+                </Text>
+                {isActive ? (
+                  <View style={[styles.activeDot, { backgroundColor: accent }]} />
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </GlassCard>
       </Animated.View>
     </View>
   );
@@ -88,39 +99,34 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
   },
-  panel: {
+  panelPosition: {
     position: 'absolute',
-    top: 96,
+    top: 92,
     alignSelf: 'center',
     width: '72%',
     maxWidth: 320,
-    borderRadius: 18,
-    backgroundColor: 'rgba(18, 18, 22, 0.97)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    height: 448,
+  },
+  panel: {
+    flex: 1,
     paddingVertical: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.45,
-    shadowRadius: 16,
-    elevation: 12,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 13,
+    flex: 1,
     paddingHorizontal: 18,
-    gap: 10,
+    gap: 12,
   },
   rowPressed: {
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
-  accentDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  rowGlyph: {
+    fontSize: 11,
+    width: 16,
+    textAlign: 'center',
   },
   rowName: {
     flex: 1,
@@ -131,19 +137,9 @@ const styles = StyleSheet.create({
   rowNameActive: {
     fontWeight: '800',
   },
-  rowShort: {
-    color: 'rgba(255, 255, 255, 0.45)',
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.4,
-    maxWidth: 90,
-    textAlign: 'right',
-  },
-  check: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
-    width: 16,
-    textAlign: 'center',
+  activeDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
   },
 });

@@ -9,11 +9,16 @@ import {
   StatusBar,
 } from 'react-native';
 import type { CameraInfo } from './types';
+import { markerGlyph } from './types';
+import { GlassCard } from './GlassCard';
 
 export interface TopBarProps {
   readonly profileName?: string;
   readonly cameraInfo?: CameraInfo;
   readonly cameraName?: string;
+  /** Abstract selection marker + light accent of the current profile (small dot only, GOAL 3). */
+  readonly marker?: string;
+  readonly accent?: string;
   /** When provided, the camera badge becomes the formal Camera Selection entry point. */
   readonly onPress?: () => void;
 }
@@ -22,6 +27,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   profileName,
   cameraInfo,
   cameraName,
+  marker,
+  accent,
   onPress,
 }: TopBarProps) => {
   const displayName = profileName ?? cameraName ?? cameraInfo?.name ?? '';
@@ -38,12 +45,19 @@ export const TopBar: React.FC<TopBarProps> = ({
           activeOpacity={0.75}
           disabled={!onPress}
           onPress={onPress}
-          style={styles.cameraNameBadge}
+          style={styles.badgeWrapper}
         >
-          <Text style={styles.cameraNameTitle} numberOfLines={1}>
-            {displayName.toUpperCase()}
-          </Text>
-          {onPress ? <Text style={styles.chevron}>⌄</Text> : null}
+          <GlassCard borderRadius={16} style={styles.badgeGlass}>
+            <View style={styles.badgeInner}>
+              {accent ? (
+                <Text style={[styles.markerGlyph, { color: accent }]}>{markerGlyph(marker)}</Text>
+              ) : null}
+              <Text style={styles.cameraNameTitle} numberOfLines={1}>
+                {displayName.toUpperCase()}
+              </Text>
+              {onPress ? <Text style={styles.chevron}>⌄</Text> : null}
+            </View>
+          </GlassCard>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -53,7 +67,7 @@ export const TopBar: React.FC<TopBarProps> = ({
 const styles = StyleSheet.create({
   safeArea: {
     backgroundColor: 'transparent',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    paddingTop: Platform.OS === 'ios' ? 0 : StatusBar.currentHeight ?? 0,
     zIndex: 10,
   },
   container: {
@@ -64,16 +78,23 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     height: 52,
   },
-  cameraNameBadge: {
+  badgeWrapper: {
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  badgeGlass: {
+    minHeight: 36,
+  },
+  badgeInner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(20, 20, 24, 0.65)',
     paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    paddingVertical: 8,
+  },
+  markerGlyph: {
+    fontSize: 9,
+    marginRight: 7,
   },
   cameraNameTitle: {
     color: '#FFFFFF',

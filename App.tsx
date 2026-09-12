@@ -170,6 +170,23 @@ function CameraAppScreen(): React.JSX.Element {
   const [isSelectorOpen, setIsSelectorOpen] = useState<boolean>(false);
   const [focusIndicator, setFocusIndicator] = useState<FocusPoint | null>(null);
 
+  // GOAL 19: on camera switch the preview overlay fades in softly instead of
+  // flashing; controls stay stable and the aperture marker glides to the new
+  // preferredAperture (handled by the profile-apply effect below).
+  const overlayOpacity = useRef(new Animated.Value(1)).current;
+  const overlayProfileIdRef = useRef<string | null | undefined>(activeProfile?.id);
+  useEffect(() => {
+    if (overlayProfileIdRef.current !== activeProfile?.id) {
+      overlayProfileIdRef.current = activeProfile?.id;
+      overlayOpacity.setValue(0.35);
+      Animated.timing(overlayOpacity, {
+        toValue: 1,
+        duration: 260,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [activeProfile?.id, overlayOpacity]);
+
   // -------------------------------------------------------------
   // 5. Radial Profile Selector State (Long-press on empty preview)
   // -------------------------------------------------------------
@@ -608,8 +625,13 @@ function CameraAppScreen(): React.JSX.Element {
             </View>
           )}
 
-          {/* Lightweight JSON-derived preview overlay */}
-          <ProfileOverlay profile={activeProfile} />
+          {/* Lightweight JSON-derived preview overlay (soft crossfade on camera switch) */}
+          <Animated.View
+            style={[StyleSheet.absoluteFillObject, { opacity: overlayOpacity }]}
+            pointerEvents="none"
+          >
+            <ProfileOverlay profile={activeProfile} />
+          </Animated.View>
 
           {/* Tap-to-focus indicator (visual only) */}
           <FocusIndicator point={focusIndicator} />
@@ -623,7 +645,9 @@ function CameraAppScreen(): React.JSX.Element {
           {/* 2. Top Bar: current simulated camera name; tapping opens the formal Camera Selector */}
           <View style={styles.topControlsContainer} pointerEvents="box-none">
             <TopBar
-              profileName={activeProfile?.name}
+              profileName={activeProfile?.displayName ?? activeProfile?.name}
+              marker={activeProfile?.ui?.markerStyle}
+              accent={activeProfile?.ui?.accent}
               onPress={() => setIsSelectorOpen(true)}
             />
           </View>

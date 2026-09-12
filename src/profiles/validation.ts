@@ -19,12 +19,18 @@ const profile = (v: unknown, i: number, e: string[]): void => {
   const p = `profiles[${i}]`;
   if (!obj(v)) { e.push(`${p} must be an object`); return; }
   for (const k of ['id','name'] as const) if (typeof v[k] !== 'string' || v[k].trim() === '') e.push(`${p}.${k} must be a non-empty string`);
+  if (v.displayName !== undefined && (typeof v.displayName !== 'string' || v.displayName.trim() === '')) e.push(`${p}.displayName must be a non-empty string`);
+  if (v.developmentReference !== undefined && !obj(v.developmentReference)) e.push(`${p}.developmentReference must be an object`);
   if (nums(v.aperture, ['preferred'], `${p}.aperture`, e)) {
     if (typeof v.aperture.preferred === 'number' && v.aperture.preferred <= 0) e.push(`${p}.aperture.preferred must be greater than zero`);
     optNum(v.aperture, 'starZone', `${p}.aperture`, e, [1, 32]);
   }
   if (!obj(v.ui)) e.push(`${p}.ui must be an object`); else {
     for (const k of ['shortName','accent','dialStyle']) if (typeof v.ui[k] !== 'string' || v.ui[k] === '') e.push(`${p}.ui.${k} must be a non-empty string`);
+    for (const k of ['personality','labelStyle','markerStyle'] as const) {
+      if (v.ui[k] !== undefined && (typeof v.ui[k] !== 'string' || v.ui[k] === '')) e.push(`${p}.ui.${k} must be a non-empty string`);
+    }
+    optNum(v.ui, 'glassTintStrength', `${p}.ui`, e, [0, 1]);
   }
   nums(v.raw, ['sharpness','detail','localToneMap','luminanceNoiseReduction','colorNoiseReduction'], `${p}.raw`, e);
   if (!obj(v.tone)) e.push(`${p}.tone must be an object`); else {
@@ -71,7 +77,23 @@ export function validateProfileDocument(value: unknown): ProfileValidationResult
     const ids = value.profiles.filter(obj).map(v => v.id).filter((id): id is string => typeof id === 'string');
     ids.forEach((id,i) => { if (ids.indexOf(id) !== i) errors.push(`profiles contains duplicate id "${id}"`); });
   }
-  return errors.length ? { success: false, errors } : { success: true, document: value as unknown as ProfileDocument };
+  return errors.length ? { success: false, errors } : { success: true, document: stripDevelopmentMetadata(value) };
+}
+
+/**
+ * DEV/PROD separation: developmentReference never leaves the validator. Bundled and imported
+ * documents may carry it for calibration work, but the runtime state (and therefore the UI and
+ * any exported-from-memory JSON) only ever sees the production identity.
+ */
+function stripDevelopmentMetadata(value: Obj): ProfileDocument {
+  return {
+    ...value,
+    profiles: (value.profiles as unknown[]).map((entry) => {
+      if (!obj(entry) || entry.developmentReference === undefined) return entry;
+      const { developmentReference: _dev, ...rest } = entry;
+      return rest;
+    }),
+  } as unknown as ProfileDocument;
 }
 export function parseProfileDocument(text: string): ProfileValidationResult {
   try { return validateProfileDocument(JSON.parse(text) as unknown); }

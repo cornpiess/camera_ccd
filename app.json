@@ -1,10 +1,12 @@
 {
   "expo": {
-    "name": "Rainbow Camera",
+    "name": "Camera 18",
     "slug": "aperture-camera",
     "version": "1.0.0",
     "orientation": "portrait",
-    "platforms": ["ios"],
+    "platforms": [
+      "ios"
+    ],
     "userInterfaceStyle": "dark",
     "icon": "./assets/app_icon.png",
     "ios": {
@@ -12,13 +14,16 @@
       "bundleIdentifier": "com.cornpiess.camera18",
       "buildNumber": "1",
       "infoPlist": {
-        "CFBundleDisplayName": "彩虹相机",
+        "CFBundleDisplayName": "Camera 18",
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "彩虹相机需要使用相机来取景与拍照。",
         "NSPhotoLibraryAddUsageDescription": "彩虹相机需要把拍好的照片保存到你的相册。",
         "NSPhotoLibraryUsageDescription": "彩虹相机需要读取相册，用来显示你最近拍摄的照片。"
       }
     },
-    "plugins": ["expo-dev-client", "expo-document-picker"]
+    "plugins": [
+      "expo-dev-client",
+      "expo-document-picker"
+    ]
   }
 }

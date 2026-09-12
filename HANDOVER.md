@@ -104,6 +104,7 @@ camera/
         ├── ThreeFingerGestureDetector.tsx  # ★ 三指长按手势的唯一实现
         ├── RadialProfileSelector.tsx # 环形相机轮盘 + 几何工具 (getClampedCenter / computeRadialSector)
         ├── CameraSelector.tsx        # ★ 正式 Camera Selection 主入口 (点顶部相机徽章弹出列表)
+        ├── GlassCard.tsx             # ★ Liquid Glass 封装 (expo-glass-effect; 旧系统/Reduce Transparency 回退实底)
         ├── FocusIndicator.tsx        # ★ Tap-to-Focus 轻量对焦框 (纯视觉，AF/AE 在原生层完成)
         ├── ApertureControl.tsx       # 光圈调节器 (可变光圈可用；否则显示 Fixed ƒ/x 并锁定)
         ├── ShutterButton.tsx         # 物理风格两段式快门按钮
