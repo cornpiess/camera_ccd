@@ -20,7 +20,7 @@ export const ITEM_SIZE = 52;
 export const CENTER_CANCEL_RADIUS = 38;
 export const MENU_PADDING = 75;
 export const TOP_CONTROLS_SAFE = 80;
-export const BOTTOM_CONTROLS_SAFE = 150;
+export const BOTTOM_CONTROLS_SAFE = 260;
 /** Hard cap of nodes on the radial ring (geometry stays legible up to here). */
 export const MAX_RING_PROFILES = 12;
 

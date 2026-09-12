@@ -407,6 +407,13 @@ public final class CameraEngineView: ExpoView {
     interruptionObservers.append(center.addObserver(
       forName: .AVCaptureSessionRuntimeError, object: session, queue: nil
     ) { [weak self] _ in self?.resumeIfNeeded() })
+    // Foreground return self-heal: iOS stops the capture session while backgrounded and
+    // does not reliably post InterruptionEnded on the way back — without this observer
+    // the first foreground return could leave a black viewfinder until a second
+    // background/foreground cycle happened to restart the session from the JS side.
+    interruptionObservers.append(center.addObserver(
+      forName: UIApplication.willEnterForegroundNotification, object: nil, queue: nil
+    ) { [weak self] _ in self?.resumeIfNeeded() })
     // Physical rotation must follow through even though the UI is portrait-locked:
     // both the preview feed and the capture connection rotate with the device.
     UIDevice.current.beginGeneratingDeviceOrientationNotifications()
@@ -473,10 +480,23 @@ public final class CameraEngineView: ExpoView {
   }
 
   /// Keep preview + capture connections in step with the physical device orientation.
+  // Rotation debouncing: orientationDidChange fires in bursts while the device pivots.
+  // Re-orienting mid-burst reconfigures the connections several times per rotation and
+  // shows up as an occasional viewfinder stutter; settling 300ms keeps one clean switch.
+  private var lastOrientationSyncAt = TimeInterval(0)
+
   private func syncOutputOrientation() {
     sessionQueue.async { [self] in
       guard configured, session.isRunning else { return }
+      let now = CACurrentMediaTime()
+      guard now - lastOrientationSyncAt > 0.3 else { return }
+      // Only commit the timestamp when an actual re-orientation happened (setOrientation
+      // no-ops when the connection already matches), so unchanged states never throttle.
+      let before = videoOutput.connection(with: .video)?.videoOrientation
       CameraEngineView.setOrientation(on: videoOutput, photoOutput: output)
+      if videoOutput.connection(with: .video)?.videoOrientation != before {
+        lastOrientationSyncAt = now
+      }
     }
   }
 

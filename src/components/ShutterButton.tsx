@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import {
+  ActivityIndicator,
   TouchableOpacity,
   StyleSheet,
   Animated,
@@ -12,6 +13,12 @@ interface ShutterButtonProps {
   isCapturing?: boolean;
 }
 
+/**
+ * System-camera-style shutter: press = squeeze animation + heavy haptic; while the
+ * capture promise is in flight the inner core goes translucent with a thin spinner
+ * (never a stuck colored block — the shape stays a circle and springs back the moment
+ * the capture settles). Re-press is gated by isCapturing.
+ */
 export const ShutterButton: React.FC<ShutterButtonProps> = ({
   onPress,
   disabled = false,
@@ -23,41 +30,20 @@ export const ShutterButton: React.FC<ShutterButtonProps> = ({
   const handlePressIn = () => {
     if (disabled || isCapturing) return;
     Animated.parallel([
-      Animated.spring(scaleAnim, {
-        toValue: 0.92,
-        tension: 300,
-        friction: 20,
-        useNativeDriver: true,
-      }),
-      Animated.spring(innerScaleAnim, {
-        toValue: 0.88,
-        tension: 300,
-        friction: 20,
-        useNativeDriver: true,
-      }),
+      Animated.spring(scaleAnim, { toValue: 0.92, tension: 300, friction: 20, useNativeDriver: true }),
+      Animated.spring(innerScaleAnim, { toValue: 0.88, tension: 300, friction: 20, useNativeDriver: true }),
     ]).start();
   };
 
   const handlePressOut = () => {
     Animated.parallel([
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        tension: 300,
-        friction: 15,
-        useNativeDriver: true,
-      }),
-      Animated.spring(innerScaleAnim, {
-        toValue: 1,
-        tension: 300,
-        friction: 15,
-        useNativeDriver: true,
-      }),
+      Animated.spring(scaleAnim, { toValue: 1, tension: 300, friction: 15, useNativeDriver: true }),
+      Animated.spring(innerScaleAnim, { toValue: 1, tension: 300, friction: 15, useNativeDriver: true }),
     ]).start();
   };
 
   const handlePress = () => {
     if (disabled || isCapturing) return;
-    // Authentic camera shutter haptic feedback
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
     onPress();
   };
@@ -84,7 +70,9 @@ export const ShutterButton: React.FC<ShutterButtonProps> = ({
             isCapturing && styles.innerCoreCapturing,
             { transform: [{ scale: innerScaleAnim }] },
           ]}
-        />
+        >
+          {isCapturing ? <ActivityIndicator size="small" color="#FFFFFF" /> : null}
+        </Animated.View>
       </TouchableOpacity>
     </Animated.View>
   );
@@ -118,16 +106,17 @@ const styles = StyleSheet.create({
     height: INNER_SIZE,
     borderRadius: INNER_SIZE / 2,
     backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 3,
   },
+  // Translucent core + spinner while the capture promise runs — reads as "working",
+  // not "stuck". Shape and size never change, so nothing jumps.
   innerCoreCapturing: {
-    backgroundColor: '#FF3B30',
-    borderRadius: 8,
-    width: INNER_SIZE * 0.6,
-    height: INNER_SIZE * 0.6,
+    backgroundColor: 'rgba(255, 255, 255, 0.35)',
   },
 });

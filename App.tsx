@@ -15,8 +15,7 @@ import {
   Text,
   type GestureResponderEvent,
   type PanResponderGestureState,
-} from 'react-native';
-import * as Haptics from 'expo-haptics';
+} from 'react-native';import * as Haptics from 'expo-haptics';
 
 // Native camera module wrapper & native APIs
 import {
@@ -44,7 +43,8 @@ import {
   TopBar,
   ShutterButton,
   ThumbnailPreview,
-  FocalApertureDial,
+  FocalCircleRow,
+  ApertureBar,
   RadialProfileSelector,
   CameraSelector,
   FocusIndicator,
@@ -64,14 +64,30 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 installDiagLog();
 
 /**
- * Viewfinder geometry, matched to the iOS system camera: a full-width 4:3 frame whose
- * top edge sits right below the top control bar (the native preview is a 4:3 image
- * letterboxed inside the view, so this rect is an exact fit — no letterbox, no crop).
- * Tap-to-focus coordinates are normalized against THIS rect (the native side converts
- * with the actual view bounds, which is always correct under any aspect math).
+ * Viewfinder layout — three explicit bands (portrait-locked UI, screen dims are stable):
+ *
+ *   ┌──────────────────────────┐
+ *   │  TOP_AREA (top bar zone) │  64pt
+ *   ├──────────────────────────┤
+ *   │  VIEWFINDER (4:3, full   │  the capture frame; exactly what the photo contains
+ *   │  width, centered in the  │
+ *   │  middle band)            │
+ *   ├──────────────────────────┤
+ *   │  BOTTOM_AREA (focal      │  248pt: focal circles + aperture bar + shutter row
+ *   │  circles / aperture /    │
+ *   │  shutter)                │
+ *   └──────────────────────────┘
+ *
+ * The native preview is a 4:3 image letterboxed inside this rect, so rect == frame —
+ * no letterbox, no crop. Tap-to-focus is normalized against THIS rect.
  */
-const VIEWFINDER_TOP = 60;
+const TOP_AREA = 64;
+const BOTTOM_AREA = 248;
 const VIEWFINDER_HEIGHT = Math.round(SCREEN_WIDTH * (4 / 3));
+const VIEWFINDER_TOP = TOP_AREA + Math.max(
+  0,
+  Math.round((SCREEN_HEIGHT - TOP_AREA - BOTTOM_AREA - VIEWFINDER_HEIGHT) / 2),
+);
 const VIEWFINDER_BOTTOM = VIEWFINDER_TOP + VIEWFINDER_HEIGHT;
 
 /**
@@ -273,8 +289,24 @@ function CameraAppScreen(): React.JSX.Element {
       setIsLoading(true);
       setCameraInitError(null);
 
-      // Await startCamera and catch errors rather than swallowing
-      await CameraEngine.startCamera();
+      // Start with a bounded retry: on the very first authorized launch the native view
+      // may still be registering while the state branches swap, and startCamera would
+      // reject with ERR_NO_ACTIVE_VIEW. One quiet retry 250ms later always succeeds —
+      // surfacing that as a "Retry Camera" screen was a false alarm (kill+relaunch bug).
+      let lastStartError: unknown = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await CameraEngine.startCamera();
+          lastStartError = null;
+          break;
+        } catch (err: unknown) {
+          lastStartError = err;
+          const isNoActiveView = err instanceof CameraEngineError && err.code === 'ERR_NO_ACTIVE_VIEW';
+          if (!isNoActiveView || attempt === 2) throw err;
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      }
+      void lastStartError;
       cameraRunningRef.current = true;
       setIsCameraRunning(true);
       setPermissionState('authorized');
@@ -323,6 +355,9 @@ function CameraAppScreen(): React.JSX.Element {
       }
     } catch (err: unknown) {
       cameraRunningRef.current = false;
+      // Surface the failure: a swallowed error here rendered as a silent black
+      // viewfinder with no way to recover (background+foreground used to "fix" it).
+      setIsCameraRunning(false);
       if (isPermissionDeniedError(err)) {
         setPermissionState('denied');
       } else {
@@ -762,134 +797,95 @@ function CameraAppScreen(): React.JSX.Element {
     initializeCameraSession();
   }, [initializeCameraSession]);
 
-  // The native CameraEngineView MUST be mounted in every early-return branch: startCamera
-  // rejects with ERR_NO_ACTIVE_VIEW while no view exists, so the system permission dialog
-  // would never appear (the run-14 regression). The explainer just overlays it.
-  if (permissionState === 'checking') {
-    return (
-      <View style={styles.rootContainer}>
-        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-        <CameraEngineView
-          style={StyleSheet.absoluteFillObject}
-          profile={activeProfile as unknown as Record<string, unknown>}
-        />
-        <CameraLoadingView message="Preparing camera..." />
-      </View>
-    );
-  }
-
-  if (permissionState === 'notDetermined' || permissionState === 'denied') {
-    const denied = permissionState === 'denied';
-    return (
-      <View style={styles.rootContainer}>
-        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-        <CameraEngineView
-          style={StyleSheet.absoluteFillObject}
-          profile={activeProfile as unknown as Record<string, unknown>}
-        />
-        <View style={StyleSheet.absoluteFillObject}>
-          <PermissionRequestView
-            statusMessage={
-              denied
-                ? 'Camera access is currently disabled. Enable it in Settings — the camera is only used for the viewfinder and photos.'
-                : 'Camera 18 simulates classic film cameras. The camera is used for the live viewfinder; photos are saved with add-only photo access.'
-            }
-            primaryLabel={denied ? 'Open Settings' : 'Continue'}
-            onRequestPermission={
-              denied
-                ? () => {
-                    Linking.openSettings().catch(() => {});
-                  }
-                : handleEnableCamera
-            }
-            secondaryLabel={denied ? 'Retry Camera' : undefined}
-            onSecondary={denied ? handleEnableCamera : undefined}
-          />
-        </View>
-      </View>
-    );
-  }
-
-  if (cameraInitError && !isCameraRunning) {
-    return (
-      <View style={styles.rootContainer}>
-        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-        <CameraEngineView
-          style={StyleSheet.absoluteFillObject}
-          profile={activeProfile as unknown as Record<string, unknown>}
-        />
-        <View style={StyleSheet.absoluteFillObject}>
-          <CameraErrorView
-            error={cameraInitError}
-            onRetry={() => {
-              setCameraInitError(null);
-              initializeCameraSession();
-            }}
-          />
-        </View>
-      </View>
-    );
-  }
-
   // -------------------------------------------------------------
-  // 11. Main Camera Interface (Camera always mounted)
+  // 11. Main Camera Interface — SINGLE native view, state overlays on top.
+  // The CameraEngineView is mounted exactly once for every app state: swapping branches
+  // used to unmount/remount the native view and race startCamera into ERR_NO_ACTIVE_VIEW
+  // (kill+relaunch showed a false "Retry Camera" screen) and swallowed restart failures
+  // rendered as a permanent black viewfinder. Overlays block touches; the view never moves.
   // -------------------------------------------------------------
+  const permissionOverlayVisible =
+    permissionState === 'checking' ||
+    permissionState === 'notDetermined' ||
+    permissionState === 'denied' ||
+    (cameraInitError !== null && !isCameraRunning);
+
   return (
     <View style={styles.rootContainer}>
       <StatusBar barStyle="light-content" hidden={false} translucent backgroundColor="transparent" />
 
-      {/* 3-Finger Gesture Handler wraps the interactive camera surface (~2 sec hold opens CalibrationModal) */}
+      {/* The one and only native preview. The profile prop carries the aperture-linked
+          bloom/starburst factors so the live preview shows the same visual system the
+          final capture will use. */}
+      <CameraEngineView
+        style={styles.viewfinder}
+        profile={(effectiveProfile ?? activeProfile) as unknown as Record<string, unknown>}
+      />
+
       <ThreeFingerGestureDetector onTriggerCalibration={() => setIsCalibrationOpen(true)}>
         <View style={styles.fullScreen}>
-          {/* 1. Native Camera Engine View — 4:3 viewfinder rect, top edge like the system camera.
-              The profile prop carries the aperture-linked bloom/starburst factors so the
-              live preview shows the same visual system the final capture will use. */}
-          <CameraEngineView
-            style={styles.viewfinder}
-            profile={(effectiveProfile ?? activeProfile) as unknown as Record<string, unknown>}
-          />
-
-          {/* Initial Loading overlay without unmounting camera */}
-          {isLoading && !isCameraRunning && (
-            <View style={StyleSheet.absoluteFillObject}>
-              <CameraLoadingView />
-            </View>
-          )}
-
-          {/* Lightweight JSON-derived preview overlay removed: the native WYSIWYG pipeline
-              (CameraDNARenderer .preview) is the single preview filter. No JS-side coloring. */}
-
           {/* Tap-to-focus indicator (visual only) */}
           <FocusIndicator point={focusIndicator} />
 
-          {/* Empty preview touch area for original preview responder */}
-          <View
-            style={styles.viewfinderTouchArea}
-            {...previewPanResponder.panHandlers}
-          />
+          {/* Viewfinder touch area: tap-to-focus + long-press radial selector */}
+          {isCameraRunning && !permissionOverlayVisible && (
+            <View
+              style={styles.viewfinderTouchArea}
+              {...previewPanResponder.panHandlers}
+            />
+          )}
 
           {/* 2. Top Bar: current simulated camera name; tapping opens the formal Camera Selector */}
-          <View style={styles.topControlsContainer} pointerEvents="box-none">
-            <TopBar
-              profileName={activeProfile?.displayName ?? activeProfile?.name}
-              marker={activeProfile?.ui?.markerStyle}
-              accent={activeProfile?.ui?.accent}
-              onPress={() => setIsSelectorOpen(true)}
-            />
-          </View>
+          {isCameraRunning && !permissionOverlayVisible && (
+            <View style={styles.topControlsContainer} pointerEvents="box-none">
+              <TopBar
+                profileName={activeProfile?.displayName ?? activeProfile?.name}
+                marker={activeProfile?.ui?.markerStyle}
+                accent={activeProfile?.ui?.accent}
+                onPress={() => setIsSelectorOpen(true)}
+              />
+            </View>
+          )}
 
-          {/* Focal/Aperture dial: always mounted (it carries the honest Fixed ƒ/x display) */}
-          <View style={styles.dialContainer} pointerEvents="box-none">
-            <FocalApertureDial
-              stops={focalStops}
-              currentFocalMm={currentFocalMm}
-              onSelectFocal={(stop) => { void handleSelectFocal(stop); }}
-              currentAperture={currentAperture}
-              availableApertures={availableApertures}
-              isVariableAperture={supportsVariableAperture}
-              onApertureChange={handleApertureChange}
-            />
-          </View>
+          {/* Startup state overlays (block all touches beneath) */}
+          {permissionState === 'checking' && <CameraLoadingView message="Preparing camera..." />}
+          {(permissionState === 'notDetermined' || permissionState === 'denied') && (
+            <View style={StyleSheet.absoluteFillObject}>
+              <PermissionRequestView
+                statusMessage={
+                  permissionState === 'denied'
+                    ? 'Camera access is currently disabled. Enable it in Settings — the camera is only used for the viewfinder and photos.'
+                    : 'Camera 18 simulates classic film cameras. The camera is used for the live viewfinder; photos are saved with add-only photo access.'
+                }
+                primaryLabel={permissionState === 'denied' ? 'Open Settings' : 'Continue'}
+                onRequestPermission={
+                  permissionState === 'denied'
+                    ? () => {
+                        Linking.openSettings().catch(() => {});
+                      }
+                    : handleEnableCamera
+                }
+                secondaryLabel={permissionState === 'denied' ? 'Retry Camera' : undefined}
+                onSecondary={permissionState === 'denied' ? handleEnableCamera : undefined}
+              />
+            </View>
+          )}
+          {cameraInitError && !isCameraRunning && (
+            <View style={StyleSheet.absoluteFillObject}>
+              <CameraErrorView
+                error={cameraInitError}
+                onRetry={() => {
+                  setCameraInitError(null);
+                  initializeCameraSession();
+                }}
+              />
+            </View>
+          )}
+          {isLoading && isCameraRunning && (
+            <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+              <CameraLoadingView />
+            </View>
+          )}
 
           {/* Transient Error Banner while running (does not unmount camera) */}
           {transientError && (
@@ -903,36 +899,54 @@ function CameraAppScreen(): React.JSX.Element {
             </View>
           )}
 
-          {/* Bottom Bar: Shutter & Recent Thumbnail (aperture moved into the dial) */}
-          <View style={styles.bottomControlsContainer} pointerEvents="box-none">
-            {/* Bottom Actions Row: Recent Thumbnail & Shutter Button */}
-            <View style={styles.bottomActionRow}>
-              {/* 5. Lower-left Recent Photo Thumbnail (tap opens the photo library) */}
-              <View style={styles.thumbnailSlot}>
-                <ThumbnailPreview
-                  uri={latestThumbnail}
-                  onPress={
-                    latestThumbnail
-                      ? () => {
-                          Linking.openURL('photos-redirect://').catch(() => {});
-                        }
-                      : undefined
-                  }
-                />
-              </View>
+          {/* Bottom control stack, top → bottom: focal circles → aperture bar → shutter.
+              The stack lives entirely inside BOTTOM_AREA; the viewfinder band above it
+              stays untouched (see the layout constants). */}
+          {isCameraRunning && !permissionOverlayVisible && (
+            <View style={styles.bottomControlsContainer} pointerEvents="box-none">
+              {/* Focal-length circles: 13 / 26 / 35 … mm lens switching */}
+              <FocalCircleRow
+                stops={focalStops}
+                currentFocalMm={currentFocalMm}
+                onSelectFocal={(stop) => { void handleSelectFocal(stop); }}
+              />
 
-              {/* 4. Centered Shutter Button */}
-              <View style={styles.shutterSlot}>
-                <ShutterButton
-                  isCapturing={capturePhase === 'capturing'}
-                  onPress={handleCapturePhoto}
-                />
-              </View>
+              {/* Aperture bar: iris glyph + mechanical ring wheel (locked on fixed lenses) */}
+              <ApertureBar
+                availableApertures={availableApertures}
+                currentAperture={currentAperture}
+                isVariableAperture={supportsVariableAperture}
+                onApertureChange={handleApertureChange}
+              />
 
-              {/* Symmetrical Spacer Slot to keep Shutter centered */}
-              <View style={styles.spacerSlot} />
+              {/* Bottom Actions Row: Recent Thumbnail & Shutter Button */}
+              <View style={styles.bottomActionRow}>
+                {/* Library entry only once a photo exists this session — an empty
+                    placeholder invited taps that lead nowhere. */}
+                <View style={styles.thumbnailSlot}>
+                  {latestThumbnail ? (
+                    <ThumbnailPreview
+                      uri={latestThumbnail}
+                      onPress={() => {
+                        Linking.openURL('photos-redirect://').catch(() => {});
+                      }}
+                    />
+                  ) : null}
+                </View>
+
+                {/* Centered Shutter Button */}
+                <View style={styles.shutterSlot}>
+                  <ShutterButton
+                    isCapturing={capturePhase === 'capturing'}
+                    onPress={handleCapturePhoto}
+                  />
+                </View>
+
+                {/* Symmetrical Spacer Slot to keep Shutter centered */}
+                <View style={styles.spacerSlot} />
+              </View>
             </View>
-          </View>
+          )}
 
           {/* Shutter Flash Curtain Overlay */}
           <Animated.View
@@ -998,11 +1012,6 @@ const styles = StyleSheet.create({
     position: 'relative',
     backgroundColor: '#000000',
   },
-  viewfinderTouchArea: {
-    ...StyleSheet.absoluteFillObject,
-    top: VIEWFINDER_TOP,
-    bottom: SCREEN_HEIGHT - VIEWFINDER_BOTTOM,
-  },
   viewfinder: {
     position: 'absolute',
     top: VIEWFINDER_TOP,
@@ -1010,22 +1019,17 @@ const styles = StyleSheet.create({
     width: SCREEN_WIDTH,
     height: VIEWFINDER_HEIGHT,
   },
+  viewfinderTouchArea: {
+    ...StyleSheet.absoluteFillObject,
+    top: VIEWFINDER_TOP,
+    bottom: SCREEN_HEIGHT - VIEWFINDER_BOTTOM,
+  },
   topControlsContainer: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     zIndex: 20,
-  },
-  dialContainer: {
-    position: 'absolute',
-    // Centered above the shutter row, overlapping the viewfinder's lower edge —
-    // the same visual position as the system camera's zoom dial.
-    bottom: 162,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 21,
   },
   transientErrorContainer: {
     position: 'absolute',
@@ -1067,10 +1071,10 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    // Enough clearance that the shutter clears the home indicator on every device —
-    // all controls must stay fully inside the screen.
+    // Exactly the BOTTOM_AREA band: focal circles + aperture bar + shutter row.
     paddingBottom: Platform.OS === 'ios' ? 52 : 28,
     paddingTop: 8,
+    gap: 8,
     alignItems: 'center',
     zIndex: 20,
   },
