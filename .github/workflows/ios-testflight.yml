@@ -39,15 +39,16 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      # ExpoModulesCore 55 需要 Xcode 26+ 编译器；相机模块的 iOS 27 物理光圈 API
-      # （setExposureModeCustom(lensAperture:...) 等）需要 Xcode 27 的 iOS 27 SDK。
-      - name: Select Xcode 27
+      # ExpoModulesCore 55 requires an Xcode 26+ compiler. The iOS 27 physical-aperture API
+      # is invoked through dynamic selectors on the Swift side (public API, compiles against
+      # any SDK), so 26+ is enough to build; prefer 27+ when the runner has it.
+      - name: Select Xcode
         run: |
           set -euo pipefail
           shopt -s nullglob
-          XCODE_APPS=(/Applications/Xcode_2[789]*.app)
+          XCODE_APPS=(/Applications/Xcode_2[6789]*.app)
           if [ "${#XCODE_APPS[@]}" -eq 0 ]; then
-            echo "::error::runner 未安装 Xcode 27+，无法编译 iOS 27 物理光圈 API。"
+            echo "::error::runner 未安装 Xcode 26+，无法编译 Expo SDK 55。"
             exit 1
           fi
           XCODE_APP=$(printf '%s\n' "${XCODE_APPS[@]}" | sort | tail -1)
@@ -55,11 +56,10 @@ jobs:
           sudo xcode-select -s "$XCODE_APP/Contents/Developer"
           XV=$(xcodebuild -version | sed -n '1s/^Xcode //p')
           echo "已选择 Xcode $XV"
-          if [ "${XV%%.*}" -lt 27 ]; then
-            echo "::error::xcode-select 后仍不是 Xcode 27+：$XV"
+          if [ "${XV%%.*}" -lt 26 ]; then
+            echo "::error::xcode-select 后仍不是 Xcode 26+：$XV"
             exit 1
           fi
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:

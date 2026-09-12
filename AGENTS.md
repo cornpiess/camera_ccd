@@ -168,7 +168,7 @@ npm run prepackage  # 打包门槛：verify + export 基线 + Swift 配平 + aut
 - `待普通 iPhone 真机验证` — 取景器 Overlay 流畅度、ProRAW 捕获、相册权限、三指长按呼出校准面板。
 - `待 iPhone 18 Pro 真机验证` — 物理可变光圈叶片联动与真实景深/星芒。
 
-诚实桩须知（2026-09-12 已升级为真实现）：Apple 已在 **iOS 27 / Xcode 27** 把 iPhone 18 Pro 的物理可变光圈开放给开发者（`setExposureModeCustom(lensAperture:duration:iso:)`、`activeFormat.minLensAperture/maxLensAperture/recommendedLensApertureStops`）。`ApertureController` 已改为：iOS 27+ 且镜头光圈范围有效时**报告并控制真实物理光圈**（光圈优先，快门/ISO 自动）；旧系统或定光圈镜头仍诚实返回 `supportsVariableAperture = false`、`setAperture` 抛 `ERR_APERTURE_UNSUPPORTED`。**红线 4 不变**：无硬件支持时严禁软件假虚化。两个 CI workflow 已要求 **Xcode 27+ SDK**，新 API 签名以 CI 实测为准。
+诚实桩须知（2026-09-12 已升级为真实现）：Apple 已在 **iOS 27 / Xcode 27** 把 iPhone 18 Pro 的物理可变光圈开放给开发者（`setExposureModeCustom(lensAperture:duration:iso:)`、`activeFormat.minLensAperture/maxLensAperture/recommendedLensApertureStops`）。`ApertureController` 已改为：iOS 27+ 且镜头光圈范围有效时**报告并控制真实物理光圈**（光圈优先，快门/ISO 自动）；旧系统或定光圈镜头仍诚实返回 `supportsVariableAperture = false`、`setAperture` 抛 `ERR_APERTURE_UNSUPPORTED`。**红线 4 不变**：无硬件支持时严禁软件假虚化。**编译策略**：iOS 27 符号全部走动态选择子/KVC 调用（公开 API，仅作跨 SDK 容错），任何 Xcode 26+ 均可编译出包——严禁改回编译期符号引用（会像 2026-09-12 TestFlight run 那样因 runner 没有 Xcode 27 而挂掉）。
 
 ---
 

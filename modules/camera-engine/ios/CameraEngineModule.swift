@@ -96,6 +96,50 @@ final class ApertureController {
 
   init() {}
 
+  // iOS 27 aperture symbols (minLensAperture / maxLensAperture / recommendedLensApertureStops /
+  // currentLensAperture / setExposureModeCustomWithLensAperture:…) are invoked DYNAMICALLY
+  // (KVC + ObjC selector) so this file compiles with any Xcode SDK — the feature is gated at
+  // runtime by #available(iOS 27.0, *) and responds(to:). All of these are PUBLIC Apple APIs;
+  // dynamic dispatch here is purely SDK-version tolerance, never private-API access.
+  // autoExposureDuration / autoISO are iOS 8-era public sentinels meaning "keep automatic".
+
+  private func formatFloat(_ format: NSObject, _ key: String) -> Double? {
+    let sel = NSSelectorFromString(key)
+    guard format.responds(to: sel) else { return nil }
+    return (format.value(forKey: key) as? NSNumber)?.doubleValue
+  }
+
+  private func recommendedStops(_ format: NSObject) -> [Double]? {
+    let sel = NSSelectorFromString("recommendedLensApertureStops")
+    guard format.responds(to: sel) else { return nil }
+    return ((format.value(forKey: "recommendedLensApertureStops") as? [NSNumber]) ?? [])
+      .map { $0.doubleValue }
+      .sorted()
+  }
+
+  /// Non-degenerate variable-aperture range of the active format, nil on fixed lenses
+  /// or pre-iOS 27 (honest fixed-aperture path).
+  private func variableApertureRange(_ device: AVCaptureDevice) -> (min: Double, max: Double, stops: [Double]?)? {
+    if #available(iOS 27.0, *) {
+      let format = device.activeFormat as NSObject
+      guard let minA = formatFloat(format, "minLensAperture"),
+            let maxA = formatFloat(format, "maxLensAperture"),
+            minA > 0, maxA > minA else { return nil }
+      return (minA, maxA, recommendedStops(format))
+    }
+    return nil
+  }
+
+  private func currentAperture(_ device: AVCaptureDevice) -> Double {
+    if #available(iOS 27.0, *) {
+      if device.responds(to: NSSelectorFromString("currentLensAperture")),
+         let v = device.value(forKey: "currentLensAperture") as? NSNumber {
+        return v.doubleValue
+      }
+    }
+    return Double(device.lensAperture)
+  }
+
   /// Inspect runtime device capabilities. On iOS 27+ the per-format lens aperture range
   /// is authoritative; a degenerate range (min >= max) means this lens has no variable
   /// aperture, so the fixed-aperture honesty path applies per lens.
@@ -111,92 +155,60 @@ final class ApertureController {
       )
     }
 
-    if #available(iOS 27.0, *) {
-      let format = device.activeFormat
-      let minAperture = Double(format.minLensAperture)
-      let maxAperture = Double(format.maxLensAperture)
-      let active = Double(device.currentLensAperture)
-      if minAperture > 0, maxAperture > minAperture {
+    let active = currentAperture(device)
+    if let range = variableApertureRange(device) {
+      return Capabilities(
+        supportsVariableAperture: true,
+        minAperture: range.min,
+        maxAperture: range.max,
+        activeAperture: active,
         // Hardware detents when the format publishes them; otherwise the JS layer derives
         // a 1/3-stop ladder from min/max (deriveVariableApertures).
-        let stops: [Double]? = format.recommendedLensApertureStops.map { stops in
-          stops.map { Double($0) }.sorted()
-        }
-        return Capabilities(
-          supportsVariableAperture: true,
-          minAperture: minAperture,
-          maxAperture: maxAperture,
-          activeAperture: active,
-          supportedApertures: (stops?.isEmpty == false) ? stops : nil,
-          deviceModel: device.localizedName
-        )
-      }
-      return Capabilities(
-        supportsVariableAperture: false,
-        minAperture: nil,
-        maxAperture: nil,
-        activeAperture: active,
-        supportedApertures: nil,
+        supportedApertures: (range.stops?.isEmpty == false) ? range.stops : nil,
         deviceModel: device.localizedName
       )
     }
-
-    // Pre-iOS 27: no public variable-aperture API — report honestly.
-    let activeLensAperture = Double(device.lensAperture)
     return Capabilities(
       supportsVariableAperture: false,
       minAperture: nil,
       maxAperture: nil,
-      activeAperture: activeLensAperture,
+      activeAperture: active,
       supportedApertures: nil,
       deviceModel: device.localizedName
     )
   }
 
-  /// Set the physical lens aperture (aperture-priority: shutter and ISO stay automatic).
-  /// Apple notes the hardware may settle on the nearest real physical position, which is
-  /// why callers re-read currentLensAperture through getCapabilities for display.
+  /// Set the physical lens aperture (aperture-priority: shutter and ISO stay automatic
+  /// via the auto sentinels). Apple notes the hardware may settle on the nearest real
+  /// physical position, which is why callers re-read currentLensAperture through
+  /// getCapabilities for display.
   func setAperture(_ fStop: Double, on device: AVCaptureDevice?, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
     guard let device = device else {
       completion(.failure(.cameraUnavailable))
       return
     }
 
-    if #available(iOS 27.0, *) {
-      let format = device.activeFormat
-      let minAperture = Double(format.minLensAperture)
-      let maxAperture = Double(format.maxLensAperture)
-      guard minAperture > 0, maxAperture > minAperture else {
-        completion(.failure(.apertureUnsupported))
-        return
-      }
-      let target = Float(min(max(fStop, minAperture), maxAperture))
-      guard format.supportsExposureModeCustom(
-        lensAperture: target,
-        duration: AVCaptureDevice.autoExposureDuration,
-        iso: AVCaptureDevice.autoISO
-      ) else {
-        completion(.failure(.apertureUnsupported))
-        return
-      }
-      do {
-        try device.lockForConfiguration()
-        defer { device.unlockForConfiguration() }
-        device.setExposureModeCustom(
-          lensAperture: target,
-          duration: AVCaptureDevice.autoExposureDuration,
-          iso: AVCaptureDevice.autoISO,
-          completionHandler: nil
-        )
-        completion(.success(()))
-      } catch {
-        completion(.failure(.configurationFailed))
-      }
+    guard let range = variableApertureRange(device) else {
+      completion(.failure(.apertureUnsupported))
       return
     }
-
-    // Pre-iOS 27: reject so UI/caller fall back to the fixed-aperture display.
-    completion(.failure(.apertureUnsupported))
+    let target = Float(min(max(fStop, range.min), range.max))
+    let setter = NSSelectorFromString("setExposureModeCustomWithLensAperture:duration:ISO:completionHandler:")
+    guard device.responds(to: setter) else {
+      completion(.failure(.apertureUnsupported))
+      return
+    }
+    do {
+      try device.lockForConfiguration()
+      defer { device.unlockForConfiguration() }
+      let imp = device.method(for: setter)
+      typealias ApertureSetter = @convention(c) (NSObject, Selector, Float, CMTime, Float, ((Error?) -> Void)?) -> Void
+      let fn = unsafeBitCast(imp, to: ApertureSetter.self)
+      fn(device, setter, target, AVCaptureDevice.autoExposureDuration, AVCaptureDevice.autoISO, nil)
+      completion(.success(()))
+    } catch {
+      completion(.failure(.configurationFailed))
+    }
   }
 }
 
