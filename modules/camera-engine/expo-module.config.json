@@ -1,6 +1,7 @@
 {
   "platforms": ["apple"],
   "apple": {
-    "modules": ["CameraEngineModule"]
+    "modules": ["CameraEngineModule"],
+    "podspecPath": "CameraEngine.podspec"
   }
 }
