@@ -500,17 +500,38 @@ function CameraAppScreen(): React.JSX.Element {
       if (stop.lensId !== currentLensId) {
         await CameraEngine.setLens(stop.lensId);
         setCurrentLensId(stop.lensId);
-        // Different lens → different physical aperture; refresh the honest display.
+        // Per-lens aperture honesty: on iPhone 18 Pro only the main lens has a variable
+        // aperture — ultra-wide/telephoto formats report a degenerate range, so the dial
+        // locks to Fixed ƒ/x. The capability ref must follow the active lens, otherwise
+        // the ApertureVisualProfile factors keep using the previous lens's range.
         try {
           const caps = await CameraEngine.getCapabilities();
+          capabilitiesRef.current = caps;
           const variable = Boolean(caps.supportsVariableAperture);
           setSupportsVariableAperture(variable);
           setAvailableApertures(variable && Array.isArray(caps.supportedApertures) && caps.supportedApertures.length > 0
             ? [...caps.supportedApertures].sort((a, b) => a - b)
             : []);
-          const aperture = caps.activeAperture ?? caps.activeLensAperture ?? 1.8;
-          setActiveAperture(aperture);
-          setCurrentAperture(aperture);
+          if (variable && activeProfile) {
+            // Returning to the variable lens: restore the user's remembered f-stop.
+            const target = cameraStateRef.current.lastApertures[activeProfile.id] ?? activeProfile.aperture?.preferred;
+            if (target != null) {
+              const min = caps.minAperture ?? target;
+              const max = caps.maxAperture ?? target;
+              const clamped = Math.min(Math.max(target, min), max);
+              await CameraEngine.setAperture(clamped);
+              setActiveAperture(clamped);
+              setCurrentAperture(clamped);
+            } else {
+              const aperture = caps.activeAperture ?? caps.activeLensAperture ?? 1.8;
+              setActiveAperture(aperture);
+              setCurrentAperture(aperture);
+            }
+          } else {
+            const aperture = caps.activeAperture ?? caps.activeLensAperture ?? 1.8;
+            setActiveAperture(aperture);
+            setCurrentAperture(aperture);
+          }
         } catch {
           // Keep the previous aperture display; the lens switch itself succeeded.
         }
@@ -522,7 +543,7 @@ function CameraAppScreen(): React.JSX.Element {
     } catch (err: unknown) {
       showTransientError(resolveErrorMessage(err));
     }
-  }, [currentLensId, showTransientError]);
+  }, [currentLensId, activeProfile, showTransientError]);
 
   const handleCapturePhoto = async () => {
     if (capturePhase === 'capturing') return;

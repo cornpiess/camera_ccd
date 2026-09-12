@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, PanResponder, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import type { FocalStop } from '../camera/focalLadder';
@@ -58,6 +58,12 @@ export const FocalApertureDial: React.FC<FocalApertureDialProps> = ({
   const dragRemainderRef = useRef(0);
   const apertureIndexRef = useRef(0);
   const rotationRef = useRef(0);
+
+  // Lens switches can turn a variable main lens into a fixed ultra-wide/telephoto —
+  // never leave the aperture slot armed with no stops to drag.
+  useEffect(() => {
+    if (!isVariableAperture) setApertureArmed(false);
+  }, [isVariableAperture]);
 
   const apertureSlotIndex = stops.length;
 
