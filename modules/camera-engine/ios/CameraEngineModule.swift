@@ -382,11 +382,9 @@ public final class CameraEngineView: ExpoView {
       }
 
       photoSettings.photoQualityPrioritization = .balanced
-      // Shutter fidelity: only enable fast capture prioritization when the runtime
-      // reports support (capability first) — minimizes shutter lag without forcing it.
-      if self.output.isFastCapturePrioritizationSupported {
-        photoSettings.isFastCapturePrioritizationEnabled = true
-      }
+      // Shutter fidelity relies on .balanced prioritization + the ProRAW dual-format path.
+      // NOTE: AVCapturePhotoSettings exposes no fast-capture toggle in this SDK; do not
+      // re-add speculative API names without verifying against the actual headers.
       let id = photoSettings.uniqueID
       let delegate = PhotoCaptureDelegate(profile: self.profileSnapshot()) { [weak self] result in
         self?.sessionQueue.async { self?.captureDelegates.removeValue(forKey: id) }
@@ -461,7 +459,6 @@ public final class CameraEngineView: ExpoView {
       var caps = controller.getCapabilities(device: device).asDictionary
       caps["supportsRAW"] = rawSupported
       caps["supportsProRAW"] = proRaw
-      caps["isReadyForCapture"] = canQueryOutput && self.output.isReadyForCapture
 
       completion(.success(caps))
     }

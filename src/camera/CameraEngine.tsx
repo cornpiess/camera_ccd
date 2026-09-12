@@ -13,8 +13,6 @@ export type CameraCapabilities = {
   deviceModel: string;
   supportsRAW: boolean;
   supportsProRAW: boolean;
-  /** Whether the photo output can accept a capture right now. */
-  isReadyForCapture?: boolean;
   /** Compatibility alias for activeAperture. */
   activeLensAperture: number;
   /** Compatibility alias for deviceModel. */
