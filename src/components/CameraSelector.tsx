@@ -4,6 +4,7 @@ import * as Haptics from 'expo-haptics';
 import type { CameraProfile } from '../profiles/types';
 import { markerGlyph, profileDisplayName } from './types';
 import { GlassCard } from './GlassCard';
+import { ProfileConfigModal } from '../calibration/ProfileConfigModal';
 
 export interface CameraSelectorProps {
   readonly visible: boolean;
@@ -16,19 +17,24 @@ export interface CameraSelectorProps {
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const ROW_HEIGHT = 56;
 const PANEL_MAX_WIDTH = Math.min(320, Math.round(SCREEN_WIDTH * 0.72));
-// The morph starts from the TopBar capsule's approximate geometry (centered capsule,
-// 44pt tall, sitting just under the status bar) and blooms into the full panel.
+// The morph starts from the TopBar capsule's geometry (centered capsule, 44pt tall,
+// just below the SafeArea inset) and blooms into the full panel.
 const CAPSULE_WIDTH = 210;
 const CAPSULE_HEIGHT = 44;
-// TopBar's capsule sits just below the SafeArea inset (~55pt on notched devices).
 const CAPSULE_TOP = 55;
 const PANEL_TOP = 92;
 
 /**
- * Liquid-glass camera selector. Opening is not a fade-in: the panel MORPHS out of the
- * top camera capsule — it blooms from the capsule's width/height/position with a springy
- * overshoot (the "water pop"), while the camera list fades in only once the glass has
- * reached full size. Closing runs the reverse: the panel pours back into the capsule.
+ * Liquid-glass camera selector, following Apple's Liquid Glass morph semantics
+ * (developer.apple.com — "Applying Liquid Glass to custom views"): the panel is the SAME
+ * glass element as the capsule, interpolating its bounds — never a fade-in of a new view.
+ * Content surfaces only after the glass reaches full size, and collapses back into the
+ * capsule on close.
+ *
+ * The bounds interpolation runs on the NATIVE driver via scale/translate transforms
+ * (width/height would force a JS-driven animation): the panel is laid out at its final
+ * size and the transform pins the scaled top edge onto the capsule position, so the glass
+ * material tracks the morph on the GPU at full frame rate.
  */
 export const CameraSelector: React.FC<CameraSelectorProps> = ({
   visible,
@@ -41,6 +47,8 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   const [mounted, setMounted] = useState(visible);
   const progress = useRef(new Animated.Value(0)).current;
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
+  // Per-camera configuration entry (⚙) restored in the liquid-glass list.
+  const [configProfileId, setConfigProfileId] = useState<string | null>(null);
 
   useEffect(() => {
     animRef.current?.stop();
@@ -49,16 +57,17 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       animRef.current = Animated.spring(progress, {
         toValue: 1,
-        tension: 120,
-        friction: 10,
-        useNativeDriver: false,
+        // Apple's bouncy spring feel: quick rise, one visible overshoot, settle.
+        tension: 150,
+        friction: 9,
+        useNativeDriver: true,
       });
       animRef.current.start();
     } else {
       animRef.current = Animated.timing(progress, {
         toValue: 0,
         duration: 170,
-        useNativeDriver: false,
+        useNativeDriver: true,
       });
       animRef.current.start(({ finished }) => {
         if (finished) setMounted(false);
@@ -70,25 +79,27 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   if (!mounted || profiles.length === 0) return null;
 
   const panelHeight = profiles.length * ROW_HEIGHT;
-  const width = progress.interpolate({
+  // Transform-origin math (RN scales around the center): pin the scaled panel's top edge
+  // onto the capsule's top edge at progress 0, landing exactly on the final bounds at 1.
+  const originTranslateY = CAPSULE_TOP + CAPSULE_HEIGHT / 2 - (PANEL_TOP + panelHeight / 2);
+  const translateX = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [CAPSULE_WIDTH, PANEL_MAX_WIDTH],
+    outputRange: [0, 0],
     extrapolate: 'clamp',
   });
-  const height = progress.interpolate({
+  const translateY = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [CAPSULE_HEIGHT, panelHeight],
+    outputRange: [originTranslateY, 0],
     extrapolate: 'clamp',
   });
-  const top = progress.interpolate({
+  const scaleX = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [CAPSULE_TOP, PANEL_TOP],
+    outputRange: [CAPSULE_WIDTH / PANEL_MAX_WIDTH, 1],
     extrapolate: 'clamp',
   });
-  // The capsule look during the morph: capsule width carries its own corner radius.
-  const radius = progress.interpolate({
+  const scaleY = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [22, 20],
+    outputRange: [CAPSULE_HEIGHT / panelHeight, 1],
     extrapolate: 'clamp',
   });
   const backdropOpacity = progress.interpolate({
@@ -96,8 +107,7 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
     outputRange: [0, 0.3],
     extrapolate: 'clamp',
   });
-  // Rows stay hidden while the glass is still blooming; they surface only once the
-  // panel reaches (or overshoots) its full size.
+  // Content surfaces only once the glass has bloomed to (or overshot) full size.
   const contentOpacity = progress.interpolate({
     inputRange: [0, 0.7, 1],
     outputRange: [0, 0, 1],
@@ -125,9 +135,15 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
           onPress={onClose}
         />
       </Animated.View>
-      {/* Centered morph host: animated top + width/height, horizontally centered */}
-      <Animated.View style={[styles.morphHost, { top }]} pointerEvents="box-none">
-        <Animated.View style={[styles.morphPanel, { width, height, borderRadius: radius }]}>
+      {/* Centered host at the panel's final position; the glass itself is transformed */}
+      <View style={[styles.morphHost, { top: PANEL_TOP }]} pointerEvents="box-none">
+        <Animated.View
+          style={[
+            styles.morphPanel,
+            { height: panelHeight, transform: [{ translateX }, { translateY }, { scaleX }, { scaleY }] },
+          ]}
+          pointerEvents={visible ? 'auto' : 'none'}
+        >
           <GlassCard borderRadius={20} isInteractive style={styles.panel}>
             <Animated.View
               style={[styles.content, { opacity: contentOpacity, transform: [{ scale: contentScale }] }]}
@@ -159,13 +175,32 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                     {isActive ? (
                       <View style={[styles.activeDot, { backgroundColor: accent }]} />
                     ) : null}
+                    <Pressable
+                      accessibilityLabel={`Configure ${displayName}`}
+                      accessibilityRole="button"
+                      hitSlop={8}
+                      onPress={() => {
+                        Haptics.selectionAsync().catch(() => {});
+                        setConfigProfileId(profile.id);
+                      }}
+                      style={({ pressed }) => [styles.configButton, pressed && styles.configButtonPressed]}
+                    >
+                      <Text style={[styles.configGlyph, { color: accent }]}>⚙</Text>
+                    </Pressable>
                   </Pressable>
                 );
               })}
             </Animated.View>
           </GlassCard>
         </Animated.View>
-      </Animated.View>
+      </View>
+
+      {/* Per-camera JSON import / tune sheet */}
+      <ProfileConfigModal
+        visible={configProfileId !== null}
+        profileId={configProfileId}
+        onClose={() => setConfigProfileId(null)}
+      />
     </View>
   );
 };
@@ -187,7 +222,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   morphPanel: {
-    overflow: 'hidden',
+    width: PANEL_MAX_WIDTH,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.35,
@@ -195,7 +230,7 @@ const styles = StyleSheet.create({
     elevation: 12,
   },
   panel: {
-    flex: 1,
+    height: '100%',
     paddingVertical: 6,
   },
   content: {
@@ -229,5 +264,19 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 3.5,
+  },
+  configButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 2,
+  },
+  configButtonPressed: {
+    backgroundColor: 'rgba(255, 255, 255, 0.14)',
+  },
+  configGlyph: {
+    fontSize: 17,
   },
 });

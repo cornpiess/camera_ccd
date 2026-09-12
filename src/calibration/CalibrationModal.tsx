@@ -18,6 +18,9 @@ import { getDiagLogText } from '../utils/diagLog';
 export interface CalibrationModalProps {
   readonly visible: boolean;
   readonly onClose: () => void;
+  /** Aperture demo mode (fixed-lens test): ring is interactive, capture stays fixed. */
+  readonly apertureDemoMode?: boolean;
+  readonly onToggleApertureDemo?: () => void;
 }
 
 interface ActionButtonProps {
@@ -40,7 +43,7 @@ function ActionButton({ label, onPress, disabled = false, destructive = false }:
   );
 }
 
-export function CalibrationModal({ visible, onClose }: CalibrationModalProps): React.JSX.Element {
+export function CalibrationModal({ visible, onClose, apertureDemoMode = false, onToggleApertureDemo }: CalibrationModalProps): React.JSX.Element {
   const { applyText, clearErrors, document, errors, exportJson, importJson, loading, reload, reset } = useProfiles();
   const [text, setText] = useState('');
   const [diagText, setDiagText] = useState<string | null>(null);
@@ -100,6 +103,19 @@ export function CalibrationModal({ visible, onClose }: CalibrationModalProps): R
             <ActionButton disabled={busy} label="Reload" onPress={() => { void run(reload); }} />
             <ActionButton destructive disabled={busy} label="Reset Default" onPress={() => { void run(reset, true); }} />
           </View>
+
+          {onToggleApertureDemo ? (
+            <View style={styles.demoRow}>
+              <ActionButton
+                label={apertureDemoMode ? 'Aperture Demo: ON' : 'Aperture Demo: OFF'}
+                onPress={onToggleApertureDemo}
+              />
+              <Text style={styles.demoHint}>
+                Fixed-lens test mode: the aperture ring becomes interactive (visual only) —
+                photos stay at the lens&apos;s fixed aperture.
+              </Text>
+            </View>
+          ) : null}
 
           <Text style={styles.label}>Profile document JSON</Text>
           <TextInput
@@ -163,6 +179,8 @@ const styles = StyleSheet.create({
   content: { padding: 20, gap: 14, paddingBottom: 40 },
   help: { color: '#b8bbc3', fontSize: 14, lineHeight: 20 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  demoRow: { gap: 8 },
+  demoHint: { color: '#8e939e', fontSize: 12.5, lineHeight: 17 },
   button: { minHeight: 44, borderRadius: 9, borderWidth: 1, borderColor: '#4776bd', backgroundColor: '#182840', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
   buttonDimmed: { opacity: 0.45 },
   buttonText: { color: '#dbe9ff', fontSize: 15, fontWeight: '600' },

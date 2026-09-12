@@ -259,6 +259,13 @@ function CameraAppScreen(): React.JSX.Element {
   // 4. Calibration Modal State (3-finger ~2 sec gesture)
   // -------------------------------------------------------------
   const [isCalibrationOpen, setIsCalibrationOpen] = useState<boolean>(false);
+  /**
+   * Aperture DEMO mode (fixed-lens test, toggled in the calibration panel): the ring is
+   * fully interactive so the feel can be tested on e.g. iPhone 14 Plus, but the capture
+   * always stays at the lens's fixed aperture — visual + bloom/starburst linkage only.
+   */
+  const [apertureDemoMode, setApertureDemoMode] = useState<boolean>(false);
+  const DEMO_APERTURES = useMemo(() => [1.48, 1.8, 2, 2.8, 4], []);
 
   // -------------------------------------------------------------
   // 4b. Formal Camera Selector (top-badge entry) & Tap-to-Focus states
@@ -422,13 +429,16 @@ function CameraAppScreen(): React.JSX.Element {
   // Depth is NOT software-faked (red line 4); on real variable-aperture hardware the
   // optics handle it. Neutral factors on fixed lenses keep profiles exactly as calibrated.
   const apertureVisual = useMemo(
-    () => apertureVisualFactors(
-      currentAperture,
-      supportsVariableAperture,
-      capabilitiesRef.current?.minAperture,
-      capabilitiesRef.current?.maxAperture,
-    ),
-    [currentAperture, supportsVariableAperture, availableApertures],
+    () => {
+      const demo = !supportsVariableAperture && apertureDemoMode;
+      return apertureVisualFactors(
+        currentAperture,
+        supportsVariableAperture || demo,
+        supportsVariableAperture ? capabilitiesRef.current?.minAperture : (demo ? DEMO_APERTURES[0] : null),
+        supportsVariableAperture ? capabilitiesRef.current?.maxAperture : (demo ? DEMO_APERTURES[DEMO_APERTURES.length - 1] : null),
+      );
+    },
+    [currentAperture, supportsVariableAperture, apertureDemoMode, DEMO_APERTURES, availableApertures],
   );
   const effectiveProfile = useMemo(
     () => (activeProfile ? applyApertureVisual(activeProfile as unknown as Record<string, unknown>, apertureVisual) : null),
@@ -500,7 +510,13 @@ function CameraAppScreen(): React.JSX.Element {
   // -------------------------------------------------------------
   const handleApertureChange = async (aperture: number) => {
     if (!supportsVariableAperture) {
-      // Fixed devices never call setAperture
+      if (!apertureDemoMode) {
+        // Fixed devices never call setAperture
+        return;
+      }
+      // DEMO mode: visual + linkage only — the capture stays at the fixed aperture.
+      setCurrentAperture(aperture);
+      setActiveAperture(aperture);
       return;
     }
     const min = capabilitiesRef.current?.minAperture ?? availableApertures[0] ?? aperture;
@@ -911,12 +927,20 @@ function CameraAppScreen(): React.JSX.Element {
                 onSelectFocal={(stop) => { void handleSelectFocal(stop); }}
               />
 
-              {/* Aperture bar: iris glyph + mechanical ring wheel (locked on fixed lenses) */}
+              {/* Aperture bar: iris glyph + mechanical ring wheel.
+                  Demo mode lets fixed-lens devices test the ring (visual only). */}
               <ApertureBar
-                availableApertures={availableApertures}
+                availableApertures={
+                  supportsVariableAperture
+                    ? availableApertures
+                    : apertureDemoMode
+                      ? DEMO_APERTURES
+                      : []
+                }
                 currentAperture={currentAperture}
-                isVariableAperture={supportsVariableAperture}
+                isVariableAperture={supportsVariableAperture || apertureDemoMode}
                 onApertureChange={handleApertureChange}
+                demoMode={!supportsVariableAperture && apertureDemoMode}
               />
 
               {/* Bottom Actions Row: Recent Thumbnail & Shutter Button */}
@@ -980,6 +1004,8 @@ function CameraAppScreen(): React.JSX.Element {
           <CalibrationModal
             visible={isCalibrationOpen}
             onClose={() => setIsCalibrationOpen(false)}
+            apertureDemoMode={apertureDemoMode}
+            onToggleApertureDemo={() => setApertureDemoMode((mode) => !mode)}
           />
         </View>
       </ThreeFingerGestureDetector>
@@ -1010,7 +1036,10 @@ const styles = StyleSheet.create({
   fullScreen: {
     flex: 1,
     position: 'relative',
-    backgroundColor: '#000000',
+    // MUST stay transparent: the native preview view is a SIBLING underneath this
+    // container, and an opaque background here paints a permanent black viewfinder
+    // over a perfectly healthy capture session (the black-frame regression).
+    backgroundColor: 'transparent',
   },
   viewfinder: {
     position: 'absolute',

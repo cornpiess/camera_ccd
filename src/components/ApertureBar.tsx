@@ -10,6 +10,12 @@ export interface ApertureBarProps {
   readonly isVariableAperture: boolean;
   /** Fired on each detent crossing and again on release-snap (only when variable). */
   readonly onApertureChange: (fStop: number) => void;
+  /**
+   * Demo mode (fixed-lens devices, enabled from the calibration panel): the ring is fully
+   * interactive for testing the feel, but the capture stays at the lens's fixed aperture.
+   * Always labeled DEMO so the simulation can never be mistaken for hardware control.
+   */
+  readonly demoMode?: boolean;
 }
 
 const WHEEL_WIDTH = 210;
@@ -39,6 +45,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   currentAperture,
   isVariableAperture,
   onApertureChange,
+  demoMode = false,
 }) => {
   const stops = availableApertures;
   const selectedIndex = useMemo(() => {
@@ -168,7 +175,9 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
         <View style={styles.centerPointer} pointerEvents="none" />
       </View>
 
-      {!isVariableAperture ? <Text style={styles.fixedCaption}>FIXED</Text> : null}
+      {(!isVariableAperture || demoMode) ? (
+        <Text style={[styles.fixedCaption, demoMode && styles.demoCaption]}>{demoMode ? 'DEMO' : 'FIXED'}</Text>
+      ) : null}
     </View>
   );
 };
@@ -260,6 +269,9 @@ const styles = StyleSheet.create({
     fontSize: 8,
     fontWeight: '700',
     letterSpacing: 1,
+  },
+  demoCaption: {
+    color: 'rgba(255, 214, 10, 0.85)',
   },
 });
 
