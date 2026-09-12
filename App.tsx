@@ -698,10 +698,17 @@ function CameraAppScreen(): React.JSX.Element {
     initializeCameraSession();
   }, [initializeCameraSession]);
 
+  // The native CameraEngineView MUST be mounted in every early-return branch: startCamera
+  // rejects with ERR_NO_ACTIVE_VIEW while no view exists, so the system permission dialog
+  // would never appear (the run-14 regression). The explainer just overlays it.
   if (permissionState === 'checking') {
     return (
       <View style={styles.rootContainer}>
         <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+        <CameraEngineView
+          style={StyleSheet.absoluteFillObject}
+          profile={activeProfile as unknown as Record<string, unknown>}
+        />
         <CameraLoadingView message="Preparing camera..." />
       </View>
     );
@@ -712,23 +719,29 @@ function CameraAppScreen(): React.JSX.Element {
     return (
       <View style={styles.rootContainer}>
         <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-        <PermissionRequestView
-          statusMessage={
-            denied
-              ? 'Camera access is currently disabled. Enable it in Settings — the camera is only used for the viewfinder and photos.'
-              : 'Camera 18 simulates classic film cameras. The camera is used for the live viewfinder; photos are saved with add-only photo access.'
-          }
-          primaryLabel={denied ? 'Open Settings' : 'Enable Camera'}
-          onRequestPermission={
-            denied
-              ? () => {
-                  Linking.openSettings().catch(() => {});
-                }
-              : handleEnableCamera
-          }
-          secondaryLabel={denied ? 'Retry Camera' : undefined}
-          onSecondary={denied ? handleEnableCamera : undefined}
+        <CameraEngineView
+          style={StyleSheet.absoluteFillObject}
+          profile={activeProfile as unknown as Record<string, unknown>}
         />
+        <View style={StyleSheet.absoluteFillObject}>
+          <PermissionRequestView
+            statusMessage={
+              denied
+                ? 'Camera access is currently disabled. Enable it in Settings — the camera is only used for the viewfinder and photos.'
+                : 'Camera 18 simulates classic film cameras. The camera is used for the live viewfinder; photos are saved with add-only photo access.'
+            }
+            primaryLabel={denied ? 'Open Settings' : 'Enable Camera'}
+            onRequestPermission={
+              denied
+                ? () => {
+                    Linking.openSettings().catch(() => {});
+                  }
+                : handleEnableCamera
+            }
+            secondaryLabel={denied ? 'Retry Camera' : undefined}
+            onSecondary={denied ? handleEnableCamera : undefined}
+          />
+        </View>
       </View>
     );
   }

@@ -132,7 +132,10 @@ node -e "const Y=require('yaml'),fs=require('fs');for(const f of ['.github/workf
 
 ```bash
 npm run verify      # = typecheck + lint + doctor，三项必须全绿
+npm run prepackage  # 打包门槛：verify + export 基线 + Swift 配平 + autolinking + LUT/Profile + 密钥扫描
 ```
+
+**出包铁律**：任何 TestFlight / Dev Build 打包前，`npm run prepackage` 必须全绿；打包人还须按 [`TESTING.md`](./TESTING.md) 的真机验收清单逐条手测。CI 红了先修再出包，禁止带红出包。
 
 逐项（排查失败时用）：
 

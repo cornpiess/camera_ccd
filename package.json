@@ -10,7 +10,8 @@
     "doctor": "npx expo-doctor",
     "verify": "npm run typecheck && npm run lint && npm run doctor",
     "prebuild:ios": "expo prebuild --platform ios --clean",
-    "build:ios:dev": "npx eas-cli build --platform ios --profile development"
+    "build:ios:dev": "npx eas-cli build --platform ios --profile development",
+    "prepackage": "node scripts/prepackage-check.js"
   },
   "dependencies": {
     "camera-engine": "file:modules/camera-engine",
