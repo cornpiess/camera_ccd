@@ -1,9 +1,10 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import type { CameraProfile } from '../profiles/types';
 import { markerGlyph, profileDisplayName } from './types';
 import { GlassCard } from './GlassCard';
+import { ProfileConfigModal } from '../calibration/ProfileConfigModal';
 
 export interface CameraSelectorProps {
   readonly visible: boolean;
@@ -27,6 +28,8 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
 }: CameraSelectorProps) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(-12)).current;
+  // Per-camera configuration entry: the gear opens the JSON tune sheet for that camera.
+  const [configProfileId, setConfigProfileId] = useState<string | null>(null);
 
   useEffect(() => {
     if (visible) {
@@ -55,9 +58,9 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
         style={styles.backdrop}
         onPress={onClose}
       />
-      <Animated.View style={[styles.panelPosition, { opacity, transform: [{ translateY }] }]}>
+      <Animated.View style={[styles.panelPosition, { opacity, transform: [{ translateY }], height: profiles.length * 56 }]}>
         <GlassCard borderRadius={20} isInteractive style={styles.panel}>
-          {profiles.slice(0, 8).map((profile) => {
+          {profiles.map((profile) => {
             const isActive = profile.id === activeProfileId;
             const accent = profile.ui?.accent || '#FFFFFF';
             const displayName = profileDisplayName(profile);
@@ -84,11 +87,30 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                 {isActive ? (
                   <View style={[styles.activeDot, { backgroundColor: accent }]} />
                 ) : null}
+                <Pressable
+                  accessibilityLabel={`Configure ${displayName}`}
+                  accessibilityRole="button"
+                  hitSlop={8}
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    setConfigProfileId(profile.id);
+                  }}
+                  style={({ pressed }) => [styles.configButton, pressed && styles.configButtonPressed]}
+                >
+                  <Text style={[styles.configGlyph, { color: accent }]}>⚙</Text>
+                </Pressable>
               </Pressable>
             );
           })}
         </GlassCard>
       </Animated.View>
+
+      {/* Per-camera JSON import / tune sheet (stays open over the selector) */}
+      <ProfileConfigModal
+        visible={configProfileId !== null}
+        profileId={configProfileId}
+        onClose={() => setConfigProfileId(null)}
+      />
     </View>
   );
 };
@@ -107,7 +129,6 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     width: '72%',
     maxWidth: 320,
-    height: 448,
   },
   panel: {
     flex: 1,
@@ -141,5 +162,19 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 3.5,
+  },
+  configButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 2,
+  },
+  configButtonPressed: {
+    backgroundColor: 'rgba(255, 255, 255, 0.14)',
+  },
+  configGlyph: {
+    fontSize: 17,
   },
 });

@@ -1,6 +1,6 @@
 export { ProfileProvider, useProfiles } from './ProfileProvider';
 export type { ProfilesContextValue } from './ProfileProvider';
-export { assertProfileDocument, parseProfileDocument, validateProfileDocument } from './validation';
+export { assertProfileDocument, parseProfileDocument, validateProfileDocument, validateProfileEntry } from './validation';
 export { HUE_BAND_NAMES } from './types';
 export type {
   CameraProfile,
