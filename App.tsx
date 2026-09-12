@@ -882,7 +882,7 @@ function CameraAppScreen(): React.JSX.Element {
             pointerEvents="none"
           />
 
-          {/* 7. 8-Profile Radial Selector (Visual only; preview responder finalizes on release) */}
+          {/* 7. Radial Selector (profile count adaptive) (Visual only; preview responder finalizes on release) */}
           <RadialProfileSelector
             visible={isRadialOpen}
             initialTouch={radialOrigin}

@@ -116,7 +116,7 @@ step('expo-modules-autolinking 发现 camera-engine', () => {
 step('camera-profiles.json 与 LUT 资源', () => {
   const doc = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/camera-profiles.json'), 'utf8'));
   must(doc.schemaVersion === 1, 'schemaVersion 必须是 1');
-  must(Array.isArray(doc.profiles) && doc.profiles.length === 8, '必须恰好 8 个 Profile');
+  must(Array.isArray(doc.profiles) && doc.profiles.length === 9, '必须恰好 9 个 Profile');
   const ids = new Set();
   for (const p of doc.profiles) {
     must(typeof p.id === 'string' && p.id.length > 0, 'profile.id 为空');

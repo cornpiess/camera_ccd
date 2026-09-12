@@ -904,6 +904,120 @@
       "developmentReference": {
         "target": "CineStill 800T"
       }
+    },
+    {
+      "id": "absolute_hero",
+      "name": "Absolute Hero",
+      "aperture": {
+        "preferred": 1.8,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "HERO",
+        "accent": "#7FA8E8",
+        "dialStyle": "editorial",
+        "personality": "vivid",
+        "markerStyle": "dot",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0.68,
+        "detail": 0.62,
+        "localToneMap": 0.22,
+        "luminanceNoiseReduction": 0.3,
+        "colorNoiseReduction": 0.34
+      },
+      "tone": {
+        "exposure": 0.12,
+        "contrast": 1.16,
+        "blackPoint": 0.03,
+        "curve": [
+          [
+            0,
+            0.012
+          ],
+          [
+            0.25,
+            0.235
+          ],
+          [
+            0.5,
+            0.53
+          ],
+          [
+            0.75,
+            0.8
+          ],
+          [
+            1,
+            0.995
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1.2,
+        "temperature": 90,
+        "tint": 4,
+        "hueBands": {
+          "red": {
+            "hue": -3,
+            "saturation": 1.14,
+            "luminance": 1.0
+          },
+          "orange": {
+            "hue": -2,
+            "saturation": 1.1,
+            "luminance": 1.06
+          },
+          "yellow": {
+            "hue": -4,
+            "saturation": 1.06,
+            "luminance": 1.04
+          },
+          "green": {
+            "hue": 4,
+            "saturation": 0.98,
+            "luminance": 1.0
+          },
+          "cyan": {
+            "hue": -4,
+            "saturation": 1.16,
+            "luminance": 0.99
+          },
+          "blue": {
+            "hue": -2,
+            "saturation": 1.24,
+            "luminance": 0.97
+          },
+          "magenta": {
+            "hue": 3,
+            "saturation": 1.14,
+            "luminance": 1.0
+          }
+        },
+        "lut": "absolute-hero"
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.06,
+          "size": 0.2
+        },
+        "vignette": {
+          "amount": 0.1,
+          "radius": 0.76
+        },
+        "halation": {
+          "amount": 0.035,
+          "radius": 0.24
+        }
+      },
+      "displayName": "Absolute Hero",
+      "developmentReference": {
+        "target": "PixCake CameraRecipe 140501 direction (vivid glossy urban portrait); original approximation, no commercial data measured",
+        "analysis": "相机模拟分析/01_分析报告"
+      }
     }
   ]
 }

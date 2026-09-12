@@ -21,9 +21,11 @@ export const CENTER_CANCEL_RADIUS = 38;
 export const MENU_PADDING = 75;
 export const TOP_CONTROLS_SAFE = 80;
 export const BOTTOM_CONTROLS_SAFE = 150;
+/** Hard cap of nodes on the radial ring (geometry stays legible up to here). */
+export const MAX_RING_PROFILES = 12;
 
 /**
- * Compute clamped center ensuring all 8 nodes stay within safe screen bounds
+ * Compute clamped center ensuring all ring nodes stay within safe screen bounds
  */
 export function getClampedCenter(
   initialTouch: Point,
@@ -48,8 +50,9 @@ export function computeRadialSector(
   pageX: number,
   pageY: number,
   center: Point,
-  profileCount: number = 8
+  profileCount: number
 ): number | null {
+  if (profileCount < 1) return null;
   const dx = pageX - center.x;
   const dy = pageY - center.y;
   const distance = Math.hypot(dx, dy);
@@ -59,13 +62,13 @@ export function computeRadialSector(
     return null;
   }
 
-  // 8 sectors divided by 45 deg (PI / 4), with index 0 centered at top (-PI / 2)
+  // Sectors of 360/profileCount degrees, with index 0 centered at top (-PI / 2)
   const angle = Math.atan2(dy, dx);
-  const sectorStep = (2 * Math.PI) / 8;
+  const sectorStep = (2 * Math.PI) / profileCount;
   let shifted = angle + Math.PI / 2 + sectorStep / 2;
   shifted = ((shifted % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
 
-  const index = Math.floor(shifted / sectorStep) % 8;
+  const index = Math.floor(shifted / sectorStep) % profileCount;
   return index < profileCount ? index : null;
 }
 
@@ -86,8 +89,10 @@ export const RadialProfileSelector: React.FC<RadialProfileSelectorProps> = ({
   profiles,
   activeProfileId,
 }: RadialProfileSelectorProps) => {
-  // Up to 8 profile slots
-  const displayProfiles = useMemo(() => profiles.slice(0, 8), [profiles]);
+  // Ring geometry adapts to the profile count (9 nodes sit slightly farther out
+  // so adjacent glass cards and their labels keep clear separation).
+  const displayProfiles = useMemo(() => profiles.slice(0, MAX_RING_PROFILES), [profiles]);
+  const itemRadius = displayProfiles.length > 8 ? ITEM_RADIUS + 9 : ITEM_RADIUS;
   const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
   const lastHapticIndexRef = useRef<number | null>(null);
 
@@ -215,11 +220,11 @@ export const RadialProfileSelector: React.FC<RadialProfileSelectorProps> = ({
             </Text>
           </View>
 
-          {/* Up to 8 Radial Profile Nodes */}
+          {/* Radial Profile Nodes (one per profile, capped at MAX_RING_PROFILES) */}
           {displayProfiles.map((profile: CameraProfile, i: number) => {
-            const sectorAngle = -Math.PI / 2 + i * ((2 * Math.PI) / 8);
-            const posX = Math.cos(sectorAngle) * ITEM_RADIUS;
-            const posY = Math.sin(sectorAngle) * ITEM_RADIUS;
+            const sectorAngle = -Math.PI / 2 + i * ((2 * Math.PI) / displayProfiles.length);
+            const posX = Math.cos(sectorAngle) * itemRadius;
+            const posY = Math.sin(sectorAngle) * itemRadius;
 
             const isHighlighted = highlightedIndex === i;
             const isCurrentlyActive = profile.id === activeProfileId;

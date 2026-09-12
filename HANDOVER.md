@@ -50,7 +50,7 @@ git push              # 6. 收工必须 push，否则另一台机器永远看不
 - ❌ 账号体系、云端同步、社交社区、Redux / Zustand 等重型状态管理库
 
 ### 2. 硬件控制边界
-- **用户只控制两件事**：1. 相机模拟型号 (8 个 Profile)；2. 光圈大小 ($f$-stop)。
+- **用户只控制两件事**：1. 相机模拟型号 (9 个 Profile)；2. 光圈大小 ($f$-stop)。
 - **其余一切全自动**：AF（自动对焦）、AE（自动曝光）、ISO、快门速度、AWB、系统防抖。
 - **光圈回退机制**：当前非 iPhone 18 Pro 机型或不支持物理可变光圈的硬件，界面明确显示 `Fixed ƒ/x`，光圈调节交互呈禁用/锁定状态，**严禁做纯软件虚化的假光圈**。
 
@@ -176,13 +176,13 @@ PhotoKit (add-only) 写入相册，界面缩略图立即可见
 
 4. **`CIContext` 开销**：`CIContext` 已提升为静态共享对象 (`private static let sharedContext`)，**严禁** 改回在每次按快门时 `new CIContext()`，否则连续拍照必定发生显存泄露并被 iOS Jetsam 杀进程。
 
-5. **相机 Profile 渲染一致性**：**禁止** 针对 Leica、Fuji、Ricoh 分别编写 `switch-case` 原生代码，所有 8 台相机必须共用 `ProfileRenderer.apply`，其风格完全由 JSON 矩阵定义。
+5. **相机 Profile 渲染一致性**：**禁止** 针对 Leica、Fuji、Ricoh 分别编写 `switch-case` 原生代码，所有相机（现 9 台）必须共用 `ProfileRenderer.apply`，其风格完全由 JSON 矩阵定义。
 
 6. **（Iteration 4 已修订）RAW 拍摄失败时的安全网**：旧行为是「RAW 失败即整张失败，不回退伴生 processed JPEG」（当时的产品决策）。按 Iteration 4「照片绝不静默消失」原则已改为：伴生 processed 图保留在 `companionData`，RAW/Camera DNA 管线失败时保存 Apple 原图并通过 `processingFallback` 标记告知用户。**不要改回静默丢弃**；若未来要收紧，必须先与用户确认。
 
 ---
 
-## 五、当前支持的 8 个相机预设
+## 五、当前支持的 9 个相机预设
 
 | 相机名称 | 预设推荐物理光圈 | 风格特征 |
 |---|---|---|
@@ -194,6 +194,7 @@ PhotoKit (add-only) 写入相册，界面缩略图立即可见
 | **Fuji Classic Negative** | $f/2.8$ | 强红黄硬调暗部偏绿 |
 | **Hasselblad Natural** | $f/2.8$ | 极度平滑真实自然色彩体系 |
 | **CineStill 800T** | $f/1.48$ | 电影暖冷对比、高光光晕 (Halation) |
+| **Absolute Hero** | $f/1.8$ | 鲜亮通透杂志感人像：钴蓝增益、皮肤透亮、暗部干净偏冷。源自像素蛋糕 140501「绝对主角」方向的原创近似，未复刻商业 LUT 数据 |
 
 *切换相机时，光圈自动归位到 Profile 的推荐值；在不支持该光圈的硬件上由原生层就近吸附。*
 

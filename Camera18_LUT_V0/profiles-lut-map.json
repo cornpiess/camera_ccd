@@ -50,6 +50,12 @@
       "displayName": "CineStill 800T color only",
       "lut": "luts/cinestill-800t.cube",
       "notes": "Cool/tungsten night palette with warm/red highlight tendency. Halation/grain must be separate from LUT."
+    },
+    {
+      "id": "absolute_hero",
+      "displayName": "Absolute Hero (PixCake 140501 direction)",
+      "lut": "luts/absolute-hero.cube",
+      "notes": "Vivid glossy portrait direction: bright clean mids, cobalt-blue boost, luminous warm skin, cool shadows, warm highlight glow. Generator: generate-absolute-hero.js."
     }
   ]
 }
