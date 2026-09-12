@@ -63,6 +63,14 @@ printf "protocol=https\nhost=github.com\n\n" | GCM_INTERACTIVE=never "$GCM" get
 git -c http.proxy=http://127.0.0.1:7890 -c credential.helper= -c credential.helper="$GCM" push origin main
 ```
 
+> 💡 **更简姿势（2026-09-12 实测有效）**：GCM 本身能从 Windows 凭据库直接取到凭据，挂死的只是默认交互提示（无 tty）。给整条 git 命令加环境变量让它走非交互路径即可，不必手动搬凭据：
+>
+> ```bash
+> GCM_INTERACTIVE=never git -c http.proxy=http://127.0.0.1:7890 -c https.proxy=http://127.0.0.1:7890 push origin main
+> ```
+>
+> 另外 git 网络命令在 Agent 沙箱内大概率不通（表现为 000/挂死），须在沙箱外执行。
+
 > ⚠️ **不要把代理写进 `.git/config`，也不要提交任何代理或密钥配置。** 换机器 / 换网络立刻失效，还会污染仓库。
 
 > ⚠️ 若本机 shell 里存在别处注入的 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量且指向不可用的端口，它会覆盖你的显式设置。排查时先 `env | grep -i proxy` 看一眼，必要时用 `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy git ...` 清掉。
