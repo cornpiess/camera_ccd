@@ -1,3 +1,6 @@
+// diagLog must be imported first: it self-installs on import so that any module-evaluation
+// error from the imports below (native module resolution included) is already captured.
+import { installDiagLog, recordDiag } from './src/utils/diagLog';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
@@ -54,6 +57,8 @@ import {
 } from './src/components';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+installDiagLog();
 
 /**
  * Top inset of the viewfinder touch area (styles.viewfinderTouchArea). Tap-to-focus layer
@@ -209,6 +214,7 @@ function CameraAppScreen(): React.JSX.Element {
   const transientErrorTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const showTransientError = useCallback((message: string) => {
+    recordDiag('error', `transient: ${message}`);
     if (transientErrorTimerRef.current) {
       clearTimeout(transientErrorTimerRef.current);
     }

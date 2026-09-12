@@ -1,6 +1,7 @@
 import React, { forwardRef, useImperativeHandle, type ComponentType } from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { requireNativeModule, requireNativeViewManager } from 'expo-modules-core';
+import { recordDiag, registeredExpoModuleNames } from '../utils/diagLog';
 
 export type CameraProfile = Record<string, unknown>;
 
@@ -69,29 +70,58 @@ type NativeCameraEngine = {
  * (same failure class as the GlassCard guarded glass require: an old/mismatched native side
  * must never cost the app its launch). On resolution failure we keep rendering and surface
  * the reason through the normal CameraErrorView path instead.
+ *
+ * The two resolutions are guarded SEPARATELY and the underlying error is preserved: the
+ * Expo runtime swallows inner failures into a console.warn and only reports "Cannot find
+ * native module", so the registered-module list is attached to make the report actionable.
  */
-const CAMERA_MODULE_UNAVAILABLE_MESSAGE =
-  'The CameraEngine native module is missing from this app build — the JS and native sides were built from different commits. Rebuild and reinstall the app.';
+type NativeResolution =
+  | {
+      readonly ok: true;
+      readonly module: NativeCameraEngine;
+      readonly preview: ComponentType<CameraEngineViewProps>;
+    }
+  | { readonly ok: false; readonly stage: 'module' | 'view'; readonly detail: string };
 
-type NativeParts = {
-  module: NativeCameraEngine;
-  preview: ComponentType<CameraEngineViewProps>;
-};
+function describeError(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
 
-function resolveNativeParts(): NativeParts | null {
+function resolveNativeParts(): NativeResolution {
   try {
     const mod = requireNativeModule<NativeCameraEngine>('CameraEngine');
-    const preview = requireNativeViewManager<CameraEngineViewProps>('CameraEngine');
-    return { module: mod, preview };
-  } catch {
-    return null;
+    try {
+      const preview = requireNativeViewManager<CameraEngineViewProps>('CameraEngine');
+      return { ok: true, module: mod, preview };
+    } catch (viewError) {
+      return { ok: false, stage: 'view', detail: describeError(viewError) };
+    }
+  } catch (moduleError) {
+    return {
+      ok: false,
+      stage: 'module',
+      detail: `${describeError(moduleError)} | registered expo modules: ${registeredExpoModuleNames()}`,
+    };
   }
 }
 
-const nativeParts = resolveNativeParts();
+const nativeResolution = resolveNativeParts();
+
+if (!nativeResolution.ok) {
+  recordDiag('error', `CameraEngine native resolution failed (${nativeResolution.stage}): ${nativeResolution.detail}`);
+}
+
+const CAMERA_MODULE_UNAVAILABLE_PREFIX = 'The CameraEngine native side failed to load in this app build';
+const CAMERA_MODULE_UNAVAILABLE_SUFFIX =
+  'The JS and native sides may come from different commits — rebuild and reinstall the app.';
 
 function unavailableError(): CameraEngineError {
-  return new CameraEngineError('ERR_NATIVE_FAILURE', CAMERA_MODULE_UNAVAILABLE_MESSAGE);
+  return new CameraEngineError(
+    'ERR_NATIVE_FAILURE',
+    nativeResolution.ok
+      ? CAMERA_MODULE_UNAVAILABLE_PREFIX
+      : `${CAMERA_MODULE_UNAVAILABLE_PREFIX} (${nativeResolution.stage}: ${nativeResolution.detail}). ${CAMERA_MODULE_UNAVAILABLE_SUFFIX}`,
+  );
 }
 
 const unavailableModule: NativeCameraEngine = {
@@ -109,8 +139,10 @@ const UnavailablePreview: ComponentType<CameraEngineViewProps> = ({ style }) => 
   <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000000' }, style]} pointerEvents="none" />
 );
 
-const NativeModule: NativeCameraEngine = nativeParts ? nativeParts.module : unavailableModule;
-const NativePreview: ComponentType<CameraEngineViewProps> = nativeParts ? nativeParts.preview : UnavailablePreview;
+const NativeModule: NativeCameraEngine = nativeResolution.ok ? nativeResolution.module : unavailableModule;
+const NativePreview: ComponentType<CameraEngineViewProps> = nativeResolution.ok
+  ? nativeResolution.preview
+  : UnavailablePreview;
 
 function typed<T>(operation: Promise<T>): Promise<T> {
   return operation.catch((cause: unknown) => {

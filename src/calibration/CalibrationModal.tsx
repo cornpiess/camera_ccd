@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import { useProfiles } from '../profiles';
+import { getDiagLogText } from '../utils/diagLog';
 
 export interface CalibrationModalProps {
   readonly visible: boolean;
@@ -42,6 +43,7 @@ function ActionButton({ label, onPress, disabled = false, destructive = false }:
 export function CalibrationModal({ visible, onClose }: CalibrationModalProps): React.JSX.Element {
   const { applyText, clearErrors, document, errors, exportJson, importJson, loading, reload, reset } = useProfiles();
   const [text, setText] = useState('');
+  const [diagText, setDiagText] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
 
   const run = useCallback(async (action: () => Promise<boolean>, clearOnSuccess = false): Promise<void> => {
@@ -127,6 +129,25 @@ export function CalibrationModal({ visible, onClose }: CalibrationModalProps): R
                 <Text key={`${index}-${error}`} selectable style={styles.errorText}>• {error}</Text>
               ))}
             </View>
+          ) : null}
+
+          <Text style={styles.label}>Diagnostic log</Text>
+          <ActionButton
+            disabled={diagText !== null}
+            label="Load Diagnostic Log"
+            onPress={() => setDiagText(getDiagLogText() || '(log is empty)')}
+          />
+          {diagText !== null ? (
+            <TextInput
+              accessibilityLabel="Diagnostic log content"
+              editable={false}
+              multiline
+              scrollEnabled
+              selectTextOnFocus
+              style={styles.editor}
+              textAlignVertical="top"
+              value={diagText}
+            />
           ) : null}
         </ScrollView>
       </KeyboardAvoidingView>

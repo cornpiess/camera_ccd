@@ -1,5 +1,6 @@
 import React from 'react';
 import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { getDiagLogText, recordDiag } from '../utils/diagLog';
 
 type StartupErrorBoundaryProps = {
   readonly children: React.ReactNode;
@@ -30,6 +31,7 @@ export class StartupErrorBoundary extends React.Component<
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
     // Also reach the system log so the failure is visible when the phone is attached to Metro.
     console.error('[StartupErrorBoundary]', error.message, error.stack, info.componentStack);
+    recordDiag('fatal', `Render failure: ${error.stack ?? `${error.name}: ${error.message}`}`);
   }
 
   render(): React.ReactNode {
@@ -37,6 +39,8 @@ export class StartupErrorBoundary extends React.Component<
     if (!error) {
       return this.props.children;
     }
+
+    const diagLog = getDiagLogText();
 
     return (
       <View style={styles.screen}>
@@ -47,6 +51,10 @@ export class StartupErrorBoundary extends React.Component<
             {error.message}
           </Text>
           {error.stack ? <Text selectable style={styles.stack}>{error.stack}</Text> : null}
+          <Text selectable style={styles.logHeading}>Diagnostic log</Text>
+          <Text selectable style={styles.stack}>
+            {diagLog}
+          </Text>
         </ScrollView>
         <Text style={styles.hint}>
           Screenshot this screen and send it to the developer — it pinpoints the failure.
@@ -99,6 +107,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
     fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
+  },
+  logHeading: {
+    color: '#8DB8FF',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 14,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
   hint: {
     color: 'rgba(255, 255, 255, 0.55)',
