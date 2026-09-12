@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import type { CameraProfile } from '../profiles/types';
 import { markerGlyph, profileDisplayName } from './types';
 import { GlassCard } from './GlassCard';
-import { ProfileConfigModal } from '../calibration/ProfileConfigModal';
 
 export interface CameraSelectorProps {
   readonly visible: boolean;
@@ -14,10 +13,22 @@ export interface CameraSelectorProps {
   readonly onClose: () => void;
 }
 
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const ROW_HEIGHT = 56;
+const PANEL_MAX_WIDTH = Math.min(320, Math.round(SCREEN_WIDTH * 0.72));
+// The morph starts from the TopBar capsule's approximate geometry (centered capsule,
+// 44pt tall, sitting just under the status bar) and blooms into the full panel.
+const CAPSULE_WIDTH = 210;
+const CAPSULE_HEIGHT = 44;
+// TopBar's capsule sits just below the SafeArea inset (~55pt on notched devices).
+const CAPSULE_TOP = 55;
+const PANEL_TOP = 92;
+
 /**
- * The formal Camera Selection entry point (the radial ring is only a shortcut for
- * expert users): a Liquid Glass strip under the top camera badge. Each item is an
- * abstract marker glyph + its own production name — no real-camera imagery, no logos.
+ * Liquid-glass camera selector. Opening is not a fade-in: the panel MORPHS out of the
+ * top camera capsule — it blooms from the capsule's width/height/position with a springy
+ * overshoot (the "water pop"), while the camera list fades in only once the glass has
+ * reached full size. Closing runs the reverse: the panel pours back into the capsule.
  */
 export const CameraSelector: React.FC<CameraSelectorProps> = ({
   visible,
@@ -26,23 +37,77 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   onSelectProfile,
   onClose,
 }: CameraSelectorProps) => {
-  const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(-12)).current;
-  // Per-camera configuration entry: the gear opens the JSON tune sheet for that camera.
-  const [configProfileId, setConfigProfileId] = useState<string | null>(null);
+  // `mounted` keeps the tree alive while the close animation pours the panel back.
+  const [mounted, setMounted] = useState(visible);
+  const progress = useRef(new Animated.Value(0)).current;
+  const animRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
+    animRef.current?.stop();
     if (visible) {
-      Animated.parallel([
-        Animated.timing(opacity, { toValue: 1, duration: 150, useNativeDriver: true }),
-        Animated.spring(translateY, { toValue: 0, friction: 9, tension: 180, useNativeDriver: true }),
-      ]).start();
+      setMounted(true);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      animRef.current = Animated.spring(progress, {
+        toValue: 1,
+        tension: 120,
+        friction: 10,
+        useNativeDriver: false,
+      });
+      animRef.current.start();
     } else {
-      Animated.timing(opacity, { toValue: 0, duration: 120, useNativeDriver: true }).start();
+      animRef.current = Animated.timing(progress, {
+        toValue: 0,
+        duration: 170,
+        useNativeDriver: false,
+      });
+      animRef.current.start(({ finished }) => {
+        if (finished) setMounted(false);
+      });
     }
-  }, [visible, opacity, translateY]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
-  if (!visible) return null;
+  if (!mounted || profiles.length === 0) return null;
+
+  const panelHeight = profiles.length * ROW_HEIGHT;
+  const width = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [CAPSULE_WIDTH, PANEL_MAX_WIDTH],
+    extrapolate: 'clamp',
+  });
+  const height = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [CAPSULE_HEIGHT, panelHeight],
+    extrapolate: 'clamp',
+  });
+  const top = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [CAPSULE_TOP, PANEL_TOP],
+    extrapolate: 'clamp',
+  });
+  // The capsule look during the morph: capsule width carries its own corner radius.
+  const radius = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [22, 20],
+    extrapolate: 'clamp',
+  });
+  const backdropOpacity = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 0.3],
+    extrapolate: 'clamp',
+  });
+  // Rows stay hidden while the glass is still blooming; they surface only once the
+  // panel reaches (or overshoots) its full size.
+  const contentOpacity = progress.interpolate({
+    inputRange: [0, 0.7, 1],
+    outputRange: [0, 0, 1],
+    extrapolate: 'clamp',
+  });
+  const contentScale = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.94, 1],
+    extrapolate: 'clamp',
+  });
 
   const handleSelect = (profile: CameraProfile) => {
     Haptics.selectionAsync().catch(() => {});
@@ -51,66 +116,56 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   };
 
   return (
-    <View style={[StyleSheet.absoluteFillObject, styles.root]}>
-      <Pressable
-        accessibilityLabel="Close camera selector"
-        accessibilityRole="button"
-        style={styles.backdrop}
-        onPress={onClose}
-      />
-      <Animated.View style={[styles.panelPosition, { opacity, transform: [{ translateY }], height: profiles.length * 56 }]}>
-        <GlassCard borderRadius={20} isInteractive style={styles.panel}>
-          {profiles.map((profile) => {
-            const isActive = profile.id === activeProfileId;
-            const accent = profile.ui?.accent || '#FFFFFF';
-            const displayName = profileDisplayName(profile);
-            return (
-              <Pressable
-                key={profile.id}
-                accessibilityRole="button"
-                accessibilityState={{ selected: isActive }}
-                accessibilityLabel={`${displayName}${isActive ? ', selected' : ''}`}
-                onPress={() => handleSelect(profile)}
-                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-              >
-                <Text
-                  style={[
-                    styles.rowGlyph,
-                    { color: isActive ? accent : 'rgba(255, 255, 255, 0.55)' },
-                  ]}
-                >
-                  {markerGlyph(profile.ui?.markerStyle)}
-                </Text>
-                <Text style={[styles.rowName, isActive && styles.rowNameActive]} numberOfLines={1}>
-                  {displayName}
-                </Text>
-                {isActive ? (
-                  <View style={[styles.activeDot, { backgroundColor: accent }]} />
-                ) : null}
-                <Pressable
-                  accessibilityLabel={`Configure ${displayName}`}
-                  accessibilityRole="button"
-                  hitSlop={8}
-                  onPress={() => {
-                    Haptics.selectionAsync().catch(() => {});
-                    setConfigProfileId(profile.id);
-                  }}
-                  style={({ pressed }) => [styles.configButton, pressed && styles.configButtonPressed]}
-                >
-                  <Text style={[styles.configGlyph, { color: accent }]}>⚙</Text>
-                </Pressable>
-              </Pressable>
-            );
-          })}
-        </GlassCard>
+    <View style={[StyleSheet.absoluteFillObject, styles.root]} pointerEvents="box-none">
+      <Animated.View style={[StyleSheet.absoluteFillObject, styles.backdrop, { opacity: backdropOpacity }]}>
+        <Pressable
+          accessibilityLabel="Close camera selector"
+          accessibilityRole="button"
+          style={styles.backdropPress}
+          onPress={onClose}
+        />
       </Animated.View>
-
-      {/* Per-camera JSON import / tune sheet (stays open over the selector) */}
-      <ProfileConfigModal
-        visible={configProfileId !== null}
-        profileId={configProfileId}
-        onClose={() => setConfigProfileId(null)}
-      />
+      {/* Centered morph host: animated top + width/height, horizontally centered */}
+      <Animated.View style={[styles.morphHost, { top }]} pointerEvents="box-none">
+        <Animated.View style={[styles.morphPanel, { width, height, borderRadius: radius }]}>
+          <GlassCard borderRadius={20} isInteractive style={styles.panel}>
+            <Animated.View
+              style={[styles.content, { opacity: contentOpacity, transform: [{ scale: contentScale }] }]}
+            >
+              {profiles.map((profile) => {
+                const isActive = profile.id === activeProfileId;
+                const accent = profile.ui?.accent || '#FFFFFF';
+                const displayName = profileDisplayName(profile);
+                return (
+                  <Pressable
+                    key={profile.id}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isActive }}
+                    accessibilityLabel={`${displayName}${isActive ? ', selected' : ''}`}
+                    onPress={() => handleSelect(profile)}
+                    style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                  >
+                    <Text
+                      style={[
+                        styles.rowGlyph,
+                        { color: isActive ? accent : 'rgba(255, 255, 255, 0.55)' },
+                      ]}
+                    >
+                      {markerGlyph(profile.ui?.markerStyle)}
+                    </Text>
+                    <Text style={[styles.rowName, isActive && styles.rowNameActive]} numberOfLines={1}>
+                      {displayName}
+                    </Text>
+                    {isActive ? (
+                      <View style={[styles.activeDot, { backgroundColor: accent }]} />
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </Animated.View>
+          </GlassCard>
+        </Animated.View>
+      </Animated.View>
     </View>
   );
 };
@@ -120,19 +175,31 @@ const styles = StyleSheet.create({
     zIndex: 40,
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
   },
-  panelPosition: {
+  backdropPress: {
+    flex: 1,
+  },
+  morphHost: {
     position: 'absolute',
-    top: 92,
-    alignSelf: 'center',
-    width: '72%',
-    maxWidth: 320,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  morphPanel: {
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.35,
+    shadowRadius: 24,
+    elevation: 12,
   },
   panel: {
     flex: 1,
     paddingVertical: 6,
+  },
+  content: {
+    flex: 1,
   },
   row: {
     flexDirection: 'row',
@@ -162,19 +229,5 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 3.5,
-  },
-  configButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 2,
-  },
-  configButtonPressed: {
-    backgroundColor: 'rgba(255, 255, 255, 0.14)',
-  },
-  configGlyph: {
-    fontSize: 17,
   },
 });
