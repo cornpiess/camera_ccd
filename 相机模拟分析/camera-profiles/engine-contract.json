@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "contractId": "camera-look-engine/v1",
+  "description": "App 与相机风格资源包之间的稳定渲染契约。Profile 只描述风格；设备、镜头、RAW/Preview 输入归一化由 App 的 InputAdapter 负责。",
+  "colorContract": {
+    "sceneWorkingSpace": "extended-linear-display-p3",
+    "sceneWhitePoint": "D65",
+    "lookLutSpace": "display-p3-srgb-transfer",
+    "intermediatePrecision": "rgba16Float-or-better",
+    "alphaMode": "unpremultiplied-during-look",
+    "supportedOutputs": ["display-p3", "srgb"],
+    "forbidEightBitIntermediate": true
+  },
+  "inputAdapterContract": {
+    "ownedBy": "app",
+    "selectorKeys": ["deviceModel", "physicalLens", "captureKind", "pixelFormat", "colorPrimaries", "transferFunction", "osMajorVersion"],
+    "requiredCaptureKinds": ["raw-final", "processed-preview"],
+    "rule": "两个输入前端必须分别校准到 sceneWorkingSpace；禁止把 processed preview 当作 RAW 线性数据。"
+  },
+  "fixedPipeline": [
+    "inputAdapter",
+    "creativeExposureAndWhiteBalance",
+    "optionalHalationSourceInSceneLinear",
+    "monotoneToneCurve",
+    "encodeToLookLutSpace",
+    "lookLut",
+    "decodeFromLookLutSpace",
+    "localContrastAndDetail",
+    "grain",
+    "vignette",
+    "outputGamutAndTransfer"
+  ],
+  "parameterSemantics": {
+    "exposureEV": "log2 stops",
+    "temperatureShiftK": "creative relative Kelvin shift; not capture WB",
+    "tintShift": "relative green-magenta creative shift in engine normalized units",
+    "toneCurve": "monotone [x,y] points in normalized scene-linear luma after exposure/WB; engine compiles to a 1D LUT",
+    "lutStrength": "mix(preLut, postLut, strength) in lookLutSpace",
+    "radiusFraction": "radius divided by the short image edge",
+    "grainSize": "normalized viewing-scale grain diameter; engine maps it to render resolution"
+  },
+  "renderIntent": {
+    "preview": {
+      "lutTier": "preview",
+      "allowReducedSpatialQuality": true,
+      "temporalSmoothingRequired": true
+    },
+    "final": {
+      "lutTier": "final",
+      "allowReducedSpatialQuality": false,
+      "useFrozenCaptureState": true
+    }
+  },
+  "failurePolicy": {
+    "missingManifest": "fail-closed-to-neutral-camera",
+    "invalidProfile": "disable-profile-and-report",
+    "missingAsset": "disable-profile-and-report",
+    "unsupportedSchema": "reject-library",
+    "neverSilentlySubstituteAnotherLook": true
+  }
+}

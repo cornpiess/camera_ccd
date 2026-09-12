@@ -1,0 +1,32 @@
+{
+  "settings" : {
+      "aspectRatio": 0
+  },
+  "version" : "1.0.0",
+  "isAI": 0,
+  "params" : {
+    "correction" : {
+      "id" : 0
+    },
+    "qualityEnhance" : {
+      "id" : 0
+    },
+    "lensBlur" : {
+      "id" : 140603,
+      "defaultValue" : 30,
+      "shapeValue" : 60
+    },
+    "longExposure" : {
+      "id" : 0
+    },
+    "color" : {
+      "id" : 140357
+    },
+    "portrait" : {
+      "id" : 140402
+    },
+    "lightning" : {
+      "id" : 0
+    }
+  }
+}

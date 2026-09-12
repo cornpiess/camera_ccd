@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "camera-look-manifest-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "libraryId", "libraryVersion", "engineContract", "integrity", "profileSchema", "defaultProfileId", "profiles"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "libraryId": {"type": "string", "minLength": 1},
+    "libraryVersion": {"type": "string", "minLength": 1},
+    "engineContract": {"type": "string", "minLength": 1},
+    "integrity": {"type": "string", "minLength": 1},
+    "profileSchema": {"type": "string", "minLength": 1},
+    "defaultProfileId": {"type": "string", "minLength": 1},
+    "profiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "displayName", "path", "enabled", "sort"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "displayName": {"type": "string", "minLength": 1},
+          "path": {"type": "string", "minLength": 1},
+          "enabled": {"type": "boolean"},
+          "sort": {"type": "integer"}
+        }
+      }
+    }
+  }
+}

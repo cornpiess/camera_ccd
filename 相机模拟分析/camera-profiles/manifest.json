@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "libraryId": "camera-look-library",
+  "libraryVersion": "1.0.0",
+  "engineContract": "engine-contract.json",
+  "integrity": "integrity.json",
+  "profileSchema": "schema/profile.schema.json",
+  "defaultProfileId": "fuji-nc",
+  "profiles": [
+    {
+      "id": "fuji-nc",
+      "displayName": "富士 NC",
+      "path": "profiles/fuji-nc/profile.json",
+      "enabled": true,
+      "sort": 10
+    },
+    {
+      "id": "leica-m9",
+      "displayName": "徕卡 M9",
+      "path": "profiles/leica-m9/profile.json",
+      "enabled": true,
+      "sort": 20
+    },
+    {
+      "id": "ricoh-positive",
+      "displayName": "理光正片",
+      "path": "profiles/ricoh-positive/profile.json",
+      "enabled": true,
+      "sort": 30
+    },
+    {
+      "id": "canon-g7x2",
+      "displayName": "佳能 G7X2",
+      "path": "profiles/canon-g7x2/profile.json",
+      "enabled": true,
+      "sort": 40
+    }
+  ]
+}

@@ -1,0 +1,326 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "camera-look-profile-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "engineContract", "id", "version", "displayName", "shortName", "aliases", "status", "category", "provenance", "ui", "captureHints", "runtime", "authoring", "calibration"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "engineContract": {"const": "camera-look-engine/v1"},
+    "id": {"type": "string", "minLength": 1},
+    "version": {"type": "string", "minLength": 1},
+    "displayName": {"type": "string", "minLength": 1},
+    "shortName": {"type": "string", "minLength": 1},
+    "aliases": {"type": "array", "items": {"type": "string"}},
+    "status": {"enum": ["experimental", "calibrating", "production"]},
+    "category": {"enum": ["film-negative", "film-positive", "digital-ccd", "digital-compact", "monochrome", "cinema-film", "creative"]},
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "statement", "rights"],
+      "properties": {
+        "kind": {"const": "independent-design"},
+        "statement": {"type": "string", "minLength": 1},
+        "rights": {"const": "original-parameters-no-third-party-lut"}
+      }
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accentHex", "bodyHex", "description"],
+      "properties": {
+        "accentHex": {"type": "string"},
+        "bodyHex": {"type": "string"},
+        "description": {"type": "string", "minLength": 1}
+      }
+    },
+    "captureHints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preferredAperture", "apertureBehavior", "preferredExposureCompensationEV"],
+      "properties": {
+        "preferredAperture": {"type": "number", "exclusiveMinimum": 0},
+        "apertureBehavior": {"const": "capability-gated-no-software-bokeh"},
+        "preferredExposureCompensationEV": {"type": "number"}
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strength", "creativeBase", "toneCurve", "lut", "adaptation", "detail", "texture", "vignette", "halation", "output"],
+      "properties": {
+        "strength": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["default", "minimum", "maximum", "userAdjustable"],
+          "properties": {
+            "default": {"type": "number", "minimum": 0, "maximum": 1},
+            "minimum": {"type": "number", "minimum": 0, "maximum": 1},
+            "maximum": {"type": "number", "minimum": 0, "maximum": 1},
+            "userAdjustable": {"type": "boolean"}
+          }
+        },
+        "creativeBase": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["exposureEV", "temperatureShiftK", "tintShift"],
+          "properties": {
+            "exposureEV": {"type": "number"},
+            "temperatureShiftK": {"type": "number"},
+            "tintShift": {"type": "number"}
+          }
+        },
+        "toneCurve": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["domain", "interpolation", "points"],
+          "properties": {
+            "domain": {"const": "scene-linear-luma-normalized"},
+            "interpolation": {"const": "monotone-cubic"},
+            "points": {
+              "type": "array",
+              "minItems": 5,
+              "maxItems": 17,
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  {"type": "number", "minimum": 0, "maximum": 1},
+                  {"type": "number", "minimum": 0, "maximum": 1}
+                ],
+                "items": false,
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          }
+        },
+        "lut": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["domain", "interpolation", "strength", "preview", "final"],
+          "properties": {
+            "domain": {"const": "display-p3-srgb-transfer"},
+            "interpolation": {"enum": ["trilinear", "tetrahedral"]},
+            "strength": {"type": "number", "minimum": 0, "maximum": 1},
+            "preview": {"$ref": "#/$defs/lutAsset"},
+            "final": {"$ref": "#/$defs/lutAsset"}
+          }
+        },
+        "adaptation": {"$ref": "#/$defs/adaptation"},
+        "detail": {"$ref": "#/$defs/detail"},
+        "texture": {"$ref": "#/$defs/texture"},
+        "vignette": {"$ref": "#/$defs/vignette"},
+        "halation": {"$ref": "#/$defs/halation"},
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["preferredColorSpace", "fallbackColorSpace", "gamutMapping", "unexpectedClipLimit"],
+          "properties": {
+            "preferredColorSpace": {"const": "display-p3"},
+            "fallbackColorSpace": {"const": "srgb"},
+            "gamutMapping": {"const": "hue-preserving-soft-compress"},
+            "unexpectedClipLimit": {"type": "number", "minimum": 0, "maximum": 0.1}
+          }
+        }
+      }
+    },
+    "authoring": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generator", "lutModel"],
+      "properties": {
+        "generator": {"const": "tools/generate_luts.py"},
+        "lutModel": {"$ref": "#/$defs/lutModel"}
+      }
+    },
+    "calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "state", "basis", "limitations"],
+      "properties": {
+        "revision": {"type": "integer", "minimum": 1},
+        "state": {"enum": ["designed-unmeasured", "paired-sample-tuned", "instrument-calibrated"]},
+        "basis": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "limitations": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+      }
+    }
+  },
+  "$defs": {
+    "lutAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size", "format"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "size": {"type": "integer", "minimum": 2, "maximum": 128},
+        "format": {"const": "cube-3d-float"}
+      }
+    },
+    "adaptation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cct", "exposure", "temporalSmoothing"],
+      "properties": {
+        "cct": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "interpolation", "lowConfidenceBlendToNeutral", "knots"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "interpolation": {"const": "mired-linear"},
+            "lowConfidenceBlendToNeutral": {"type": "number", "minimum": 0, "maximum": 1},
+            "knots": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kelvin", "additionalTemperatureShiftK", "additionalTintShift", "lutStrengthScale"],
+                "properties": {
+                  "kelvin": {"type": "number", "minimum": 1500, "maximum": 15000},
+                  "additionalTemperatureShiftK": {"type": "number"},
+                  "additionalTintShift": {"type": "number"},
+                  "lutStrengthScale": {"type": "number", "minimum": 0, "maximum": 1.5}
+                }
+              }
+            }
+          }
+        },
+        "exposure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "targetMedianLuma", "strength", "maxCorrectionEV", "highlightProtectionStart"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "targetMedianLuma": {"type": "number", "minimum": 0.01, "maximum": 0.9},
+            "strength": {"type": "number", "minimum": 0, "maximum": 1},
+            "maxCorrectionEV": {"type": "number", "minimum": 0, "maximum": 2},
+            "highlightProtectionStart": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "temporalSmoothing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["previewHalfLifeMs", "freezeOnShutter"],
+          "properties": {
+            "previewHalfLifeMs": {"type": "integer", "minimum": 0, "maximum": 5000},
+            "freezeOnShutter": {"const": true}
+          }
+        }
+      }
+    },
+    "detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["localContrastAmount", "localContrastRadiusFraction", "sharpenAmount", "sharpenRadiusPxAt12MP", "deharshAmount"],
+      "properties": {
+        "localContrastAmount": {"type": "number", "minimum": -1, "maximum": 1},
+        "localContrastRadiusFraction": {"type": "number", "minimum": 0, "maximum": 0.1},
+        "sharpenAmount": {"type": "number", "minimum": 0, "maximum": 1},
+        "sharpenRadiusPxAt12MP": {"type": "number", "minimum": 0, "maximum": 5},
+        "deharshAmount": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "texture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["grainModel", "amount", "size", "chromaAmount", "shadowBias", "highlightSuppression", "seedPolicy"],
+      "properties": {
+        "grainModel": {"enum": ["film-density", "ccd-shadow", "digital-fine", "none"]},
+        "amount": {"type": "number", "minimum": 0, "maximum": 1},
+        "size": {"type": "number", "minimum": 0, "maximum": 1},
+        "chromaAmount": {"type": "number", "minimum": 0, "maximum": 1},
+        "shadowBias": {"type": "number", "minimum": -1, "maximum": 1},
+        "highlightSuppression": {"type": "number", "minimum": 0, "maximum": 1},
+        "seedPolicy": {"const": "capture-uuid-profile-version"}
+      }
+    },
+    "vignette": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amountEV", "midpoint", "feather"],
+      "properties": {
+        "amountEV": {"type": "number", "minimum": -2, "maximum": 0},
+        "midpoint": {"type": "number", "minimum": 0, "maximum": 1},
+        "feather": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "halation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "threshold", "amount", "radiusFraction", "colorRGB"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "threshold": {"type": "number", "minimum": 0, "maximum": 8},
+        "amount": {"type": "number", "minimum": 0, "maximum": 1},
+        "radiusFraction": {"type": "number", "minimum": 0, "maximum": 0.1},
+        "colorRGB": {
+          "type": "array",
+          "prefixItems": [{"type": "number"}, {"type": "number"}, {"type": "number"}],
+          "items": false,
+          "minItems": 3,
+          "maxItems": 3
+        }
+      }
+    },
+    "lutModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matrix", "globalSaturation", "vibrance", "hueBands", "splitToning", "softClip"],
+      "properties": {
+        "matrix": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {"type": "number"}
+          }
+        },
+        "globalSaturation": {"type": "number", "minimum": 0, "maximum": 2},
+        "vibrance": {"type": "number", "minimum": -1, "maximum": 1},
+        "hueBands": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "centerDegrees", "widthDegrees", "hueShiftDegrees", "saturationScale", "lumaScale"],
+            "properties": {
+              "name": {"enum": ["red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta"]},
+              "centerDegrees": {"type": "number"},
+              "widthDegrees": {"type": "number", "exclusiveMinimum": 0},
+              "hueShiftDegrees": {"type": "number"},
+              "saturationScale": {"type": "number", "minimum": 0, "maximum": 2},
+              "lumaScale": {"type": "number", "minimum": 0.5, "maximum": 1.5}
+            }
+          }
+        },
+        "splitToning": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["shadowRGB", "shadowStrength", "highlightRGB", "highlightStrength", "balance", "transitionWidth"],
+          "properties": {
+            "shadowRGB": {"$ref": "#/$defs/rgbTriplet"},
+            "shadowStrength": {"type": "number", "minimum": 0, "maximum": 1},
+            "highlightRGB": {"$ref": "#/$defs/rgbTriplet"},
+            "highlightStrength": {"type": "number", "minimum": 0, "maximum": 1},
+            "balance": {"type": "number", "minimum": -1, "maximum": 1},
+            "transitionWidth": {"type": "number", "minimum": 0.05, "maximum": 1}
+          }
+        },
+        "softClip": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "rgbTriplet": {
+      "type": "array",
+      "prefixItems": [{"type": "number"}, {"type": "number"}, {"type": "number"}],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    }
+  }
+}

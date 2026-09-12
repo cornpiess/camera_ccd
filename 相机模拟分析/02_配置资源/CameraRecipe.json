@@ -1,0 +1,33 @@
+[{
+        "id": -1,
+        "label": "相机配方",
+        "children": [
+            {
+                "id": 140501,
+                "path": "CameraRecipe/140501",
+                "name": "绝对主角",
+                "isAI": 1,
+                "iconPath": "EffectUIConfig/CameraRecipe/140501.png",
+                "brandIcon": "EffectUIConfig/CameraRecipe/140501_brand.png"
+            },
+            {
+                "id": 140502,
+                "path": "CameraRecipe/140502",
+                "name": "流影穿梭",
+                "isAI": 1,
+                "iconPath": "EffectUIConfig/CameraRecipe/140502.png",
+                "brandIcon": "EffectUIConfig/CameraRecipe/140502_brand.png"
+            },
+            {
+                "id": 140503,
+                "path": "CameraRecipe/140503",
+                "name": "霓虹车影",
+                "isAI": 1,
+                "iconPath": "EffectUIConfig/CameraRecipe/140503.png",
+                "brandIcon": "EffectUIConfig/CameraRecipe/140503_brand.png"
+            }
+        ]
+    }
+]
+
+
