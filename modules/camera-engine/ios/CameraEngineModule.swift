@@ -437,6 +437,9 @@ public final class CameraEngineView: ExpoView {
     super.layoutSubviews()
     renderLayer.frame = bounds
     previewView?.frame = bounds
+    // A relayout accompanies interface rotation — re-sync the output connections right
+    // here so preview framing follows the rotated UI immediately (no-change guarded).
+    syncOutputOrientation()
   }
 
   fileprivate func setProfile(_ value: [String: Any]) {
@@ -501,6 +504,21 @@ public final class CameraEngineView: ExpoView {
   }
 
   private static func currentDeviceOrientation() -> AVCaptureVideoOrientation? {
+    // The UI itself rotates (canonical camera interaction), so the WINDOW SCENE's
+    // interface orientation is the authoritative source — it reflects what the user
+    // actually sees. Device orientation is only the fallback (e.g. scene not yet ready).
+    if let scene = UIApplication.shared.connectedScenes
+      .compactMap({ $0 as? UIWindowScene })
+      .first(where: { $0.activationState == .foregroundActive }) {
+      switch scene.interfaceOrientation {
+      case .portrait: return .portrait
+      case .portraitUpsideDown: return .portraitUpsideDown
+      case .landscapeLeft: return .landscapeLeft
+      case .landscapeRight: return .landscapeRight
+      case .unknown: break
+      @unknown default: break
+      }
+    }
     let deviceOrientation = UIDevice.current.orientation
     // During a physical rotation the OS briefly reports faceUp / unknown. Returning a
     // fallback here made the connection orientation oscillate portrait ↔ landscape and

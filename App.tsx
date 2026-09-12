@@ -13,6 +13,8 @@ import {
   Platform,
   PanResponder,
   Text,
+  TouchableOpacity,
+  useWindowDimensions,
   type GestureResponderEvent,
   type PanResponderGestureState,
 } from 'react-native';import * as Haptics from 'expo-haptics';
@@ -30,6 +32,7 @@ import {
 import { loadCameraState, rememberAperture, saveCameraState, type CameraState } from './src/camera/cameraStateStore';
 import { buildFocalStops, defaultFocalStop, type FocalStop } from './src/camera/focalLadder';
 import { apertureVisualFactors, applyApertureVisual } from './src/camera/apertureVisualProfile';
+import { deriveSkin, isLightColor } from './src/theme/skin';
 
 // Profile management provider
 import { ProfileProvider, useProfiles } from './src/profiles/ProfileProvider';
@@ -59,36 +62,50 @@ import {
   type Point,
 } from './src/components';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const SCREEN_WIDTH_FALLBACK = Dimensions.get('window').width;
+const SCREEN_HEIGHT_FALLBACK = Dimensions.get('window').height;
 
 installDiagLog();
 
 /**
- * Viewfinder layout — three explicit bands (portrait-locked UI, screen dims are stable):
+ * Viewfinder layout — CANONICAL camera-app rotation semantics:
  *
- *   ┌──────────────────────────┐
- *   │  TOP_AREA (top bar zone) │  64pt
- *   ├──────────────────────────┤
- *   │  VIEWFINDER (4:3, full   │  the capture frame; exactly what the photo contains
- *   │  width, centered in the  │
- *   │  middle band)            │
- *   ├──────────────────────────┤
- *   │  BOTTOM_AREA (focal      │  248pt: focal circles + aperture bar + shutter row
- *   │  circles / aperture /    │
- *   │  shutter)                │
- *   └──────────────────────────┘
+ * The WHOLE interface rotates with the device (app.json orientation=default). The
+ * viewfinder is always the exact 4:3 capture frame:
+ *   - portrait:  full-width 4:3 band below the top capsule; controls overlay the bottom.
+ *   - landscape: full-height 4:3 frame centered horizontally; controls overlay top/bottom
+ *                (the system-camera look — no dead black bands).
  *
- * The native preview is a 4:3 image letterboxed inside this rect, so rect == frame —
- * no letterbox, no crop. Tap-to-focus is normalized against THIS rect.
+ * All geometry derives from useWindowDimensions(), so rotation re-lays-out live. The
+ * native MTKView letterboxes the 4:3 frame inside this rect; because the rect itself is
+ * 4:3, rect == frame — no visible letterbox, and tap-to-focus normalizes against it.
  */
-const TOP_AREA = 64;
-const BOTTOM_AREA = 248;
-const VIEWFINDER_HEIGHT = Math.round(SCREEN_WIDTH * (4 / 3));
-const VIEWFINDER_TOP = TOP_AREA + Math.max(
-  0,
-  Math.round((SCREEN_HEIGHT - TOP_AREA - BOTTOM_AREA - VIEWFINDER_HEIGHT) / 2),
-);
-const VIEWFINDER_BOTTOM = VIEWFINDER_TOP + VIEWFINDER_HEIGHT;
+const STATUS_BAR_HEIGHT = Platform.OS === 'ios' ? 47 : (StatusBar.currentHeight ?? 24);
+/** Status bar + the camera capsule. */
+const TOP_BAND = Math.round(STATUS_BAR_HEIGHT + 70);
+/** Minimum room the control stack needs; the finder band never shrinks below it. */
+const MIN_BOTTOM_BAND = 232;
+
+interface FinderRect {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+function computeFinderRect(width: number, height: number): FinderRect {
+  if (width > height) {
+    // Landscape: full-height 4:3 frame, centered horizontally.
+    const frameWidth = Math.round(height * (4 / 3));
+    return { left: Math.round((width - frameWidth) / 2), top: 0, width: frameWidth, height };
+  }
+  // Portrait: full-width 4:3 below the top band, never colliding with the controls.
+  const maxWidth = Math.round(Math.min(width, (height - TOP_BAND - MIN_BOTTOM_BAND) * (3 / 4)));
+  const frameWidth = Math.max(200, Math.min(width, maxWidth));
+  const frameHeight = Math.round(frameWidth * (4 / 3));
+  const top = TOP_BAND + Math.max(0, Math.round((height - TOP_BAND - MIN_BOTTOM_BAND - frameHeight) / 2));
+  return { left: Math.round((width - frameWidth) / 2), top, width: frameWidth, height: frameHeight };
+}
 
 /**
  * Capture lifecycle the UI can distinguish without a native event channel:
@@ -182,11 +199,23 @@ function isPermissionDeniedError(err: unknown): boolean {
  * Internal Camera App Screen Component (within ProfileProvider context)
  */
 function CameraAppScreen(): React.JSX.Element {
+  // Live dimensions: the whole interface rotates with the device, so every band of the
+  // layout recomputes on rotation (canonical camera-app behavior).
+  const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = useWindowDimensions();
+  const finder = useMemo(() => computeFinderRect(SCREEN_WIDTH, SCREEN_HEIGHT), [SCREEN_WIDTH, SCREEN_HEIGHT]);
+
   // -------------------------------------------------------------
   // 1. Profile State exclusively via useProfiles() JSON state
   // -------------------------------------------------------------
   const { profiles, currentProfile, currentProfileId, selectProfile, errors: profileErrors } = useProfiles();
   const activeProfile = currentProfile ?? profiles[0] ?? null;
+
+  // Per-camera UI skin: the interface chrome takes the camera's identity color
+  // (muted, brand-evocative — e.g. textured Leica red, pale Ricoh film green).
+  const skin = useMemo(
+    () => deriveSkin(activeProfile?.ui?.accent as string | undefined),
+    [activeProfile?.ui?.accent],
+  );
 
   // -------------------------------------------------------------
   // 2. Camera Engine Hardware State
@@ -213,6 +242,9 @@ function CameraAppScreen(): React.JSX.Element {
   // Photo Capture & Preview states
   const [capturePhase, setCapturePhase] = useState<CapturePhase>('idle');
   const [latestThumbnail, setLatestThumbnail] = useState<string | null>(null);
+  // Persistent, tappable remediation when the photo-library ADD permission is denied —
+  // a 4-second transient banner was too easy to miss, which read as "photos don't save".
+  const [photoPermDenied, setPhotoPermDenied] = useState<boolean>(false);
 
   // Tracks whether the native session started successfully (used by the AppState recovery path)
   const cameraRunningRef = useRef<boolean>(false);
@@ -260,11 +292,12 @@ function CameraAppScreen(): React.JSX.Element {
   // -------------------------------------------------------------
   const [isCalibrationOpen, setIsCalibrationOpen] = useState<boolean>(false);
   /**
-   * Aperture DEMO mode (fixed-lens test, toggled in the calibration panel): the ring is
-   * fully interactive so the feel can be tested on e.g. iPhone 14 Plus, but the capture
-   * always stays at the lens's fixed aperture — visual + bloom/starburst linkage only.
+   * Aperture DEMO mode (fixed-lens devices): the ring is fully interactive by DEFAULT so
+   * the wheel feel exists on e.g. iPhone 14 Plus — bloom/starburst linkage only, the
+   * capture always stays at the lens's fixed aperture and the bar is labeled DEMO.
+   * Depth/bokeh is never faked (red line 4). Toggle off in the calibration panel.
    */
-  const [apertureDemoMode, setApertureDemoMode] = useState<boolean>(false);
+  const [apertureDemoMode, setApertureDemoMode] = useState<boolean>(true);
   const DEMO_APERTURES = useMemo(() => [1.48, 1.8, 2, 2.8, 4], []);
 
   // -------------------------------------------------------------
@@ -277,8 +310,16 @@ function CameraAppScreen(): React.JSX.Element {
   // 5. Radial Profile Selector State (Long-press on empty preview)
   // -------------------------------------------------------------
   const [isRadialOpen, setIsRadialOpen] = useState<boolean>(false);
-  const [radialOrigin, setRadialOrigin] = useState<Point>({ x: SCREEN_WIDTH / 2, y: SCREEN_HEIGHT / 2 });
+  const [radialOrigin, setRadialOrigin] = useState<Point>({
+    x: SCREEN_WIDTH_FALLBACK / 2,
+    y: SCREEN_HEIGHT_FALLBACK / 2,
+  });
   const [currentTouchPoint, setCurrentTouchPoint] = useState<Point | null>(null);
+
+  // Live screen dims for gesture math (rotation-aware; refs avoid responder closures
+  // capturing stale values).
+  const screenDimsRef = useRef({ width: SCREEN_WIDTH, height: SCREEN_HEIGHT });
+  screenDimsRef.current = { width: SCREEN_WIDTH, height: SCREEN_HEIGHT };
 
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchStartPosRef = useRef<Point | null>(null);
@@ -544,13 +585,17 @@ function CameraAppScreen(): React.JSX.Element {
 
   /**
    * Focal-stop selection: switch the physical lens first when needed, then apply the
-   * crop zoom on it. Display updates only after both hardware calls succeed.
+   * crop zoom on it. Every step is journaled to the diag log; on failure the mm display
+   * REVERTS to the engaged stop so the UI never claims a focal the optics are not at.
    */
   const handleSelectFocal = useCallback(async (stop: FocalStop) => {
+    const previousMm = currentFocalMm;
     try {
+      recordDiag('info', `focal: select ${stop.mm}mm (lens=${stop.lensId}, zoom=${stop.zoom}) from ${previousMm}mm`);
       if (stop.lensId !== currentLensId) {
         await CameraEngine.setLens(stop.lensId);
         setCurrentLensId(stop.lensId);
+        recordDiag('info', `focal: lens switched to ${stop.lensId}`);
         // Per-lens aperture honesty: on iPhone 18 Pro only the main lens has a variable
         // aperture — ultra-wide/telephoto formats report a degenerate range, so the dial
         // locks to Fixed ƒ/x. The capability ref must follow the active lens, otherwise
@@ -589,12 +634,16 @@ function CameraAppScreen(): React.JSX.Element {
       }
       if (stop.zoom !== 1) {
         await CameraEngine.setZoomFactor(stop.zoom);
+        recordDiag('info', `focal: zoom ${stop.zoom} applied on ${stop.lensId}`);
       }
       setCurrentFocalMm(stop.mm);
     } catch (err: unknown) {
+      recordDiag('error', `focal: select ${stop.mm}mm FAILED: ${err instanceof Error ? err.message : String(err)}`);
+      // Never leave the dial claiming a focal the optics did not reach.
+      if (previousMm != null) setCurrentFocalMm(previousMm);
       showTransientError(resolveErrorMessage(err));
     }
-  }, [currentLensId, activeProfile, showTransientError]);
+  }, [currentLensId, currentFocalMm, activeProfile, showTransientError]);
 
   const handleCapturePhoto = async () => {
     if (capturePhase === 'capturing') return;
@@ -628,6 +677,8 @@ function CameraAppScreen(): React.JSX.Element {
       ]);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       setCapturePhase('idle');
+      setPhotoPermDenied(false);
+      recordDiag('info', `capture: saved (fallback=${Boolean(result?.processingFallback)}, thumb=${Boolean(result?.thumbnailUri)})`);
       if (result?.thumbnailUri) {
         setLatestThumbnail(result.thumbnailUri);
       } else if (result?.fileUri) {
@@ -637,6 +688,11 @@ function CameraAppScreen(): React.JSX.Element {
         showTransientError('Camera DNA processing failed — the original photo was saved.');
       }
     } catch (err: unknown) {
+      const code = err instanceof CameraEngineError ? err.code : 'unknown';
+      recordDiag('error', `capture: FAILED (${code}): ${err instanceof Error ? err.message : String(err)}`);
+      // A denied add-only photo permission is easy to miss as a 4s banner and reads as
+      // "photos don't save" — surface it as a persistent, tappable remediation pill.
+      if (code === 'ERR_PHOTO_PERMISSION_DENIED') setPhotoPermDenied(true);
       showTransientError(resolveErrorMessage(err));
       setCapturePhase('failed');
       // The failure state decays; the shutter is immediately usable again.
@@ -658,20 +714,20 @@ function CameraAppScreen(): React.JSX.Element {
 
   /**
    * Tap-to-Focus: a quick, low-movement release sets the AF/AE point of interest and
-   * shows a lightweight indicator. The tap is sent as a point normalized to the preview
-   * layer; the native side converts it with captureDevicePointConverted, which stays
-   * correct under aspect-fill on every device (no hand-rolled aspect math here).
+   * shows a lightweight indicator. The tap is normalized against the finder rect (which
+   * IS the 4:3 frame); the native side maps it through its letterbox math, staying
+   * correct in both orientations.
    */
   const handleTapToFocus = useCallback(
     (pageX: number, pageY: number) => {
       if (!isCameraRunning) return;
       setFocusIndicator({ x: pageX, y: pageY, key: Date.now() });
 
-      const nx = Math.min(1, Math.max(0, pageX / SCREEN_WIDTH));
-      const ny = Math.min(1, Math.max(0, (pageY - VIEWFINDER_TOP) / VIEWFINDER_HEIGHT));
+      const nx = Math.min(1, Math.max(0, (pageX - finder.left) / finder.width));
+      const ny = Math.min(1, Math.max(0, (pageY - finder.top) / finder.height));
       CameraEngine.setFocusPoint(nx, ny).catch(() => {});
     },
-    [isCameraRunning],
+    [isCameraRunning, finder],
   );
 
   const handleSelectProfile = useCallback(
@@ -702,7 +758,8 @@ function CameraAppScreen(): React.JSX.Element {
       const origin = touchStartPosRef.current ?? radialOrigin;
 
       if (x != null && y != null && origin) {
-        const clampedCenter = getClampedCenter(origin, SCREEN_WIDTH, SCREEN_HEIGHT);
+        const { width: liveW, height: liveH } = screenDimsRef.current;
+        const clampedCenter = getClampedCenter(origin, liveW, liveH);
         const displayProfiles = profilesRef.current.slice(0, 8);
         const sector = computeRadialSector(x, y, clampedCenter, displayProfiles.length);
 
@@ -827,14 +884,17 @@ function CameraAppScreen(): React.JSX.Element {
     (cameraInitError !== null && !isCameraRunning);
 
   return (
-    <View style={styles.rootContainer}>
+    <View style={[styles.rootContainer, { backgroundColor: skin.chrome }]}>
       <StatusBar barStyle="light-content" hidden={false} translucent backgroundColor="transparent" />
 
       {/* The one and only native preview. The profile prop carries the aperture-linked
           bloom/starburst factors so the live preview shows the same visual system the
-          final capture will use. */}
+          final capture will use. The rect tracks rotation via live window dimensions. */}
       <CameraEngineView
-        style={styles.viewfinder}
+        style={[
+          styles.viewfinder,
+          { left: finder.left, top: finder.top, width: finder.width, height: finder.height },
+        ]}
         profile={(effectiveProfile ?? activeProfile) as unknown as Record<string, unknown>}
       />
 
@@ -843,10 +903,13 @@ function CameraAppScreen(): React.JSX.Element {
           {/* Tap-to-focus indicator (visual only) */}
           <FocusIndicator point={focusIndicator} />
 
-          {/* Viewfinder touch area: tap-to-focus + long-press radial selector */}
+          {/* Viewfinder touch area: tap-to-focus + long-press radial selector (the finder rect) */}
           {isCameraRunning && !permissionOverlayVisible && (
             <View
-              style={styles.viewfinderTouchArea}
+              style={[
+                styles.viewfinderTouchArea,
+                { left: finder.left, top: finder.top, width: finder.width, height: finder.height },
+              ]}
               {...previewPanResponder.panHandlers}
             />
           )}
@@ -858,6 +921,7 @@ function CameraAppScreen(): React.JSX.Element {
                 profileName={activeProfile?.displayName ?? activeProfile?.name}
                 marker={activeProfile?.ui?.markerStyle}
                 accent={activeProfile?.ui?.accent}
+                skin={skin}
                 onPress={() => setIsSelectorOpen(true)}
               />
             </View>
@@ -915,15 +979,34 @@ function CameraAppScreen(): React.JSX.Element {
             </View>
           )}
 
-          {/* Bottom control stack, top → bottom: focal circles → aperture bar → shutter.
-              The stack lives entirely inside BOTTOM_AREA; the viewfinder band above it
-              stays untouched (see the layout constants). */}
+          {/* Photo-saving remediation pill: persistent until a capture succeeds. */}
+          {photoPermDenied && isCameraRunning && !permissionOverlayVisible && (
+            <View style={styles.photoPermContainer} pointerEvents="box-none">
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Photo saving is off. Open Settings."
+                activeOpacity={0.8}
+                onPress={() => {
+                  Linking.openSettings().catch(() => {});
+                }}
+                style={[styles.photoPermPill, { borderColor: skin.border }]}
+              >
+                <Text style={styles.photoPermIcon}>🖼️</Text>
+                <Text style={styles.photoPermText}>
+                  Photo saving is off — tap to open Settings
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Bottom control stack, top → bottom: focal circles → aperture bar → shutter. */}
           {isCameraRunning && !permissionOverlayVisible && (
-            <View style={styles.bottomControlsContainer} pointerEvents="box-none">
+            <View style={[styles.bottomControlsContainer, { backgroundColor: skin.chrome }]} pointerEvents="box-none">
               {/* Focal-length circles: 13 / 26 / 35 … mm lens switching */}
               <FocalCircleRow
                 stops={focalStops}
                 currentFocalMm={currentFocalMm}
+                accent={skin.accent}
                 onSelectFocal={(stop) => { void handleSelectFocal(stop); }}
               />
 
@@ -941,6 +1024,7 @@ function CameraAppScreen(): React.JSX.Element {
                 isVariableAperture={supportsVariableAperture || apertureDemoMode}
                 onApertureChange={handleApertureChange}
                 demoMode={!supportsVariableAperture && apertureDemoMode}
+                accent={skin.accent}
               />
 
               {/* Bottom Actions Row: Recent Thumbnail & Shutter Button */}
@@ -1043,15 +1127,36 @@ const styles = StyleSheet.create({
   },
   viewfinder: {
     position: 'absolute',
-    top: VIEWFINDER_TOP,
-    left: 0,
-    width: SCREEN_WIDTH,
-    height: VIEWFINDER_HEIGHT,
+    backgroundColor: '#000000',
   },
   viewfinderTouchArea: {
-    ...StyleSheet.absoluteFillObject,
-    top: VIEWFINDER_TOP,
-    bottom: SCREEN_HEIGHT - VIEWFINDER_BOTTOM,
+    position: 'absolute',
+  },
+  photoPermContainer: {
+    position: 'absolute',
+    bottom: 268,
+    left: 16,
+    right: 16,
+    alignItems: 'center',
+    zIndex: 60,
+  },
+  photoPermPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(20, 20, 24, 0.92)',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+  },
+  photoPermIcon: {
+    fontSize: 14,
+    marginRight: 8,
+  },
+  photoPermText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
   },
   topControlsContainer: {
     position: 'absolute',

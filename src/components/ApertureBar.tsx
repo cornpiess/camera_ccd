@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, PanResponder, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { hexToRgba } from '../theme/skin';
 
 export interface ApertureBarProps {
   /** Hardware stops in ascending order (f/1.48 … f/4). Empty on fixed-aperture lenses. */
@@ -11,11 +12,13 @@ export interface ApertureBarProps {
   /** Fired on each detent crossing and again on release-snap (only when variable). */
   readonly onApertureChange: (fStop: number) => void;
   /**
-   * Demo mode (fixed-lens devices, enabled from the calibration panel): the ring is fully
-   * interactive for testing the feel, but the capture stays at the lens's fixed aperture.
-   * Always labeled DEMO so the simulation can never be mistaken for hardware control.
+   * Demo mode (fixed-lens devices, on by default): the ring is fully interactive for the
+   * wheel feel, but the capture stays at the lens's fixed aperture. Always labeled DEMO
+   * so the simulation can never be mistaken for hardware control.
    */
   readonly demoMode?: boolean;
+  /** Camera identity accent — pointer, engaged stop and iris ring wear the camera skin. */
+  readonly accent?: string;
 }
 
 const WHEEL_WIDTH = 210;
@@ -46,6 +49,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   isVariableAperture,
   onApertureChange,
   demoMode = false,
+  accent,
 }) => {
   const stops = availableApertures;
   const selectedIndex = useMemo(() => {
@@ -132,10 +136,11 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
     <View style={styles.bar} pointerEvents="box-none">
       {/* Iris glyph: physical aperture cross-section, hole grows/shrinks with the ring */}
       <View style={styles.iris} pointerEvents="none">
-        <View style={styles.irisRing}>
+        <View style={[styles.irisRing, accent ? { borderColor: hexToRgba(accent, 0.55) } : null]}>
           <View
             style={[
               styles.irisHole,
+              accent && !isVariableAperture ? null : { backgroundColor: accent ?? 'rgba(255, 255, 255, 0.9)' },
               { width: holeSize, height: holeSize, borderRadius: holeSize / 2, opacity: isVariableAperture ? 0.95 : 0.4 },
             ]}
           />
@@ -161,6 +166,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
                   style={[
                     styles.stopLabel,
                     focused && styles.stopLabelFocused,
+                    focused && accent ? { color: accent } : null,
                     !focused && { opacity: Math.max(0.18, 0.65 - distance * 0.22), fontSize: Math.max(10, 14 - distance * 2) },
                   ]}
                   numberOfLines={1}
@@ -172,11 +178,16 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
           })}
         </Animated.View>
         {/* Center pointer */}
-        <View style={styles.centerPointer} pointerEvents="none" />
+        <View
+          style={[styles.centerPointer, accent ? { backgroundColor: hexToRgba(accent, 0.9) } : null]}
+          pointerEvents="none"
+        />
       </View>
 
       {(!isVariableAperture || demoMode) ? (
-        <Text style={[styles.fixedCaption, demoMode && styles.demoCaption]}>{demoMode ? 'DEMO' : 'FIXED'}</Text>
+        <Text style={[styles.fixedCaption, demoMode && styles.demoCaption, demoMode && accent ? { color: accent } : null]}>
+          {demoMode ? 'DEMO' : 'FIXED'}
+        </Text>
       ) : null}
     </View>
   );

@@ -236,7 +236,7 @@
       },
       "ui": {
         "shortName": "GR Neg",
-        "accent": "#7FA0A6",
+        "accent": "#8FC7A0",
         "dialStyle": "snap",
         "personality": "cool",
         "markerStyle": "diamond",
@@ -349,7 +349,7 @@
       },
       "ui": {
         "shortName": "M9",
-        "accent": "#A6ABB0",
+        "accent": "#B5443C",
         "dialStyle": "engraved",
         "personality": "classic",
         "markerStyle": "ring",

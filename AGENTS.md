@@ -84,7 +84,7 @@ git -c http.proxy=http://127.0.0.1:7890 -c credential.helper= -c credential.help
 | 1 | **禁止 EAS 云端打包**：不得执行 `eas build` / `npx eas build` / `npm run build:ios:dev` / `eas build --local`，除非用户**明确说出「现在可以打包」**。日常出包走第 1.1 节的 CI 路径 | EAS 免费配额仅 **15 次/月 iOS**，误触发要重新排队 |
 | 2 | **禁止品牌分支**：不得为 Leica / Fuji / Ricoh 等任何品牌在原生层写 `switch-case`。8 台相机必须共用 `ProfileRenderer.apply`，风格**只由 `assets/camera-profiles.json` 定义** | 加新相机必须只改 JSON |
 | 3 | **禁止改回非共享 `CIContext`**：必须保持 `PhotoCaptureDelegate.sharedContext` 静态共享，不得在每次快门时 `new CIContext()` | 连续拍照会显存泄露并被 iOS Jetsam 杀进程 |
-| 4 | **禁止假虚化**：无物理可变光圈硬件时，UI 必须显示 `Fixed ƒ/x` 并锁定光圈交互，**严禁做纯软件景深/背景虚化** | 产品诚实性 |
+| 4 | **禁止假虚化**：任何机型都**严禁纯软件景深/背景虚化/假光斑**。无物理可变光圈硬件时，光圈滚轮以 **DEMO 模式**呈现（默认开启，条上明示 DEMO）：可拧、有手感，联动 bloom/starburst 视觉因子，但成片始终使用镜头真实光圈；可变光圈硬件（iPhone 18 Pro）走真实物理光圈。相机皮肤：界面 chrome 取自各相机 `ui.accent`（品牌经典色的低饱和版本，如徕卡质感红、理光浅绿），**不得为品牌写原生分支** | 产品诚实性 |
 
 ### 1.1 日常出包：走 GitHub Actions，不占 EAS 配额
 
