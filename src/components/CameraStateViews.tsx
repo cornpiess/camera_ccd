@@ -12,15 +12,28 @@ import * as Haptics from 'expo-haptics';
 interface PermissionRequestViewProps {
   onRequestPermission: () => void;
   statusMessage?: string;
+  /** Label of the primary action button (defaults to "Enable Camera"). */
+  primaryLabel?: string;
+  /** Optional secondary action (e.g. "Open Settings" / "Retry") shown under the primary button. */
+  secondaryLabel?: string;
+  onSecondary?: () => void;
 }
 
 export const PermissionRequestView: React.FC<PermissionRequestViewProps> = ({
   onRequestPermission,
-  statusMessage = 'Access to the camera is required to capture photos and preview customized profiles.',
+  statusMessage = 'Camera 18 simulates classic film cameras. It needs the camera for the viewfinder and photo access (add-only) to save your shots.',
+  primaryLabel = 'Enable Camera',
+  secondaryLabel,
+  onSecondary,
 }: PermissionRequestViewProps) => {
   const handlePress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     onRequestPermission();
+  };
+
+  const handleSecondary = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    onSecondary?.();
   };
 
   return (
@@ -38,8 +51,14 @@ export const PermissionRequestView: React.FC<PermissionRequestViewProps> = ({
           onPress={handlePress}
           style={styles.primaryButton}
         >
-          <Text style={styles.primaryButtonText}>Enable Camera</Text>
+          <Text style={styles.primaryButtonText}>{primaryLabel}</Text>
         </TouchableOpacity>
+
+        {secondaryLabel && onSecondary ? (
+          <TouchableOpacity activeOpacity={0.8} onPress={handleSecondary} style={styles.secondaryButton}>
+            <Text style={styles.secondaryButtonText}>{secondaryLabel}</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     </SafeAreaView>
   );
@@ -157,6 +176,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     letterSpacing: 0.3,
+  },
+  secondaryButton: {
+    marginTop: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+  },
+  secondaryButtonText: {
+    color: 'rgba(255, 255, 255, 0.75)',
+    fontSize: 14,
+    fontWeight: '600',
   },
   loadingText: {
     color: 'rgba(255, 255, 255, 0.75)',

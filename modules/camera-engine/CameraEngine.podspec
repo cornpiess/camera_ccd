@@ -11,6 +11,9 @@ Pod::Spec.new do |s|
   s.static_framework = true
   s.swift_version  = '5.9'
   s.source_files   = 'ios/**/*.{h,m,mm,swift}'
-  s.frameworks     = 'AVFoundation', 'Photos', 'CoreImage', 'ImageIO', 'UIKit'
+  # Camera DNA .cube LUTs (Camera18_LUT_V0 pack) ship as a pod resource bundle so the
+  # same LUT can be loaded natively for both the WYSIWYG preview and the final capture.
+  s.resource_bundles = { 'CameraEngineLUTs' => 'ios/LUTs/*.cube' }
+  s.frameworks     = 'AVFoundation', 'Photos', 'CoreImage', 'ImageIO', 'UIKit', 'MetalKit'
   s.dependency 'ExpoModulesCore'
 end

@@ -25,6 +25,8 @@ import {
   CameraEngineView,
   type CapturedPhoto,
   type CameraCapabilities,
+  type CameraLens,
+  type CameraAuthorizationStatus,
 } from './src/camera/CameraEngine';
 import { loadCameraState, rememberAperture, saveCameraState, type CameraState } from './src/camera/cameraStateStore';
 
@@ -41,13 +43,13 @@ import {
   ShutterButton,
   ThumbnailPreview,
   ApertureControl,
-  ProfileOverlay,
   RadialProfileSelector,
   CameraSelector,
   FocusIndicator,
   StartupErrorBoundary,
-  type FocusPoint,
+  LensSwitcher,
   ThreeFingerGestureDetector,
+  type FocusPoint,
   PermissionRequestView,
   CameraLoadingView,
   CameraErrorView,
@@ -168,7 +170,9 @@ function CameraAppScreen(): React.JSX.Element {
   // -------------------------------------------------------------
   // 2. Camera Engine Hardware State
   // -------------------------------------------------------------
-  const [permissionDenied, setPermissionDenied] = useState<boolean>(false);
+  // App Store-style permission flow: probe WITHOUT triggering the system dialog, show an
+  // explainer first, and only start the session (which may request access) on user action.
+  const [permissionState, setPermissionState] = useState<CameraAuthorizationStatus | 'checking'>('checking');
   const [cameraInitError, setCameraInitError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isCameraRunning, setIsCameraRunning] = useState<boolean>(false);
@@ -179,6 +183,10 @@ function CameraAppScreen(): React.JSX.Element {
   const [currentAperture, setCurrentAperture] = useState<number>(1.8);
   const [availableApertures, setAvailableApertures] = useState<number[]>([]);
   const capabilitiesRef = useRef<CameraCapabilities | null>(null);
+
+  // Rear lens switching (0.5× / 1× / 2×); empty when the device has a single lens.
+  const [lenses, setLenses] = useState<CameraLens[]>([]);
+  const [currentLensId, setCurrentLensId] = useState<string>('wide');
 
   // Photo Capture & Preview states
   const [capturePhase, setCapturePhase] = useState<CapturePhase>('idle');
@@ -236,23 +244,6 @@ function CameraAppScreen(): React.JSX.Element {
   const [isSelectorOpen, setIsSelectorOpen] = useState<boolean>(false);
   const [focusIndicator, setFocusIndicator] = useState<FocusPoint | null>(null);
 
-  // GOAL 19: on camera switch the preview overlay fades in softly instead of
-  // flashing; controls stay stable and the aperture marker glides to the new
-  // preferredAperture (handled by the profile-apply effect below).
-  const overlayOpacity = useRef(new Animated.Value(1)).current;
-  const overlayProfileIdRef = useRef<string | null | undefined>(activeProfile?.id);
-  useEffect(() => {
-    if (overlayProfileIdRef.current !== activeProfile?.id) {
-      overlayProfileIdRef.current = activeProfile?.id;
-      overlayOpacity.setValue(0.35);
-      Animated.timing(overlayOpacity, {
-        toValue: 1,
-        duration: 260,
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [activeProfile?.id, overlayOpacity]);
-
   // -------------------------------------------------------------
   // 5. Radial Profile Selector State (Long-press on empty preview)
   // -------------------------------------------------------------
@@ -275,12 +266,12 @@ function CameraAppScreen(): React.JSX.Element {
     try {
       setIsLoading(true);
       setCameraInitError(null);
-      setPermissionDenied(false);
 
       // Await startCamera and catch errors rather than swallowing
       await CameraEngine.startCamera();
       cameraRunningRef.current = true;
       setIsCameraRunning(true);
+      setPermissionState('authorized');
 
       // Query hardware capabilities
       try {
@@ -311,10 +302,18 @@ function CameraAppScreen(): React.JSX.Element {
         setCurrentAperture(1.8);
         setAvailableApertures([]);
       }
+
+      // Rear lens list (0.5× / 1× / 2×); empty on single-lens devices.
+      try {
+        const list = await CameraEngine.getAvailableLenses();
+        setLenses(Array.isArray(list) ? list : []);
+      } catch {
+        setLenses([]);
+      }
     } catch (err: unknown) {
       cameraRunningRef.current = false;
       if (isPermissionDeniedError(err)) {
-        setPermissionDenied(true);
+        setPermissionState('denied');
       } else {
         const errorMsg = err instanceof Error ? err.message : 'Failed to initialize Camera Engine';
         setCameraInitError(errorMsg);
@@ -324,14 +323,37 @@ function CameraAppScreen(): React.JSX.Element {
     }
   }, []);
 
-  // Initialize camera only once after view mount
+  // Permission probe on mount: never triggers the system dialog itself. When already
+  // authorized (or after the user opts in via the explainer) the session starts here.
+  const didAutoStartRef = useRef(false);
   useEffect(() => {
-    initializeCameraSession();
+    let mounted = true;
+    CameraEngine.getCameraAuthorizationStatus()
+      .then((status) => {
+        if (mounted) setPermissionState(status);
+      })
+      .catch(() => {
+        if (mounted) setPermissionState('denied');
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (permissionState === 'authorized' && !didAutoStartRef.current) {
+      didAutoStartRef.current = true;
+      initializeCameraSession();
+    }
+  }, [permissionState, initializeCameraSession]);
+
+  // Stop the native session exactly once, on unmount.
+  useEffect(() => {
     return () => {
       cameraRunningRef.current = false;
       CameraEngine.stopCamera().catch(() => {});
     };
-  }, [initializeCameraSession]);
+  }, []);
 
   // -------------------------------------------------------------
   // 6b. Foreground recovery: iOS suspends/interrupts the capture session while
@@ -440,6 +462,24 @@ function CameraAppScreen(): React.JSX.Element {
       showTransientError(resolveErrorMessage(err));
     }
   };
+
+  const handleSelectLens = useCallback(async (lensId: string) => {
+    try {
+      await CameraEngine.setLens(lensId);
+      setCurrentLensId(lensId);
+      // A different lens means a different physical aperture — refresh the honest display.
+      try {
+        const caps = await CameraEngine.getCapabilities();
+        const aperture = caps.activeAperture ?? caps.activeLensAperture ?? 1.8;
+        setActiveAperture(aperture);
+        setCurrentAperture(aperture);
+      } catch {
+        // Keep the previous display when the refresh fails; the lens switch itself succeeded.
+      }
+    } catch (err: unknown) {
+      showTransientError(resolveErrorMessage(err));
+    }
+  }, [showTransientError]);
 
   const handleCapturePhoto = async () => {
     if (capturePhase === 'capturing') return;
@@ -650,25 +690,45 @@ function CameraAppScreen(): React.JSX.Element {
   );
 
   // -------------------------------------------------------------
-  // 10. Startup State Views (Permission denied / initial mount error)
+  // 10. Startup State Views (permission explainer / initial mount error)
   // -------------------------------------------------------------
-  if (permissionDenied) {
+  const handleEnableCamera = useCallback(() => {
+    // The user opted in on the explainer — the next startCamera triggers the system dialog.
+    didAutoStartRef.current = true;
+    initializeCameraSession();
+  }, [initializeCameraSession]);
+
+  if (permissionState === 'checking') {
     return (
       <View style={styles.rootContainer}>
         <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-        <CameraEngineView
-          style={StyleSheet.absoluteFillObject}
-          profile={activeProfile as unknown as Record<string, unknown>}
+        <CameraLoadingView message="Preparing camera..." />
+      </View>
+    );
+  }
+
+  if (permissionState === 'notDetermined' || permissionState === 'denied') {
+    const denied = permissionState === 'denied';
+    return (
+      <View style={styles.rootContainer}>
+        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+        <PermissionRequestView
+          statusMessage={
+            denied
+              ? 'Camera access is currently disabled. Enable it in Settings — the camera is only used for the viewfinder and photos.'
+              : 'Camera 18 simulates classic film cameras. The camera is used for the live viewfinder; photos are saved with add-only photo access.'
+          }
+          primaryLabel={denied ? 'Open Settings' : 'Enable Camera'}
+          onRequestPermission={
+            denied
+              ? () => {
+                  Linking.openSettings().catch(() => {});
+                }
+              : handleEnableCamera
+          }
+          secondaryLabel={denied ? 'Retry Camera' : undefined}
+          onSecondary={denied ? handleEnableCamera : undefined}
         />
-        <View style={StyleSheet.absoluteFillObject}>
-          <PermissionRequestView
-            statusMessage="Camera permission was denied. Please grant camera access in Settings to use the camera."
-            onRequestPermission={() => {
-              setPermissionDenied(false);
-              initializeCameraSession();
-            }}
-          />
-        </View>
       </View>
     );
   }
@@ -717,13 +777,8 @@ function CameraAppScreen(): React.JSX.Element {
             </View>
           )}
 
-          {/* Lightweight JSON-derived preview overlay (soft crossfade on camera switch) */}
-          <Animated.View
-            style={[StyleSheet.absoluteFillObject, { opacity: overlayOpacity }]}
-            pointerEvents="none"
-          >
-            <ProfileOverlay profile={activeProfile} />
-          </Animated.View>
+          {/* Lightweight JSON-derived preview overlay removed: the native WYSIWYG pipeline
+              (CameraDNARenderer .preview) is the single preview filter. No JS-side coloring. */}
 
           {/* Tap-to-focus indicator (visual only) */}
           <FocusIndicator point={focusIndicator} />
@@ -743,6 +798,13 @@ function CameraAppScreen(): React.JSX.Element {
               onPress={() => setIsSelectorOpen(true)}
             />
           </View>
+
+          {/* Rear lens switcher (0.5× / 1× / 2×), only when the device has multiple lenses */}
+          {lenses.length > 1 && (
+            <View style={styles.lensSwitcherContainer} pointerEvents="box-none">
+              <LensSwitcher lenses={lenses} currentId={currentLensId} onSelect={(id) => { void handleSelectLens(id); }} />
+            </View>
+          )}
 
           {/* Transient Error Banner while running (does not unmount camera) */}
           {transientError && (
@@ -872,6 +934,15 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 20,
+  },
+  lensSwitcherContainer: {
+    position: 'absolute',
+    // Just above the bottom controls, centered — the only lens affordance on screen.
+    bottom: 178,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 21,
   },
   transientErrorContainer: {
     position: 'absolute',

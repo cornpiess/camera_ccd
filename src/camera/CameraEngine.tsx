@@ -31,6 +31,15 @@ export type CapturedPhoto = {
   processingFallback?: boolean | null;
 };
 
+export type CameraLens = {
+  /** Lens slot id: "ultraWide" | "wide" | "telephoto". */
+  id: string;
+  /** Human-readable multiplier label, e.g. "0.5×". */
+  label: string;
+};
+
+export type CameraAuthorizationStatus = 'authorized' | 'notDetermined' | 'denied' | 'restricted';
+
 export type CameraEngineErrorCode =
   | 'ERR_NO_ACTIVE_VIEW'
   | 'ERR_PERMISSION_DENIED'
@@ -61,6 +70,10 @@ type NativeCameraEngine = {
   setFocusPoint(x: number, y: number): Promise<void>;
   getCapabilities(): Promise<CameraCapabilities>;
   applyProfile(profile: CameraProfile): Promise<void>;
+  /** Read-only authorization probe; the system dialog only fires from startCamera. */
+  getCameraAuthorizationStatus(): Promise<CameraAuthorizationStatus>;
+  getAvailableLenses(): Promise<CameraLens[]>;
+  setLens(lensId: string): Promise<void>;
 };
 
 /**
@@ -132,6 +145,9 @@ const unavailableModule: NativeCameraEngine = {
   setFocusPoint: () => Promise.reject(unavailableError()),
   getCapabilities: () => Promise.reject(unavailableError()),
   applyProfile: () => Promise.reject(unavailableError()),
+  getCameraAuthorizationStatus: () => Promise.reject(unavailableError()),
+  getAvailableLenses: () => Promise.reject(unavailableError()),
+  setLens: () => Promise.reject(unavailableError()),
 };
 
 /** Black stand-in preview so the app still mounts and shows the error view above it. */
@@ -159,6 +175,10 @@ export const setAperture = (fStop: number): Promise<void> => typed(NativeModule.
 export const setFocusPoint = (x: number, y: number): Promise<void> => typed(NativeModule.setFocusPoint(x, y));
 export const getCapabilities = (): Promise<CameraCapabilities> => typed(NativeModule.getCapabilities());
 export const applyProfile = (profile: CameraProfile): Promise<void> => typed(NativeModule.applyProfile(profile));
+export const getCameraAuthorizationStatus = (): Promise<CameraAuthorizationStatus> =>
+  typed(NativeModule.getCameraAuthorizationStatus());
+export const getAvailableLenses = (): Promise<CameraLens[]> => typed(NativeModule.getAvailableLenses());
+export const setLens = (lensId: string): Promise<void> => typed(NativeModule.setLens(lensId));
 
 /** Functional native API; also convenient for call sites that prefer a namespace object. */
 export const CameraEngine = {
@@ -169,6 +189,9 @@ export const CameraEngine = {
   setFocusPoint,
   getCapabilities,
   applyProfile,
+  getCameraAuthorizationStatus,
+  getAvailableLenses,
+  setLens,
 } as const;
 
 export type CameraEngineHandle = {
@@ -179,6 +202,9 @@ export type CameraEngineHandle = {
   setFocusPoint: typeof setFocusPoint;
   getCapabilities: typeof getCapabilities;
   applyProfile: typeof applyProfile;
+  getCameraAuthorizationStatus: typeof getCameraAuthorizationStatus;
+  getAvailableLenses: typeof getAvailableLenses;
+  setLens: typeof setLens;
 };
 
 export type CameraEngineViewProps = {
@@ -205,6 +231,9 @@ export const CameraEngineView = forwardRef<CameraEngineHandle, CameraEngineViewP
     setFocusPoint,
     getCapabilities,
     applyProfile,
+    getCameraAuthorizationStatus,
+    getAvailableLenses,
+    setLens,
   }), []);
   return <NativePreview {...nativeProps} />;
 });

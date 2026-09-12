@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "profiles": [
     {
-      "id": "warm_portrait",
-      "name": "Warm Portrait",
+      "id": "canon_g7x2",
+      "name": "Canon G7X II",
       "aperture": {
         "preferred": 1.8,
         "starZone": 4
       },
       "ui": {
-        "shortName": "Warm",
+        "shortName": "G7X",
         "accent": "#D9B98A",
         "dialStyle": "compact",
         "personality": "soft",
@@ -93,7 +93,7 @@
             "luminance": 1.01
           }
         },
-        "lut": null
+        "lut": "canon-g7x2"
       },
       "texture": {
         "grain": {
@@ -109,20 +109,20 @@
           "radius": 0.18
         }
       },
-      "displayName": "Warm Portrait",
+      "displayName": "Canon G7X II",
       "developmentReference": {
         "target": "Canon G7 X II"
       }
     },
     {
-      "id": "street_positive",
-      "name": "Street Positive",
+      "id": "ricoh_positive",
+      "name": "Ricoh Positive",
       "aperture": {
         "preferred": 4,
         "starZone": 4
       },
       "ui": {
-        "shortName": "Positive",
+        "shortName": "GR Pos",
         "accent": "#C7A163",
         "dialStyle": "snap",
         "personality": "crisp",
@@ -206,7 +206,7 @@
             "luminance": 0.99
           }
         },
-        "lut": null
+        "lut": "ricoh-positive"
       },
       "texture": {
         "grain": {
@@ -222,20 +222,20 @@
           "radius": 0.2
         }
       },
-      "displayName": "Street Positive",
+      "displayName": "Ricoh Positive",
       "developmentReference": {
         "target": "Ricoh Positive"
       }
     },
     {
-      "id": "street_negative",
-      "name": "Street Negative",
+      "id": "ricoh_negative",
+      "name": "Ricoh Negative",
       "aperture": {
         "preferred": 4,
         "starZone": 4
       },
       "ui": {
-        "shortName": "Negative",
+        "shortName": "GR Neg",
         "accent": "#7FA0A6",
         "dialStyle": "snap",
         "personality": "cool",
@@ -319,7 +319,7 @@
             "luminance": 1.03
           }
         },
-        "lut": null
+        "lut": "ricoh-negative"
       },
       "texture": {
         "grain": {
@@ -335,20 +335,20 @@
           "radius": 0.25
         }
       },
-      "displayName": "Street Negative",
+      "displayName": "Ricoh Negative",
       "developmentReference": {
         "target": "Ricoh Negative"
       }
     },
     {
-      "id": "ccd_classic",
-      "name": "CCD Classic",
+      "id": "leica_m9",
+      "name": "Leica M9",
       "aperture": {
         "preferred": 2.8,
         "starZone": 4
       },
       "ui": {
-        "shortName": "CCD",
+        "shortName": "M9",
         "accent": "#A6ABB0",
         "dialStyle": "engraved",
         "personality": "classic",
@@ -432,7 +432,7 @@
             "luminance": 0.98
           }
         },
-        "lut": null
+        "lut": "leica-m9"
       },
       "texture": {
         "grain": {
@@ -448,20 +448,20 @@
           "radius": 0.2
         }
       },
-      "displayName": "CCD Classic",
+      "displayName": "Leica M9",
       "developmentReference": {
         "target": "Leica M9"
       }
     },
     {
-      "id": "muted_chrome",
-      "name": "Muted Chrome",
+      "id": "fuji_classic_chrome",
+      "name": "Fuji Classic Chrome",
       "aperture": {
         "preferred": 4,
         "starZone": 4
       },
       "ui": {
-        "shortName": "Chrome",
+        "shortName": "Fuji CC",
         "accent": "#8C979C",
         "dialStyle": "knurled",
         "personality": "restrained",
@@ -545,7 +545,7 @@
             "luminance": 1.01
           }
         },
-        "lut": null
+        "lut": "fuji-classic-chrome"
       },
       "texture": {
         "grain": {
@@ -561,20 +561,20 @@
           "radius": 0.22
         }
       },
-      "displayName": "Muted Chrome",
+      "displayName": "Fuji Classic Chrome",
       "developmentReference": {
         "target": "Fuji Classic Chrome"
       }
     },
     {
-      "id": "retro_negative",
-      "name": "Retro Negative",
+      "id": "fuji_classic_negative",
+      "name": "Fuji Classic Negative",
       "aperture": {
         "preferred": 2.8,
         "starZone": 4
       },
       "ui": {
-        "shortName": "Retro",
+        "shortName": "Fuji CN",
         "accent": "#97A06A",
         "dialStyle": "knurled",
         "personality": "nostalgic",
@@ -658,7 +658,7 @@
             "luminance": 0.98
           }
         },
-        "lut": null
+        "lut": "fuji-classic-negative"
       },
       "texture": {
         "grain": {
@@ -674,20 +674,20 @@
           "radius": 0.28
         }
       },
-      "displayName": "Retro Negative",
+      "displayName": "Fuji Classic Negative",
       "developmentReference": {
         "target": "Fuji Classic Negative"
       }
     },
     {
-      "id": "natural_tone",
-      "name": "Natural Tone",
+      "id": "hasselblad_natural",
+      "name": "Hasselblad Natural",
       "aperture": {
         "preferred": 2.8,
         "starZone": 4
       },
       "ui": {
-        "shortName": "Natural",
+        "shortName": "Hassel",
         "accent": "#CBBFA8",
         "dialStyle": "medium-format",
         "personality": "clean",
@@ -771,7 +771,7 @@
             "luminance": 1.03
           }
         },
-        "lut": null
+        "lut": "hasselblad-natural"
       },
       "texture": {
         "grain": {
@@ -787,14 +787,14 @@
           "radius": 0.16
         }
       },
-      "displayName": "Natural Tone",
+      "displayName": "Hasselblad Natural",
       "developmentReference": {
         "target": "Hasselblad Natural"
       }
     },
     {
-      "id": "tungsten_800",
-      "name": "Tungsten 800",
+      "id": "cinestill_800t",
+      "name": "CineStill 800T",
       "aperture": {
         "preferred": 1.48,
         "starZone": 2.8
@@ -884,7 +884,7 @@
             "luminance": 0.98
           }
         },
-        "lut": null
+        "lut": "cinestill-800t"
       },
       "texture": {
         "grain": {
@@ -900,7 +900,7 @@
           "radius": 0.58
         }
       },
-      "displayName": "Tungsten 800",
+      "displayName": "CineStill 800T",
       "developmentReference": {
         "target": "CineStill 800T"
       }

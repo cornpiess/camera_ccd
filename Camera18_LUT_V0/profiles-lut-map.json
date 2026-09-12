@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "lutVersion": "Camera18-V0",
+  "warning": "These are original calibration starting points, not measured 1:1 reproductions.",
+  "profiles": [
+    {
+      "id": "canon_g7x2",
+      "displayName": "Canon G7 X II",
+      "lut": "luts/canon-g7x2.cube",
+      "notes": "Warm/pleasant skin, modest saturation, gentle midtone lift; starting point only."
+    },
+    {
+      "id": "ricoh_positive",
+      "displayName": "Ricoh Positive Film",
+      "lut": "luts/ricoh-positive.cube",
+      "notes": "Denser positive-film direction: saturated, punchy, deeper shadows."
+    },
+    {
+      "id": "ricoh_negative",
+      "displayName": "Ricoh Negative Film",
+      "lut": "luts/ricoh-negative.cube",
+      "notes": "Muted negative-film direction with cool/cyan shadows and warm highlights."
+    },
+    {
+      "id": "leica_m9",
+      "displayName": "Leica M9 body-character",
+      "lut": "luts/leica-m9.cube",
+      "notes": "M9 body-color starting point: solid mids, restrained greens/blues, gentle warm/red character."
+    },
+    {
+      "id": "fuji_classic_chrome",
+      "displayName": "Fujifilm Classic Chrome",
+      "lut": "luts/fuji-classic-chrome.cube",
+      "notes": "Muted documentary look: restrained magenta, cooler shadows, warm-ish mids, lifted toe."
+    },
+    {
+      "id": "fuji_classic_negative",
+      "displayName": "Fujifilm Classic Negative",
+      "lut": "luts/fuji-classic-negative.cube",
+      "notes": "Punchy contrast with teal/cyan shadow tendency and warmer/magenta highlights."
+    },
+    {
+      "id": "hasselblad_natural",
+      "displayName": "Hasselblad Natural",
+      "lut": "luts/hasselblad-natural.cube",
+      "notes": "Very restrained natural-color starting point with smooth highlight roll-off and gentle skin lift."
+    },
+    {
+      "id": "cinestill_800t",
+      "displayName": "CineStill 800T color only",
+      "lut": "luts/cinestill-800t.cube",
+      "notes": "Cool/tungsten night palette with warm/red highlight tendency. Halation/grain must be separate from LUT."
+    }
+  ]
+}

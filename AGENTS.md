@@ -113,9 +113,18 @@ node -e "const Y=require('yaml'),fs=require('fs');for(const f of ['.github/workf
 
 ## 2. 禁止过度设计
 
-不得引入：手动 ISO / 快门 / WB / EV、滤镜选择器、滤镜强度滑块、后期编辑器、AI 增强、直方图、网格水平仪、Pro Mode、镜头切换、账号体系、云同步、Redux / Zustand。
+不得引入：手动 ISO / 快门 / WB / EV、滤镜选择器、滤镜强度滑块、后期编辑器、AI 增强、直方图、网格水平仪、Pro Mode、账号体系、云同步、Redux / Zustand。
 
-**用户只控制两件事**：相机型号（8 个 Profile）+ 光圈 f-stop。其余（AF / AE / ISO / 快门 / AWB / 防抖）全自动。
+例外（用户 2026-09-12 明确批准）：**后置镜头切换**（0.5×/1×/2× 档位）是正式功能；**前后置切换**仍然禁止。
+
+**用户只控制三件事**：相机型号（8 个 Profile）+ 光圈 f-stop + 后置镜头档位。其余（AF / AE / ISO / 快门 / AWB / 防抖）全自动。
+
+**相机模拟架构（用户定稿，禁止偏离）**：
+- 预览：`AVCaptureVideoDataOutput → CIImage → CameraDNARenderer(.preview) → MTKView`（MetalKit 显示，无自定义 shader）
+- 成片：`AVCapturePhotoOutput → CIImage → 同一 CameraDNARenderer(.final) → JPEG`
+- 共享阶段：LUT（.cube，`Camera18_LUT_V0` 包）、曝光、色彩、色调、对比、暗角
+- 仅成片：detail/deharsh、完整颗粒、halation
+- 禁止：RN 侧逐帧图像处理、独立预览滤镜实现、AI、V1 自定义 Metal shader
 
 ---
 
