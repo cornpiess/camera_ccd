@@ -218,6 +218,8 @@ export type CameraEngineViewProps = {
   profile?: CameraProfile;
   /** Reserved display value. Setting hardware aperture is unsupported. */
   aperture?: number;
+  /** Rounded-rect viewfinder card radius (pt); 0 = square corners. */
+  cornerRadius?: number;
   onError?: (error: CameraEngineError) => void;
 };
 

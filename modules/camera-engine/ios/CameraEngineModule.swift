@@ -256,6 +256,11 @@ public final class CameraEngineModule: Module {
       Prop("profile") { (view: CameraEngineView, profile: [String: Any]?) in
         view.setProfile(profile ?? [:])
       }
+      // Rounded-rectangle "viewfinder card" (Dazz-style): the radius is set from JS so
+      // the card geometry lives with the rest of the layout system.
+      Prop("cornerRadius") { (view: CameraEngineView, radius: CGFloat?) in
+        view.setCornerRadius(radius ?? 0)
+      }
       OnViewDidUpdateProps { view in
         self.activeView = view
       }
@@ -444,6 +449,32 @@ public final class CameraEngineView: ExpoView {
 
   fileprivate func setProfile(_ value: [String: Any]) {
     profileLock.lock(); profile = value; profileLock.unlock()
+  }
+
+  // Rounded viewfinder card: clip the preview (and every sublayer) to a continuous-corner
+  // rounded rect. Applied to the root layer AND the Metal view so the drawable never
+  // pokes past a corner.
+  private var cornerRadiusStorage: CGFloat = 0
+
+  fileprivate func setCornerRadius(_ radius: CGFloat) {
+    cornerRadiusStorage = max(0, radius)
+    applyCornerRadius()
+  }
+
+  private func applyCornerRadius() {
+    let radius = cornerRadiusStorage
+    for layerItem in [layer, previewView?.layer] {
+      guard let target = layerItem else { continue }
+      target.cornerRadius = radius
+      if radius > 0 {
+        target.cornerCurve = .continuous
+        target.masksToBounds = true
+      } else {
+        target.masksToBounds = false
+      }
+    }
+    renderLayer.cornerRadius = radius
+    renderLayer.masksToBounds = radius > 0
   }
 
   private func profileSnapshot() -> [String: Any] {

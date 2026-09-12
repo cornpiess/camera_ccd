@@ -873,17 +873,29 @@ function CameraAppScreen(): React.JSX.Element {
 
       {/* The one and only native preview. The profile prop carries the aperture-linked
           bloom/starburst factors so the live preview shows the same visual system the
-          final capture will use. The rect tracks rotation via live window dimensions. */}
+          final capture will use. The rect tracks rotation via live window dimensions;
+          the rounded-rect card (Dazz-style) is clipped natively via cornerRadius. */}
       <CameraEngineView
         style={[
           styles.viewfinder,
           { left: finder.left, top: finder.top, width: finder.width, height: finder.height },
         ]}
+        cornerRadius={28}
         profile={(effectiveProfile ?? activeProfile) as unknown as Record<string, unknown>}
       />
 
       <ThreeFingerGestureDetector onTriggerCalibration={() => setIsCalibrationOpen(true)}>
         <View style={styles.fullScreen}>
+          {/* Viewfinder card edge: a hairline ring matching the native rounded clip,
+              giving the finder the "card" read (Dazz-style) without blocking touches. */}
+          <View
+            pointerEvents="none"
+            style={[
+              styles.finderCardFrame,
+              { left: finder.left, top: finder.top, width: finder.width, height: finder.height },
+            ]}
+          />
+
           {/* Tap-to-focus indicator (visual only) */}
           <FocusIndicator point={focusIndicator} />
 
@@ -1127,6 +1139,13 @@ const styles = StyleSheet.create({
   viewfinder: {
     position: 'absolute',
     backgroundColor: '#000000',
+  },
+  finderCardFrame: {
+    position: 'absolute',
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.14)',
+    zIndex: 5,
   },
   viewfinderTouchArea: {
     position: 'absolute',
