@@ -57,9 +57,14 @@ private extension CameraEngineError {
 }
 
 // MARK: - Aperture Controller Abstraction
-/// Manages variable aperture runtime discovery and hardware control via official public APIs only.
-/// On devices without variable aperture support (or until future SDKs expose Apple public APIs),
-/// it safely and honestly reports supportsVariableAperture = false and rejects setAperture calls.
+/// Manages variable aperture runtime discovery and hardware control.
+/// Since iOS 27 / iPhone 18 Pro, Apple exposes the physical variable aperture to third
+/// parties: `AVCaptureDevice.setExposureModeCustom(lensAperture:duration:iso:)` gives us
+/// true aperture-priority (hardware aperture under our control, shutter/ISO stay auto),
+/// with the real range in `activeFormat.minLensAperture / maxLensAperture` and the
+/// hardware detents in `activeFormat.recommendedLensApertureStops`.
+/// On older OS versions or lenses without a variable aperture we still honestly report
+/// supportsVariableAperture = false and reject setAperture — never fake depth of field.
 final class ApertureController {
   struct Capabilities {
     let supportsVariableAperture: Bool
@@ -91,7 +96,9 @@ final class ApertureController {
 
   init() {}
 
-  /// Inspect runtime device capabilities using official public AVFoundation properties.
+  /// Inspect runtime device capabilities. On iOS 27+ the per-format lens aperture range
+  /// is authoritative; a degenerate range (min >= max) means this lens has no variable
+  /// aperture, so the fixed-aperture honesty path applies per lens.
   func getCapabilities(device: AVCaptureDevice?) -> Capabilities {
     guard let device = device else {
       return Capabilities(
@@ -104,11 +111,38 @@ final class ApertureController {
       )
     }
 
-    let activeLensAperture = Double(device.lensAperture)
+    if #available(iOS 27.0, *) {
+      let format = device.activeFormat
+      let minAperture = Double(format.minLensAperture)
+      let maxAperture = Double(format.maxLensAperture)
+      let active = Double(device.currentLensAperture)
+      if minAperture > 0, maxAperture > minAperture {
+        // Hardware detents when the format publishes them; otherwise the JS layer derives
+        // a 1/3-stop ladder from min/max (deriveVariableApertures).
+        let stops: [Double]? = format.recommendedLensApertureStops.map { stops in
+          stops.map { Double($0) }.sorted()
+        }
+        return Capabilities(
+          supportsVariableAperture: true,
+          minAperture: minAperture,
+          maxAperture: maxAperture,
+          activeAperture: active,
+          supportedApertures: (stops?.isEmpty == false) ? stops : nil,
+          deviceModel: device.localizedName
+        )
+      }
+      return Capabilities(
+        supportsVariableAperture: false,
+        minAperture: nil,
+        maxAperture: nil,
+        activeAperture: active,
+        supportedApertures: nil,
+        deviceModel: device.localizedName
+      )
+    }
 
-    // TODO: Verify on iPhone 18 Pro once official Apple public API is available in future iOS SDK.
-    // We intentionally never use private APIs, KVC, or guess undocumented selectors.
-    // For now, honestly report supportsVariableAperture = false.
+    // Pre-iOS 27: no public variable-aperture API — report honestly.
+    let activeLensAperture = Double(device.lensAperture)
     return Capabilities(
       supportsVariableAperture: false,
       minAperture: nil,
@@ -119,16 +153,49 @@ final class ApertureController {
     )
   }
 
-  /// Attempts to set hardware variable aperture on the active device.
-  /// Rejects on unsupported devices or until verified public API exists.
+  /// Set the physical lens aperture (aperture-priority: shutter and ISO stay automatic).
+  /// Apple notes the hardware may settle on the nearest real physical position, which is
+  /// why callers re-read currentLensAperture through getCapabilities for display.
   func setAperture(_ fStop: Double, on device: AVCaptureDevice?, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
-    guard let _ = device else {
+    guard let device = device else {
       completion(.failure(.cameraUnavailable))
       return
     }
 
-    // TODO: Connect to official Apple public API for iPhone 18 Pro variable aperture.
-    // Do not fake success; reject with apertureUnsupported so UI/caller can fallback gracefully.
+    if #available(iOS 27.0, *) {
+      let format = device.activeFormat
+      let minAperture = Double(format.minLensAperture)
+      let maxAperture = Double(format.maxLensAperture)
+      guard minAperture > 0, maxAperture > minAperture else {
+        completion(.failure(.apertureUnsupported))
+        return
+      }
+      let target = Float(min(max(fStop, minAperture), maxAperture))
+      guard format.supportsExposureModeCustom(
+        lensAperture: target,
+        duration: AVCaptureDevice.autoExposureDuration,
+        iso: AVCaptureDevice.autoISO
+      ) else {
+        completion(.failure(.apertureUnsupported))
+        return
+      }
+      do {
+        try device.lockForConfiguration()
+        defer { device.unlockForConfiguration() }
+        device.setExposureModeCustom(
+          lensAperture: target,
+          duration: AVCaptureDevice.autoExposureDuration,
+          iso: AVCaptureDevice.autoISO,
+          completionHandler: nil
+        )
+        completion(.success(()))
+      } catch {
+        completion(.failure(.configurationFailed))
+      }
+      return
+    }
+
+    // Pre-iOS 27: reject so UI/caller fall back to the fixed-aperture display.
     completion(.failure(.apertureUnsupported))
   }
 }
@@ -228,6 +295,12 @@ public final class CameraEngineModule: Module {
     AsyncFunction("setLens") { (lensId: String, promise: Promise) in
       guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
       view.setLens(lensId) { result in self.settle(result, promise) }
+    }
+
+    /// Crop zoom on the ACTIVE lens (videoZoomFactor); applies to preview AND capture.
+    AsyncFunction("setZoomFactor") { (factor: Double, promise: Promise) in
+      guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
+      view.setZoomFactor(factor) { result in self.settle(result, promise) }
     }
 
     AsyncFunction("applyProfile") { (profile: [String: Any], promise: Promise) in
@@ -590,6 +663,27 @@ public final class CameraEngineView: ExpoView {
         return ["id": spec.id, "label": spec.label]
       }
       DispatchQueue.main.async { completion(.success(lenses)) }
+    }
+  }
+
+  /// Apply a crop zoom on the ACTIVE rear lens (device.videoZoomFactor). Zoom is a
+  /// device-level property, so preview feed and AVCapturePhotoOutput see the exact same
+  /// framing — the WYSIWYG contract holds for digitally-derived focal stops too.
+  /// Clamped to [1, 8] and the hardware ceiling; a freshly switched lens starts at 1.
+  fileprivate func setZoomFactor(_ factor: Double, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
+    sessionQueue.async {
+      guard let device = self.camera, device.isConnected else {
+        completion(.failure(.notRunning)); return
+      }
+      do {
+        try device.lockForConfiguration()
+        defer { device.unlockForConfiguration() }
+        let ceiling = min(device.activeFormat.videoMaxZoomFactor, 8.0)
+        device.videoZoomFactor = min(max(1.0, factor), ceiling)
+        completion(.success(()))
+      } catch {
+        completion(.failure(.configurationFailed))
+      }
     }
   }
 

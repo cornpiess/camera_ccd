@@ -39,15 +39,15 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      # ExpoModulesCore 55 明确以 Swift 6 编译，并使用 Xcode 26 编译器支持的
-      # actor-isolated conformance 语法。macos-15 的默认 Xcode 16.4 无法解析该语法。
-      - name: Select Xcode 26
+      # ExpoModulesCore 55 需要 Xcode 26+ 编译器；相机模块的 iOS 27 物理光圈 API
+      # （setExposureModeCustom(lensAperture:...) 等）需要 Xcode 27 的 iOS 27 SDK。
+      - name: Select Xcode 27
         run: |
           set -euo pipefail
           shopt -s nullglob
-          XCODE_APPS=(/Applications/Xcode_26*.app)
+          XCODE_APPS=(/Applications/Xcode_2[789]*.app)
           if [ "${#XCODE_APPS[@]}" -eq 0 ]; then
-            echo "::error::runner 未安装 Xcode 26，无法编译 Expo SDK 55。"
+            echo "::error::runner 未安装 Xcode 27+，无法编译 iOS 27 物理光圈 API。"
             exit 1
           fi
           XCODE_APP=$(printf '%s\n' "${XCODE_APPS[@]}" | sort | tail -1)
@@ -55,8 +55,8 @@ jobs:
           sudo xcode-select -s "$XCODE_APP/Contents/Developer"
           XV=$(xcodebuild -version | sed -n '1s/^Xcode //p')
           echo "已选择 Xcode $XV"
-          if [ "${XV%%.*}" -lt 26 ]; then
-            echo "::error::xcode-select 后仍不是 Xcode 26+：$XV"
+          if [ "${XV%%.*}" -lt 27 ]; then
+            echo "::error::xcode-select 后仍不是 Xcode 27+：$XV"
             exit 1
           fi
 

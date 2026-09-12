@@ -74,6 +74,8 @@ type NativeCameraEngine = {
   getCameraAuthorizationStatus(): Promise<CameraAuthorizationStatus>;
   getAvailableLenses(): Promise<CameraLens[]>;
   setLens(lensId: string): Promise<void>;
+  /** Crop zoom (videoZoomFactor) on the ACTIVE lens; ≥1, applies to preview AND capture. */
+  setZoomFactor(factor: number): Promise<void>;
 };
 
 /**
@@ -148,6 +150,7 @@ const unavailableModule: NativeCameraEngine = {
   getCameraAuthorizationStatus: () => Promise.reject(unavailableError()),
   getAvailableLenses: () => Promise.reject(unavailableError()),
   setLens: () => Promise.reject(unavailableError()),
+  setZoomFactor: () => Promise.reject(unavailableError()),
 };
 
 /** Black stand-in preview so the app still mounts and shows the error view above it. */
@@ -179,6 +182,7 @@ export const getCameraAuthorizationStatus = (): Promise<CameraAuthorizationStatu
   typed(NativeModule.getCameraAuthorizationStatus());
 export const getAvailableLenses = (): Promise<CameraLens[]> => typed(NativeModule.getAvailableLenses());
 export const setLens = (lensId: string): Promise<void> => typed(NativeModule.setLens(lensId));
+export const setZoomFactor = (factor: number): Promise<void> => typed(NativeModule.setZoomFactor(factor));
 
 /** Functional native API; also convenient for call sites that prefer a namespace object. */
 export const CameraEngine = {
@@ -192,6 +196,7 @@ export const CameraEngine = {
   getCameraAuthorizationStatus,
   getAvailableLenses,
   setLens,
+  setZoomFactor,
 } as const;
 
 export type CameraEngineHandle = {
@@ -205,6 +210,7 @@ export type CameraEngineHandle = {
   getCameraAuthorizationStatus: typeof getCameraAuthorizationStatus;
   getAvailableLenses: typeof getAvailableLenses;
   setLens: typeof setLens;
+  setZoomFactor: typeof setZoomFactor;
 };
 
 export type CameraEngineViewProps = {
@@ -234,6 +240,7 @@ export const CameraEngineView = forwardRef<CameraEngineHandle, CameraEngineViewP
     getCameraAuthorizationStatus,
     getAvailableLenses,
     setLens,
+    setZoomFactor,
   }), []);
   return <NativePreview {...nativeProps} />;
 });

@@ -25,10 +25,11 @@ import {
   CameraEngineView,
   type CapturedPhoto,
   type CameraCapabilities,
-  type CameraLens,
   type CameraAuthorizationStatus,
 } from './src/camera/CameraEngine';
+// LoadCameraState, focal model
 import { loadCameraState, rememberAperture, saveCameraState, type CameraState } from './src/camera/cameraStateStore';
+import { buildFocalStops, defaultFocalStop, type FocalStop } from './src/camera/focalLadder';
 
 // Profile management provider
 import { ProfileProvider, useProfiles } from './src/profiles/ProfileProvider';
@@ -42,12 +43,11 @@ import {
   TopBar,
   ShutterButton,
   ThumbnailPreview,
-  ApertureControl,
+  FocalApertureDial,
   RadialProfileSelector,
   CameraSelector,
   FocusIndicator,
   StartupErrorBoundary,
-  LensSwitcher,
   ThreeFingerGestureDetector,
   type FocusPoint,
   PermissionRequestView,
@@ -63,11 +63,15 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 installDiagLog();
 
 /**
- * Top inset of the viewfinder touch area (styles.viewfinderTouchArea). Tap-to-focus layer
- * coordinates are computed relative to the full-screen preview view, so the offset must be
- * removed before normalizing.
+ * Viewfinder geometry, matched to the iOS system camera: a full-width 4:3 frame whose
+ * top edge sits right below the top control bar (the native preview is a 4:3 image
+ * letterboxed inside the view, so this rect is an exact fit — no letterbox, no crop).
+ * Tap-to-focus coordinates are normalized against THIS rect (the native side converts
+ * with the actual view bounds, which is always correct under any aspect math).
  */
-const VIEWFINDER_TOP_INSET = 80;
+const VIEWFINDER_TOP = 60;
+const VIEWFINDER_HEIGHT = Math.round(SCREEN_WIDTH * (4 / 3));
+const VIEWFINDER_BOTTOM = VIEWFINDER_TOP + VIEWFINDER_HEIGHT;
 
 /**
  * Capture lifecycle the UI can distinguish without a native event channel:
@@ -184,9 +188,10 @@ function CameraAppScreen(): React.JSX.Element {
   const [availableApertures, setAvailableApertures] = useState<number[]>([]);
   const capabilitiesRef = useRef<CameraCapabilities | null>(null);
 
-  // Rear lens switching (0.5× / 1× / 2×); empty when the device has a single lens.
-  const [lenses, setLenses] = useState<CameraLens[]>([]);
+  // Rear lens inventory → derived focal stops for the dial (13/26/35/52 on dual, 13…192 on Pro).
   const [currentLensId, setCurrentLensId] = useState<string>('wide');
+  const [focalStops, setFocalStops] = useState<FocalStop[]>([]);
+  const [currentFocalMm, setCurrentFocalMm] = useState<number | null>(null);
 
   // Photo Capture & Preview states
   const [capturePhase, setCapturePhase] = useState<CapturePhase>('idle');
@@ -303,12 +308,17 @@ function CameraAppScreen(): React.JSX.Element {
         setAvailableApertures([]);
       }
 
-      // Rear lens list (0.5× / 1× / 2×); empty on single-lens devices.
+      // Rear lens list → derive the focal-stop ladder for the dial.
       try {
         const list = await CameraEngine.getAvailableLenses();
-        setLenses(Array.isArray(list) ? list : []);
+        const lensArray = Array.isArray(list) ? list : [];
+        const stops = buildFocalStops(lensArray.map((lens) => lens.id));
+        setFocalStops(stops);
+        setCurrentFocalMm((previous) =>
+          previous ?? defaultFocalStop(lensArray.map((lens) => lens.id)).mm,
+        );
       } catch {
-        setLenses([]);
+        // Single-lens fallbacks stay on the previous state.
       }
     } catch (err: unknown) {
       cameraRunningRef.current = false;
@@ -463,23 +473,38 @@ function CameraAppScreen(): React.JSX.Element {
     }
   };
 
-  const handleSelectLens = useCallback(async (lensId: string) => {
+  /**
+   * Focal-stop selection: switch the physical lens first when needed, then apply the
+   * crop zoom on it. Display updates only after both hardware calls succeed.
+   */
+  const handleSelectFocal = useCallback(async (stop: FocalStop) => {
     try {
-      await CameraEngine.setLens(lensId);
-      setCurrentLensId(lensId);
-      // A different lens means a different physical aperture — refresh the honest display.
-      try {
-        const caps = await CameraEngine.getCapabilities();
-        const aperture = caps.activeAperture ?? caps.activeLensAperture ?? 1.8;
-        setActiveAperture(aperture);
-        setCurrentAperture(aperture);
-      } catch {
-        // Keep the previous display when the refresh fails; the lens switch itself succeeded.
+      if (stop.lensId !== currentLensId) {
+        await CameraEngine.setLens(stop.lensId);
+        setCurrentLensId(stop.lensId);
+        // Different lens → different physical aperture; refresh the honest display.
+        try {
+          const caps = await CameraEngine.getCapabilities();
+          const variable = Boolean(caps.supportsVariableAperture);
+          setSupportsVariableAperture(variable);
+          setAvailableApertures(variable && Array.isArray(caps.supportedApertures) && caps.supportedApertures.length > 0
+            ? [...caps.supportedApertures].sort((a, b) => a - b)
+            : []);
+          const aperture = caps.activeAperture ?? caps.activeLensAperture ?? 1.8;
+          setActiveAperture(aperture);
+          setCurrentAperture(aperture);
+        } catch {
+          // Keep the previous aperture display; the lens switch itself succeeded.
+        }
       }
+      if (stop.zoom !== 1) {
+        await CameraEngine.setZoomFactor(stop.zoom);
+      }
+      setCurrentFocalMm(stop.mm);
     } catch (err: unknown) {
       showTransientError(resolveErrorMessage(err));
     }
-  }, [showTransientError]);
+  }, [currentLensId, showTransientError]);
 
   const handleCapturePhoto = async () => {
     if (capturePhase === 'capturing') return;
@@ -553,7 +578,7 @@ function CameraAppScreen(): React.JSX.Element {
       setFocusIndicator({ x: pageX, y: pageY, key: Date.now() });
 
       const nx = Math.min(1, Math.max(0, pageX / SCREEN_WIDTH));
-      const ny = Math.min(1, Math.max(0, (pageY - VIEWFINDER_TOP_INSET) / SCREEN_HEIGHT));
+      const ny = Math.min(1, Math.max(0, (pageY - VIEWFINDER_TOP) / VIEWFINDER_HEIGHT));
       CameraEngine.setFocusPoint(nx, ny).catch(() => {});
     },
     [isCameraRunning],
@@ -777,9 +802,9 @@ function CameraAppScreen(): React.JSX.Element {
       {/* 3-Finger Gesture Handler wraps the interactive camera surface (~2 sec hold opens CalibrationModal) */}
       <ThreeFingerGestureDetector onTriggerCalibration={() => setIsCalibrationOpen(true)}>
         <View style={styles.fullScreen}>
-          {/* 1. Full-Screen Native Camera Engine View (cameraPosition prop removed) */}
+          {/* 1. Native Camera Engine View — 4:3 viewfinder rect, top edge like the system camera */}
           <CameraEngineView
-            style={StyleSheet.absoluteFillObject}
+            style={styles.viewfinder}
             profile={activeProfile as unknown as Record<string, unknown>}
           />
 
@@ -812,12 +837,18 @@ function CameraAppScreen(): React.JSX.Element {
             />
           </View>
 
-          {/* Rear lens switcher (0.5× / 1× / 2×), only when the device has multiple lenses */}
-          {lenses.length > 1 && (
-            <View style={styles.lensSwitcherContainer} pointerEvents="box-none">
-              <LensSwitcher lenses={lenses} currentId={currentLensId} onSelect={(id) => { void handleSelectLens(id); }} />
-            </View>
-          )}
+          {/* Focal/Aperture dial: always mounted (it carries the honest Fixed ƒ/x display) */}
+          <View style={styles.dialContainer} pointerEvents="box-none">
+            <FocalApertureDial
+              stops={focalStops}
+              currentFocalMm={currentFocalMm}
+              onSelectFocal={(stop) => { void handleSelectFocal(stop); }}
+              currentAperture={currentAperture}
+              availableApertures={availableApertures}
+              isVariableAperture={supportsVariableAperture}
+              onApertureChange={handleApertureChange}
+            />
+          </View>
 
           {/* Transient Error Banner while running (does not unmount camera) */}
           {transientError && (
@@ -831,18 +862,8 @@ function CameraAppScreen(): React.JSX.Element {
             </View>
           )}
 
-          {/* Bottom Bar: Aperture Control, Shutter, Recent Thumbnail */}
+          {/* Bottom Bar: Shutter & Recent Thumbnail (aperture moved into the dial) */}
           <View style={styles.bottomControlsContainer} pointerEvents="box-none">
-            {/* 3. Aperture Control (Interactive only if variable; otherwise Fixed ƒ/x) */}
-            <ApertureControl
-              currentAperture={currentAperture}
-              onApertureChange={handleApertureChange}
-              isVariableAperture={supportsVariableAperture}
-              availableApertures={availableApertures}
-              activeAperture={activeAperture}
-              starZone={activeProfile?.aperture?.starZone}
-            />
-
             {/* Bottom Actions Row: Recent Thumbnail & Shutter Button */}
             <View style={styles.bottomActionRow}>
               {/* 5. Lower-left Recent Photo Thumbnail (tap opens the photo library) */}
@@ -938,8 +959,15 @@ const styles = StyleSheet.create({
   },
   viewfinderTouchArea: {
     ...StyleSheet.absoluteFillObject,
-    top: 80,
-    bottom: 160,
+    top: VIEWFINDER_TOP,
+    bottom: SCREEN_HEIGHT - VIEWFINDER_BOTTOM,
+  },
+  viewfinder: {
+    position: 'absolute',
+    top: VIEWFINDER_TOP,
+    left: 0,
+    width: SCREEN_WIDTH,
+    height: VIEWFINDER_HEIGHT,
   },
   topControlsContainer: {
     position: 'absolute',
@@ -948,10 +976,11 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 20,
   },
-  lensSwitcherContainer: {
+  dialContainer: {
     position: 'absolute',
-    // Just above the bottom controls, centered — the only lens affordance on screen.
-    bottom: 178,
+    // Centered above the shutter row, overlapping the viewfinder's lower edge —
+    // the same visual position as the system camera's zoom dial.
+    bottom: 162,
     left: 0,
     right: 0,
     alignItems: 'center',

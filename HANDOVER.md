@@ -46,7 +46,7 @@ git push              # 6. 收工必须 push，否则另一台机器永远看不
 - ❌ 手动 ISO / 手动快门速度 / 手动白平衡 (WB) / 手动 EV / 曝光补偿
 - ❌ 滤镜选择器、滤镜强度滑块、后期照片编辑器
 - ❌ AI 消除、AI 增强、计算摄影风格化算法
-- ❌ 直方图、九宫格水平仪、专业模式 (Pro Mode)、前后置镜头切换（后置多镜头 0.5×/1×/2× 档位切换已于 2026-09-12 获用户批准，为正式功能）
+- ❌ 直方图、九宫格水平仪、专业模式 (Pro Mode)、前后置镜头切换（后置多镜头切换已于 2026-09-12 获用户批准，为正式功能，UI 呈现为焦段 mm 数值转盘）
 - ❌ 账号体系、云端同步、社交社区、Redux / Zustand 等重型状态管理库
 
 ### 2. 硬件控制边界
@@ -106,7 +106,9 @@ camera/
         ├── CameraSelector.tsx        # ★ 正式 Camera Selection 主入口 (点顶部相机徽章弹出列表)
         ├── GlassCard.tsx             # ★ Liquid Glass 封装 (expo-glass-effect; 旧系统/Reduce Transparency 回退实底)
         ├── FocusIndicator.tsx        # ★ Tap-to-Focus 轻量对焦框 (纯视觉，AF/AE 在原生层完成)
-        ├── ApertureControl.tsx       # 光圈调节器 (可变光圈可用；否则显示 Fixed ƒ/x 并锁定)
+        ├── FocalApertureDial.tsx     # ★ 圆形焦段/光圈转盘：环上点选焦段(mm)，顶部保留光圈位
+        │                             #   （定光圈镜头诚实显示 Fixed ƒ/x；可变光圈机型拖动为
+        │                             #   锯齿棘轮手感，每 1/3 stop 一次触感）
         ├── ShutterButton.tsx         # 物理风格两段式快门按钮
         ├── ThumbnailPreview.tsx      # 左下角成片缩略图 (直读生成图，不滥查相册)
         ├── ProfileOverlay.tsx        # 取景器实时色彩风格近似遮罩
@@ -259,4 +261,5 @@ npx expo export --platform ios --output-dir dist-check; if (Test-Path dist-check
   - ProRAW / RAW 实机捕获速率、写入相册（PhotoKit add-only）权限弹窗。
   - 三指长按呼出校准（Calibration）面板的热加载流程。
 - **待 iPhone 18 Pro 真机验证**：
-  - 接入 Apple 正式物理可变光圈 API 后，物理光圈叶片收放联动与真实光学星芒/景深表现。
+  - iOS 27 物理光圈 API 已接入（`setExposureModeCustom(lensAperture:...)` 光圈优先）：光圈叶片收放联动、真实光圈范围/档位读取、真实光学星芒/景深表现。
+  - 焦段转盘的变焦裁切（`videoZoomFactor`）与成片取景一致性。
