@@ -409,13 +409,11 @@ public final class CameraEngineView: ExpoView {
 
   /// Tap-to-focus: the JS layer sends the tap as a point normalized to the preview layer
   /// (0..1); converting through AVCaptureVideoPreviewLayer.captureDevicePointConverted keeps
-  /// the mapping correct under aspect-fill on every device. Continuous AF/AE stay active.
+  /// the mapping correct under aspect-fill on every device. The conversion touches
+  /// CALayer-backed state, so it must run on the main thread; only then do we hop to the
+  /// session queue to lock and configure the device. Continuous AF/AE stay active.
   fileprivate func setFocusPoint(x: Double, y: Double, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
-    sessionQueue.async {
-      guard let device = self.camera, device.isConnected else {
-        completion(.failure(.notRunning))
-        return
-      }
+    DispatchQueue.main.async {
       let bounds = self.previewLayer.bounds
       guard bounds.width > 0, bounds.height > 0 else {
         completion(.failure(.notRunning))
@@ -424,16 +422,23 @@ public final class CameraEngineView: ExpoView {
       let layerPoint = CGPoint(x: CGFloat(min(max(x, 0), 1)) * bounds.width,
                                y: CGFloat(min(max(y, 0), 1)) * bounds.height)
       let devicePoint = self.previewLayer.captureDevicePointConverted(fromLayerPoint: layerPoint)
-      do {
-        try device.lockForConfiguration()
-        defer { device.unlockForConfiguration() }
-        if device.isFocusPointOfInterestSupported { device.focusPointOfInterest = devicePoint }
-        if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
-        if device.isExposurePointOfInterestSupported { device.exposurePointOfInterest = devicePoint }
-        if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
-        completion(.success(()))
-      } catch {
-        completion(.failure(.configurationFailed))
+
+      self.sessionQueue.async {
+        guard let device = self.camera, device.isConnected else {
+          completion(.failure(.notRunning))
+          return
+        }
+        do {
+          try device.lockForConfiguration()
+          defer { device.unlockForConfiguration() }
+          if device.isFocusPointOfInterestSupported { device.focusPointOfInterest = devicePoint }
+          if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
+          if device.isExposurePointOfInterestSupported { device.exposurePointOfInterest = devicePoint }
+          if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+          completion(.success(()))
+        } catch {
+          completion(.failure(.configurationFailed))
+        }
       }
     }
   }
@@ -536,9 +541,13 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
       return
     }
 
-    // ponytail: a RAW failure still aborts the capture instead of falling back to the
-    // companion processed JPEG; that fallback is a product decision, not implemented.
+    // Never-lose-the-photo rule: if the RAW part failed at the source but this is a
+    // dual-format capture, defer the decision — the companion processed photo may still
+    // arrive and didFinishCaptureFor is guaranteed to run and deliver it.
     guard error == nil, let photoData = photo.fileDataRepresentation() else {
+      if expectedPhotoCount > 1 {
+        return
+      }
       finish(.failure(.captureFailed))
       return
     }
@@ -547,17 +556,18 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     // cannot race the asynchronous render started below.
     completionLock.lock(); didAcceptPhoto = true; completionLock.unlock()
 
-    // Real capture metadata (EXIF exposure data, timestamps, lens info) must be captured on the
-    // delegate thread and carried into the render, or the saved JPEG would lose every shooting
-    // property. Never fabricate hardware EXIF — these values describe the actual iPhone capture.
-    let captureMetadata = photo.metadata
+    processCapturedData(photoData, metadata: photo.metadata, isRaw: isRaw, initialFallback: false)
+  }
 
+  /// Full-quality Camera DNA pipeline: render → EXIF-preserving JPEG → Photos.
+  /// Runs exactly once per capture (guarded by hasCompleted inside finish).
+  private func processCapturedData(_ photoData: Data, metadata: [AnyHashable: Any], isRaw: Bool, initialFallback: Bool) {
     Self.processingQueue.async { [self] in
       guard !hasCompleted else { return }
 
       // 1. RAW / ProRAW First vs Processed Fallback
       var renderedCIImage: CIImage?
-      var usedFallback = false
+      var usedFallback = initialFallback
 
       if isRaw {
         // Core Image official RAW rendering pipeline via CIRAWFilter
@@ -602,7 +612,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
       completionLock.lock(); generatedURLs = [fileURL, thumbURL]; completionLock.unlock()
 
       do {
-        guard let jpeg = Self.jpegRepresentation(image, metadata: captureMetadata, colorSpace: colorSpace, quality: 0.95) else {
+        guard let jpeg = Self.jpegRepresentation(image, metadata: metadata, colorSpace: colorSpace, quality: 0.95) else {
           throw CameraEngineError.processingFailed
         }
         try jpeg.write(to: fileURL, options: .atomic)
@@ -646,19 +656,31 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
   }
 
   func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
-    if error != nil { finish(.failure(.captureFailed)); return }
-    // Safety net: when no usable photo ever reached the pipeline, nothing else will
-    // call finish and the JS promise would hang forever (shutter stuck disabled).
-    guard !didAcceptAnyPhoto else { return }
+    completionLock.lock()
+    let accepted = didAcceptPhoto
+    let companion = companionData
+    completionLock.unlock()
+
+    // A photo already reached the render pipeline — its own path owns the outcome,
+    // including the companion fallback inside the render stage. Never kill it here:
+    // finishing with a failure while processing is in flight would silently drop a
+    // photo that is about to be saved.
+    if accepted { return }
+
+    // RAW never delivered a usable photo, but the companion Apple-processed photo
+    // did: save it untouched (marked as fallback) instead of losing the capture.
+    if error == nil, let companion = companion {
+      processCapturedData(companion, metadata: [:], isRaw: false, initialFallback: true)
+      return
+    }
+
+    // Safety net: nothing usable ever arrived. Finish so the JS promise cannot hang
+    // forever (shutter stuck disabled).
     finish(.failure(.captureFailed))
   }
 
   private var hasCompleted: Bool {
     completionLock.lock(); defer { completionLock.unlock() }; return didComplete
-  }
-
-  private var didAcceptAnyPhoto: Bool {
-    completionLock.lock(); defer { completionLock.unlock() }; return didAcceptPhoto
   }
 
   // Rendered pixels are already upright, so the original orientation tag is replaced with "1"

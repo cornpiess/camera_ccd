@@ -1,6 +1,30 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AccessibilityInfo, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
-import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from 'expo-glass-effect';
+
+// Guarded require: expo-glass-effect resolves its native view manager at MODULE LOAD time,
+// so importing it unconditionally would crash any build whose native side predates this
+// dependency (e.g. loading new JS through Metro into the dev-r2 dev client). If anything
+// fails to resolve we run in fallback mode forever — never at the cost of a launch crash.
+let GlassViewImpl: React.ComponentType<{
+  glassEffectStyle?: 'clear' | 'regular' | 'none';
+  tintColor?: string;
+  isInteractive?: boolean;
+  colorScheme?: 'auto' | 'light' | 'dark';
+  style?: StyleProp<ViewStyle>;
+}> | null = null;
+let availabilityHelpers: { isGlassEffectAPIAvailable: () => boolean; isLiquidGlassAvailable: () => boolean } | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const glass = require('expo-glass-effect');
+  GlassViewImpl = glass.GlassView;
+  availabilityHelpers = {
+    isGlassEffectAPIAvailable: glass.isGlassEffectAPIAvailable,
+    isLiquidGlassAvailable: glass.isLiquidGlassAvailable,
+  };
+} catch {
+  GlassViewImpl = null;
+  availabilityHelpers = null;
+}
 
 /**
  * Track the system Reduce Transparency setting: when enabled, glass controls must fall back to
@@ -48,14 +72,19 @@ export const GlassCard: React.FC<GlassCardProps> = ({
   borderRadius = 18,
 }: GlassCardProps) => {
   const reduceTransparency = useReduceTransparency();
-  const glassOK = isGlassEffectAPIAvailable() && isLiquidGlassAvailable() && !reduceTransparency;
+  const glassOK =
+    GlassViewImpl !== null &&
+    availabilityHelpers !== null &&
+    availabilityHelpers.isGlassEffectAPIAvailable() &&
+    availabilityHelpers.isLiquidGlassAvailable() &&
+    !reduceTransparency;
 
   const tint = useMemo(() => tintColor ?? undefined, [tintColor]);
 
-  if (glassOK) {
+  if (glassOK && GlassViewImpl) {
     return (
       <View style={[styles.clip, { borderRadius }, style]}>
-        <GlassView
+        <GlassViewImpl
           glassEffectStyle="regular"
           tintColor={tint}
           isInteractive={isInteractive}
