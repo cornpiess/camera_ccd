@@ -1,5 +1,5 @@
-import React, { forwardRef, useImperativeHandle } from 'react';
-import type { StyleProp, ViewStyle } from 'react-native';
+import React, { forwardRef, useImperativeHandle, type ComponentType } from 'react';
+import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { requireNativeModule, requireNativeViewManager } from 'expo-modules-core';
 
 export type CameraProfile = Record<string, unknown>;
@@ -62,8 +62,55 @@ type NativeCameraEngine = {
   applyProfile(profile: CameraProfile): Promise<void>;
 };
 
-const NativeModule = requireNativeModule<NativeCameraEngine>('CameraEngine');
-const NativePreview = requireNativeViewManager<CameraEngineViewProps>('CameraEngine');
+/**
+ * Both native entry points (the function module and the preview view manager) are resolved
+ * by expo-modules-core at MODULE LOAD time, so an unguarded failure aborts the whole JS
+ * bundle before React renders anything — in a production build that is a full black screen
+ * (same failure class as the GlassCard guarded glass require: an old/mismatched native side
+ * must never cost the app its launch). On resolution failure we keep rendering and surface
+ * the reason through the normal CameraErrorView path instead.
+ */
+const CAMERA_MODULE_UNAVAILABLE_MESSAGE =
+  'The CameraEngine native module is missing from this app build — the JS and native sides were built from different commits. Rebuild and reinstall the app.';
+
+type NativeParts = {
+  module: NativeCameraEngine;
+  preview: ComponentType<CameraEngineViewProps>;
+};
+
+function resolveNativeParts(): NativeParts | null {
+  try {
+    const mod = requireNativeModule<NativeCameraEngine>('CameraEngine');
+    const preview = requireNativeViewManager<CameraEngineViewProps>('CameraEngine');
+    return { module: mod, preview };
+  } catch {
+    return null;
+  }
+}
+
+const nativeParts = resolveNativeParts();
+
+function unavailableError(): CameraEngineError {
+  return new CameraEngineError('ERR_NATIVE_FAILURE', CAMERA_MODULE_UNAVAILABLE_MESSAGE);
+}
+
+const unavailableModule: NativeCameraEngine = {
+  startCamera: () => Promise.reject(unavailableError()),
+  stopCamera: () => Promise.reject(unavailableError()),
+  capturePhoto: () => Promise.reject(unavailableError()),
+  setAperture: () => Promise.reject(unavailableError()),
+  setFocusPoint: () => Promise.reject(unavailableError()),
+  getCapabilities: () => Promise.reject(unavailableError()),
+  applyProfile: () => Promise.reject(unavailableError()),
+};
+
+/** Black stand-in preview so the app still mounts and shows the error view above it. */
+const UnavailablePreview: ComponentType<CameraEngineViewProps> = ({ style }) => (
+  <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000000' }, style]} pointerEvents="none" />
+);
+
+const NativeModule: NativeCameraEngine = nativeParts ? nativeParts.module : unavailableModule;
+const NativePreview: ComponentType<CameraEngineViewProps> = nativeParts ? nativeParts.preview : UnavailablePreview;
 
 function typed<T>(operation: Promise<T>): Promise<T> {
   return operation.catch((cause: unknown) => {

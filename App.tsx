@@ -42,6 +42,7 @@ import {
   RadialProfileSelector,
   CameraSelector,
   FocusIndicator,
+  StartupErrorBoundary,
   type FocusPoint,
   ThreeFingerGestureDetector,
   PermissionRequestView,
@@ -830,13 +831,17 @@ function CameraAppScreen(): React.JSX.Element {
 }
 
 /**
- * Top-Level App Entry wrapped in ProfileProvider
+ * Top-Level App Entry wrapped in StartupErrorBoundary + ProfileProvider.
+ * The boundary is the production safety net: without it an uncaught render error would
+ * leave a silent full-black screen; with it the phone shows the actual error text.
  */
 export default function App(): React.JSX.Element {
   return (
-    <ProfileProvider>
-      <CameraAppScreen />
-    </ProfileProvider>
+    <StartupErrorBoundary>
+      <ProfileProvider>
+        <CameraAppScreen />
+      </ProfileProvider>
+    </StartupErrorBoundary>
   );
 }
 

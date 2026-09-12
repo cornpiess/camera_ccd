@@ -10,3 +10,4 @@ export * from './ThreeFingerGestureDetector';
 export * from './CameraStateViews';
 export * from './CameraSelector';
 export * from './FocusIndicator';
+export * from './StartupErrorBoundary';
