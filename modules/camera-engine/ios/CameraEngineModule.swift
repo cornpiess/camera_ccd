@@ -101,7 +101,8 @@ final class ApertureController {
   // (KVC + ObjC selector) so this file compiles with any Xcode SDK — the feature is gated at
   // runtime by #available(iOS 27.0, *) and responds(to:). All of these are PUBLIC Apple APIs;
   // dynamic dispatch here is purely SDK-version tolerance, never private-API access.
-  // autoExposureDuration / autoISO are iOS 8-era public sentinels meaning "keep automatic".
+  // autoExposureDuration / autoISO are iOS 27 class properties (the "keep automatic"
+  // sentinels) and are fetched through dynamic class-method calls — see setAperture.
 
   private func formatFloat(_ format: NSObject, _ key: String) -> Double? {
     let sel = NSSelectorFromString(key)
@@ -193,18 +194,34 @@ final class ApertureController {
       return
     }
     let target = Float(min(max(fStop, range.min), range.max))
-    let setter = NSSelectorFromString("setExposureModeCustomWithLensAperture:duration:ISO:completionHandler:")
-    guard device.responds(to: setter) else {
+    let setterSel = NSSelectorFromString("setExposureModeCustomWithLensAperture:duration:ISO:completionHandler:")
+    guard device.responds(to: setterSel) else {
       completion(.failure(.apertureUnsupported))
       return
     }
+    // The auto sentinels (shutter/ISO stay automatic) are iOS 27 class properties, so they
+    // are fetched through dynamic class-method calls too — compiling against an older SDK
+    // never references the symbols at link time.
+    let deviceClass: AnyObject = AVCaptureDevice.self
+    let durationSel = NSSelectorFromString("autoExposureDuration")
+    let isoSel = NSSelectorFromString("autoISO")
+    guard deviceClass.responds(to: durationSel), deviceClass.responds(to: isoSel),
+          let durationImp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), durationSel) as IMP?,
+          let isoImp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), isoSel) as IMP? else {
+      completion(.failure(.apertureUnsupported))
+      return
+    }
+    typealias ClassTimeGetter = @convention(c) (AnyObject, Selector) -> CMTime
+    typealias ClassFloatGetter = @convention(c) (AnyObject, Selector) -> Float
+    let autoDuration = unsafeBitCast(durationImp, to: ClassTimeGetter.self)(deviceClass, durationSel)
+    let autoIso = unsafeBitCast(isoImp, to: ClassFloatGetter.self)(deviceClass, isoSel)
     do {
       try device.lockForConfiguration()
       defer { device.unlockForConfiguration() }
-      let imp = device.method(for: setter)
+      let imp = device.method(for: setterSel)
       typealias ApertureSetter = @convention(c) (NSObject, Selector, Float, CMTime, Float, ((Error?) -> Void)?) -> Void
       let fn = unsafeBitCast(imp, to: ApertureSetter.self)
-      fn(device, setter, target, AVCaptureDevice.autoExposureDuration, AVCaptureDevice.autoISO, nil)
+      fn(device, setterSel, target, autoDuration, autoIso, nil)
       completion(.success(()))
     } catch {
       completion(.failure(.configurationFailed))
