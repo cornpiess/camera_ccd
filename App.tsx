@@ -337,13 +337,17 @@ function CameraAppScreen(): React.JSX.Element {
     const min = capabilitiesRef.current?.minAperture ?? availableApertures[0] ?? aperture;
     const max = capabilitiesRef.current?.maxAperture ?? availableApertures[availableApertures.length - 1] ?? aperture;
     const clamped = Math.min(Math.max(aperture, min), max);
+    const previous = currentAperture;
 
+    // Optimistic UI so the marker tracks the finger immediately; revert if the
+    // hardware rejects, so the shown value is always a real confirmed stop.
+    setCurrentAperture(clamped);
+    setActiveAperture(clamped);
     try {
       await CameraEngine.setAperture(clamped);
-      // Update UI only after native success
-      setCurrentAperture(clamped);
-      setActiveAperture(clamped);
     } catch (err: unknown) {
+      setCurrentAperture(previous);
+      setActiveAperture(previous);
       const msg = err instanceof Error ? err.message : 'Failed to set aperture';
       showTransientError(msg);
     }

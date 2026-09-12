@@ -54,14 +54,18 @@ export const ApertureControl: React.FC<ApertureControlProps> = ({
   };
 
   /* -------------------------------------------------------------
-     Swipe-to-adjust on the collapsed badge (GOAL 9: 左右滑动调节).
+     Swipe-to-adjust on the collapsed badge (GOAL 9/11: 拖动跟手).
      Values are mirrored into refs so the PanResponder closures never
-     act on stale render state. Swipe direction follows the dial
-     metaphor: drag right = stop toward ƒ/4 (smaller aperture),
-     drag left = stop toward ƒ/1.4 (larger aperture).
+     act on stale render state. Steps fire DURING the drag — each time
+     the finger crosses a 26px threshold — so response feels immediate
+     while native calls stay naturally coalesced to one per stop.
+     Direction follows the dial metaphor: drag right = stop toward
+     ƒ/4 (smaller aperture), drag left = toward ƒ/1.4.
      ------------------------------------------------------------- */
   const apertureStateRef = useRef({ current: currentAperture, stops: availableApertures });
   apertureStateRef.current = { current: currentAperture, stops: availableApertures };
+  const dragRef = useRef({ accum: 0, index: 0 });
+  const STEP_PX = 26;
 
   const swipePanResponder = useMemo(
     () =>
@@ -69,17 +73,27 @@ export const ApertureControl: React.FC<ApertureControlProps> = ({
         onStartShouldSetPanResponder: () => false,
         onMoveShouldSetPanResponder: (_evt, g) =>
           Math.abs(g.dx) > 18 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
-        onPanResponderRelease: (_evt, g) => {
+        onPanResponderGrant: () => {
           const { current, stops } = apertureStateRef.current;
-          if (stops.length <= 1) return;
           const index = stops.findIndex((v) => Math.abs(v - current) < 0.05);
-          const currentIndex = index >= 0 ? index : 0;
-          const step = g.dx > 0 ? 1 : -1;
-          const next = stops[Math.min(stops.length - 1, Math.max(0, currentIndex + step))];
-          if (next !== undefined && Math.abs(next - current) >= 0.05) {
+          dragRef.current = { accum: 0, index: index >= 0 ? index : 0 };
+        },
+        onPanResponderMove: (_evt, g) => {
+          const { stops } = apertureStateRef.current;
+          if (stops.length <= 1) return;
+          dragRef.current.accum += g.dx;
+          while (Math.abs(dragRef.current.accum) >= STEP_PX) {
+            const step = dragRef.current.accum > 0 ? 1 : -1;
+            const nextIndex = Math.min(stops.length - 1, Math.max(0, dragRef.current.index + step));
+            dragRef.current.accum = 0;
+            if (nextIndex === dragRef.current.index) break;
+            dragRef.current.index = nextIndex;
             Haptics.selectionAsync().catch(() => {});
-            onApertureChange?.(next);
+            onApertureChange?.(stops[nextIndex]!);
           }
+        },
+        onPanResponderRelease: () => {
+          dragRef.current.accum = 0;
         },
       }),
     [onApertureChange],

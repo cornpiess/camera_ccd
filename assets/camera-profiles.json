@@ -118,7 +118,7 @@
       "id": "street_positive",
       "name": "Street Positive",
       "aperture": {
-        "preferred": 2.8,
+        "preferred": 4,
         "starZone": 4
       },
       "ui": {
@@ -231,7 +231,7 @@
       "id": "street_negative",
       "name": "Street Negative",
       "aperture": {
-        "preferred": 2.8,
+        "preferred": 4,
         "starZone": 4
       },
       "ui": {
@@ -344,7 +344,7 @@
       "id": "ccd_classic",
       "name": "CCD Classic",
       "aperture": {
-        "preferred": 2,
+        "preferred": 2.8,
         "starZone": 4
       },
       "ui": {
@@ -457,7 +457,7 @@
       "id": "muted_chrome",
       "name": "Muted Chrome",
       "aperture": {
-        "preferred": 2.8,
+        "preferred": 4,
         "starZone": 4
       },
       "ui": {

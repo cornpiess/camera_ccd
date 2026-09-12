@@ -304,7 +304,10 @@ public final class CameraEngineView: ExpoView {
     session.sessionPreset = .photo
     if needsInput { session.addInput(input) }
     if needsOutput { session.addOutput(output) }
-    output.maxPhotoQualityPrioritization = .quality
+    // GOAL 16: V1 prioritizes .balanced — Camera 18 is an everyday camera and the shutter must
+    // give quick, clear feedback. Move back to .quality only if real-device testing shows the
+    // extra capture latency is acceptable. Never flip this per-capture at runtime.
+    output.maxPhotoQualityPrioritization = .balanced
 
     // Enable Apple ProRAW capability on session output if supported on this hardware & OS
     if #available(iOS 14.3, *), output.isAppleProRAWSupported {
@@ -345,7 +348,7 @@ public final class CameraEngineView: ExpoView {
         return
       }
 
-      photoSettings.photoQualityPrioritization = .quality
+      photoSettings.photoQualityPrioritization = .balanced
       let id = photoSettings.uniqueID
       let delegate = PhotoCaptureDelegate(profile: self.profileSnapshot()) { [weak self] result in
         self?.sessionQueue.async { self?.captureDelegates.removeValue(forKey: id) }
