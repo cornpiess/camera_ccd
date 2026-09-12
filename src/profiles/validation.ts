@@ -64,6 +64,7 @@ const pushProfileErrors = (v: unknown, e: (message: string) => void): void => {
     const color = v.color;
     ['saturation','temperature','tint'].forEach(k => { if (typeof color[k] !== 'number' || !Number.isFinite(color[k])) e(`color.${k} must be a finite number`); });
     if (color.lut !== undefined && color.lut !== null && typeof color.lut !== 'string') e('color.lut must be a string or null');
+    optNum(color, 'lutIntensity', 'color', e, [0, 1]);
     if (!obj(color.hueBands)) e('color.hueBands must be an object'); else {
       const hueBands = color.hueBands;
       HUE_BAND_NAMES.forEach(b => nums(hueBands[b], ['hue','saturation','luminance'], `color.hueBands.${b}`, e));
@@ -73,6 +74,9 @@ const pushProfileErrors = (v: unknown, e: (message: string) => void): void => {
     nums(v.texture.grain, ['amount','size'], 'texture.grain', e);
     nums(v.texture.vignette, ['amount','radius'], 'texture.vignette', e);
     nums(v.texture.halation, ['amount','radius'], 'texture.halation', e);
+    if (v.texture.starburst !== undefined) {
+      nums(v.texture.starburst, ['threshold','strength','length','rays'], 'texture.starburst', e);
+    }
   }
 };
 

@@ -45,16 +45,32 @@ export interface GlobalColorAdjustments {
   readonly temperature: number;
   readonly tint: number;
   readonly hueBands: HueBands;
-  /** Reserved: reference to a future 3D LUT / color cube asset (GOAL 19 keeps this capability open). Not applied by the engine yet. */
+  /** Optional 3D LUT (.cube, Camera18_LUT_V0 pack) applied as the camera-character layer. */
   readonly lut?: string | null;
+  /**
+   * LUT blend intensity 0..1 (default 1). The engine mixes LUT output over the tone-mapped
+   * image, so calibrated looks can be held back (0.3–0.8) to avoid a cheap filter feel.
+   */
+  readonly lutIntensity?: number;
 }
 export interface GrainSettings { readonly amount: number; readonly size: number }
 export interface VignetteSettings { readonly amount: number; readonly radius: number }
 export interface HalationSettings { readonly amount: number; readonly radius: number }
+export interface StarburstSettings {
+  /** Highlight cut-in threshold 0..1 — only true point lights pass (lamps, sun, speculars). */
+  readonly threshold: number;
+  /** 0..1 base strength; the aperture linkage multiplies this at run time. */
+  readonly strength: number;
+  /** 0..1 streak length (maps to the motion-blur radius of each ray pass). */
+  readonly length: number;
+  /** Visible ray points: 4, 6 or 8 (2/3/4 blur directions). */
+  readonly rays: number;
+}
 export interface TextureSettings {
   readonly grain: GrainSettings;
   readonly vignette: VignetteSettings;
   readonly halation: HalationSettings;
+  readonly starburst?: StarburstSettings;
 }
 export interface CameraProfile {
   readonly id: string;

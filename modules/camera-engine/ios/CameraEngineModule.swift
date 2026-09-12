@@ -1319,13 +1319,22 @@ private enum CameraDNARenderer {
     }
 
     // SHARED: camera-character LUT (.cube, Camera18_LUT_V0 pack) — applied identically in
-    // preview and final so both outputs share the same color DNA.
+    // preview and final so both outputs share the same color DNA. `lutIntensity` (0..1,
+    // default 1) holds a calibrated look back over the tone-mapped base so characters
+    // layer without a cheap full-strength filter feel.
     if let lutName = color["lut"] as? String, let cube = LUTLoader.load(lutName) {
-      image = filter("CIColorCubeWithColorSpace", image, [
+      let luted = filter("CIColorCubeWithColorSpace", image, [
         "inputCubeDimension": cube.dimension,
         "inputCubeData": cube.data,
         "inputColorSpace": CameraEngineGPU.sRGBColorSpace,
       ])
+      let intensity = number(color, "lutIntensity", 1, 0...1)
+      if intensity < 0.999 {
+        let faded = filter("CIColorMatrix", luted, ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(intensity))])
+        image = filter("CISourceOverCompositing", faded, [kCIInputBackgroundImageKey: image])
+      } else {
+        image = luted
+      }
     }
 
     // SHARED: vignette
@@ -1361,6 +1370,43 @@ private enum CameraDNARenderer {
         let radius = 2.0 + number(halation, "radius", 0.2, 0...1) * 38.0
         let glow = filter("CIGaussianBlur", warm, [kCIInputRadiusKey: radius]).cropped(to: image.extent)
         image = filter("CIScreenBlendMode", glow, [kCIInputBackgroundImageKey: image]).cropped(to: image.extent)
+      }
+
+      // Starburst (FINAL-ONLY): point lights only. Highlight cut-in → multi-direction
+      // motion blur → screen back. Plain walls/skin/sky stay below the threshold and
+      // never streak. Strength is aperture-linked from the JS layer (ApertureVisualProfile):
+      // near-absent wide open, strongest stopped down.
+      let starburst = dictionary(texture["starburst"])
+      let starStrength = number(starburst, "strength", 0, 0...1)
+      if starStrength > 0.001 {
+        let threshold = number(starburst, "threshold", 0.78, 0...1)
+        if threshold < 0.995 {
+          let cutScale = CGFloat(1.0 / max(0.05, 1.0 - threshold))
+          let cutBias = CGFloat(-threshold * cutScale)
+          var cut = filter("CIColorMatrix", image, [
+            "inputRVector": CIVector(x: cutScale, y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0, y: cutScale, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: cutScale, w: 0),
+            "inputBiasVector": CIVector(x: cutBias, y: cutBias, z: cutBias, w: 0)
+          ])
+          cut = filter("CIColorClamp", cut, [
+            "inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1)
+          ])
+          // Visible ray points = 2 per blur direction (4-ray = cross, 6, 8 …).
+          let directions = max(2, min(4, Int(number(starburst, "rays", 4, 4...8)) / 2))
+          let streakRadius = CGFloat(6.0 + number(starburst, "length", 0.3, 0...1) * 55.0)
+          var streaks: CIImage? = nil
+          for i in 0..<directions {
+            let angle = CGFloat(Double(i) * Double.pi / Double(directions))
+            let ray = filter("CIMotionBlur", cut, [kCIInputAngleKey: angle, kCIInputRadiusKey: streakRadius]).cropped(to: image.extent)
+            streaks = streaks.map { filter("CIScreenBlendMode", ray, [kCIInputBackgroundImageKey: $0]) } ?? ray
+          }
+          if let streaks = streaks {
+            let faded = filter("CIColorMatrix", streaks, ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(starStrength * 0.85))])
+            image = filter("CIScreenBlendMode", faded, [kCIInputBackgroundImageKey: image]).cropped(to: image.extent)
+          }
+        }
       }
     }
 

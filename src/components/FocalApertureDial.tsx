@@ -96,14 +96,16 @@ export const FocalApertureDial: React.FC<FocalApertureDialProps> = ({
         },
         onPanResponderMove: (_evt, gestureState) => {
           if (!isVariableAperture || !apertureArmed) return;
-          // gestureState.dy is cumulative from grant; dragRemainderRef holds the
-          // unconsumed residual so detents stay exact across many small move events.
-          const total = gestureState.dy + dragRemainderRef.current;
+          // Both axes accepted (real rings turn horizontally or vertically): the dominant
+          // axis wins so diagonal drags don't double-step. Down/right closes the aperture
+          // (higher f-number), like pushing the ring toward its stop-down direction.
+          const total =
+            Math.abs(gestureState.dx) >= Math.abs(gestureState.dy)
+              ? gestureState.dx + dragRemainderRef.current
+              : gestureState.dy + dragRemainderRef.current;
           const steps = Math.trunc(total / APERTURE_DETENT_PX);
           if (steps === 0) return;
           dragRemainderRef.current = total - steps * APERTURE_DETENT_PX;
-          // Dragging DOWN closes the aperture (higher f-number), like pushing a real
-          // ring's lower edge toward the stop-down direction.
           const direction: 1 | -1 = steps > 0 ? 1 : -1;
           for (let s = 0; s < Math.abs(steps); s++) {
             handleApertureDetent(direction);

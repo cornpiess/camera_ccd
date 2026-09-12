@@ -898,6 +898,12 @@
         "halation": {
           "amount": 0.42,
           "radius": 0.58
+        },
+        "starburst": {
+          "threshold": 0.82,
+          "strength": 0.3,
+          "length": 0.42,
+          "rays": 4
         }
       },
       "displayName": "CineStill 800T",
@@ -997,7 +1003,8 @@
             "luminance": 1.0
           }
         },
-        "lut": "absolute-hero"
+        "lut": "absolute-hero",
+        "lutIntensity": 0.85
       },
       "texture": {
         "grain": {
@@ -1011,6 +1018,12 @@
         "halation": {
           "amount": 0.035,
           "radius": 0.24
+        },
+        "starburst": {
+          "threshold": 0.86,
+          "strength": 0.14,
+          "length": 0.3,
+          "rays": 4
         }
       },
       "displayName": "Absolute Hero",

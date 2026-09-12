@@ -27,9 +27,10 @@ import {
   type CameraCapabilities,
   type CameraAuthorizationStatus,
 } from './src/camera/CameraEngine';
-// LoadCameraState, focal model
+// LoadCameraState, focal model, aperture visual linkage
 import { loadCameraState, rememberAperture, saveCameraState, type CameraState } from './src/camera/cameraStateStore';
 import { buildFocalStops, defaultFocalStop, type FocalStop } from './src/camera/focalLadder';
+import { apertureVisualFactors, applyApertureVisual } from './src/camera/apertureVisualProfile';
 
 // Profile management provider
 import { ProfileProvider, useProfiles } from './src/profiles/ProfileProvider';
@@ -382,13 +383,30 @@ function CameraAppScreen(): React.JSX.Element {
   // -------------------------------------------------------------
   // 7. Apply profile in separate effect WITHOUT restarting camera
   // -------------------------------------------------------------
+  // ApertureVisualProfile (§20/§21): one f-stop drives bloom + starburst together.
+  // Depth is NOT software-faked (red line 4); on real variable-aperture hardware the
+  // optics handle it. Neutral factors on fixed lenses keep profiles exactly as calibrated.
+  const apertureVisual = useMemo(
+    () => apertureVisualFactors(
+      currentAperture,
+      supportsVariableAperture,
+      capabilitiesRef.current?.minAperture,
+      capabilitiesRef.current?.maxAperture,
+    ),
+    [currentAperture, supportsVariableAperture, availableApertures],
+  );
+  const effectiveProfile = useMemo(
+    () => (activeProfile ? applyApertureVisual(activeProfile as unknown as Record<string, unknown>, apertureVisual) : null),
+    [activeProfile, apertureVisual],
+  );
+
   useEffect(() => {
-    if (!isCameraRunning || !activeProfile) return;
+    if (!isCameraRunning || !activeProfile || !effectiveProfile) return;
 
     let isMounted = true;
     const applyCurrentProfile = async () => {
       try {
-        await CameraEngine.applyProfile(activeProfile as unknown as Record<string, unknown>);
+        await CameraEngine.applyProfile(effectiveProfile);
 
         // Aperture memory (Iteration 4): the JSON preferredAperture is only the first-touch
         // default — a user's last chosen f-stop for this profile wins.
@@ -419,7 +437,7 @@ function CameraAppScreen(): React.JSX.Element {
     return () => {
       isMounted = false;
     };
-  }, [activeProfile, isCameraRunning, supportsVariableAperture, availableApertures, showTransientError]);
+  }, [effectiveProfile, activeProfile, isCameraRunning, supportsVariableAperture, availableApertures, showTransientError]);
 
   // Profile validation/import/reload errors shown as transient overlay while running
   useEffect(() => {
@@ -802,10 +820,12 @@ function CameraAppScreen(): React.JSX.Element {
       {/* 3-Finger Gesture Handler wraps the interactive camera surface (~2 sec hold opens CalibrationModal) */}
       <ThreeFingerGestureDetector onTriggerCalibration={() => setIsCalibrationOpen(true)}>
         <View style={styles.fullScreen}>
-          {/* 1. Native Camera Engine View — 4:3 viewfinder rect, top edge like the system camera */}
+          {/* 1. Native Camera Engine View — 4:3 viewfinder rect, top edge like the system camera.
+              The profile prop carries the aperture-linked bloom/starburst factors so the
+              live preview shows the same visual system the final capture will use. */}
           <CameraEngineView
             style={styles.viewfinder}
-            profile={activeProfile as unknown as Record<string, unknown>}
+            profile={(effectiveProfile ?? activeProfile) as unknown as Record<string, unknown>}
           />
 
           {/* Initial Loading overlay without unmounting camera */}
