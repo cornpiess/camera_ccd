@@ -101,18 +101,16 @@ export const ApertureControl: React.FC<ApertureControlProps> = ({
 
   /* -------------------------------------------------------------
      CASE 1: Fixed Aperture Fallback (Non-interactive)
+     A small, quiet pill: the hardware has no variable aperture, so the
+     control is display-only — it must not look like a big tappable dial.
      ------------------------------------------------------------- */
   if (!isVariableAperture || availableApertures.length <= 1) {
     const displayVal = activeAperture ?? 1.8;
     return (
       <View style={styles.container} pointerEvents="none">
-        <GlassCard borderRadius={16}>
-          <View style={styles.fixedBadgeInner}>
-            <Text style={styles.fixedApertureText}>
-              Fixed {formatAperture(displayVal)}
-            </Text>
-          </View>
-        </GlassCard>
+        <View style={styles.fixedBadge}>
+          <Text style={styles.fixedApertureText}>Fixed {formatAperture(displayVal)}</Text>
+        </View>
       </View>
     );
   }
@@ -215,16 +213,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginVertical: 4,
   },
-  fixedBadgeInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+  fixedBadge: {
+    borderRadius: 12,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
   fixedApertureText: {
-    color: '#E6E6E6',
-    fontSize: 13,
-    fontWeight: '700',
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontSize: 11,
+    fontWeight: '600',
     letterSpacing: 0.4,
   },
   fixedIndicatorTag: {

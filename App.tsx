@@ -913,10 +913,11 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+    // Enough clearance that the shutter clears the home indicator on every device —
+    // all controls must stay fully inside the screen.
+    paddingBottom: Platform.OS === 'ios' ? 52 : 28,
     paddingTop: 8,
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
     zIndex: 20,
   },
   bottomActionRow: {

@@ -52,17 +52,11 @@ export const ProfileOverlay: React.FC<ProfileOverlayProps> = ({
       tintOpacity = Math.min(0.1, (Math.abs(tint) / 15) * 0.1);
     }
 
-    // 4. Texture / Vignette approximation
-    const vignetteAmount = profile.texture?.vignette?.amount ?? 0;
-    const vignetteRadius = profile.texture?.vignette?.radius ?? 0.7;
-    const vignetteOpacity = vignetteAmount > 0 ? Math.min(0.65, vignetteAmount * 1.6) : 0;
-    const vignetteBorderWidth = Math.round(36 * (1.1 - Math.min(1, Math.max(0.4, vignetteRadius))));
+    // 4. Texture layers (vignette frame / film grain) were removed from the live preview:
+    // they read as translucent gray bands over the viewfinder with no informational value.
+    // Texture stays where it belongs — applied to the captured photo in the native pipeline.
 
-    // 5. Texture / Grain approximation
-    const grainAmount = profile.texture?.grain?.amount ?? 0;
-    const grainOpacity = grainAmount > 0 ? Math.min(0.2, grainAmount * 0.35) : 0;
-
-    // 6. Texture / Halation approximation
+    // 5. Texture / Halation approximation (kept: a faint warm glow hint at the highlights)
     const halationAmount = profile.texture?.halation?.amount ?? 0;
     let halationColor: string | null = null;
     let halationOpacity = 0;
@@ -78,9 +72,6 @@ export const ProfileOverlay: React.FC<ProfileOverlayProps> = ({
       temperatureOpacity,
       tintColor,
       tintOpacity,
-      vignetteOpacity,
-      vignetteBorderWidth,
-      grainOpacity,
       halationColor,
       halationOpacity,
     };
@@ -141,30 +132,6 @@ export const ProfileOverlay: React.FC<ProfileOverlayProps> = ({
           ]}
         />
       )}
-
-      {/* Vignette layer */}
-      {overlay.vignetteOpacity > 0 && (
-        <View
-          style={[
-            styles.vignetteFrame,
-            {
-              borderWidth: overlay.vignetteBorderWidth,
-              opacity: overlay.vignetteOpacity,
-            },
-          ]}
-        />
-      )}
-
-      {/* Film grain layer */}
-      {overlay.grainOpacity > 0 && (
-        <View
-          style={[
-            StyleSheet.absoluteFillObject,
-            styles.grainLayer,
-            { opacity: overlay.grainOpacity },
-          ]}
-        />
-      )}
     </View>
   );
 };
@@ -172,15 +139,6 @@ export const ProfileOverlay: React.FC<ProfileOverlayProps> = ({
 const styles = StyleSheet.create({
   container: {
     overflow: 'hidden',
-  },
-  vignetteFrame: {
-    ...StyleSheet.absoluteFillObject,
-    borderColor: 'rgba(0, 0, 0, 0.5)',
-    zIndex: 1,
-  },
-  grainLayer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    zIndex: 2,
   },
 });
 
