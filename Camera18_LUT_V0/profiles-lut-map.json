@@ -68,6 +68,84 @@
       "displayName": "LEICASTD",
       "lut": "luts/panasonic-leicastd.cube",
       "notes": "LUT-only profile (all other stages neutral). Panasonic S1RII v1.6 Standard -> V-Log -> Leica Classic baked single 33pt LUT. Source: V-Log Alchemy (github.com/shenmintao/V-Log-Alchemy), Apache-2.0. Input space: standard display-referred photo (LUMIXPHOTOSTYLE STD), NOT V-Log."
+    },
+    {
+      "id": "panasonic_camping_vibe",
+      "displayName": "露营氛围",
+      "lut": "luts/panasonic-camping-vibe.cube",
+      "notes": "LUT-only profile (其余全中性)。Panasonic 中国官方 Real-Time LUT Library「露营氛围」by 郭宾。快照: github.com/fdkevin0/lumix_luts 2026-08-24。仅内部测试使用。"
+    },
+    {
+      "id": "panasonic_verdant_scenery",
+      "displayName": "青绿风景",
+      "lut": "luts/panasonic-verdant-scenery.cube",
+      "notes": "LUT-only profile (其余全中性)。Panasonic 中国官方 Real-Time LUT Library「青绿风景」by 郭宾。快照: github.com/fdkevin0/lumix_luts 2026-08-24。仅内部测试使用。"
+    },
+    {
+      "id": "panasonic_dusk_atmosphere",
+      "displayName": "黄昏氛围",
+      "lut": "luts/panasonic-dusk-atmosphere.cube",
+      "notes": "LUT-only profile (其余全中性)。Panasonic 中国官方 Real-Time LUT Library「黄昏氛围」by 郭宾。快照: github.com/fdkevin0/lumix_luts 2026-08-24。仅内部测试使用。"
+    },
+    {
+      "id": "panasonic_positive_film",
+      "displayName": "正片",
+      "lut": "luts/panasonic-positive-film.cube",
+      "notes": "LUT-only profile (其余全中性)。Panasonic 中国官方 Real-Time LUT Library「正片」by 海螺壳。快照: github.com/fdkevin0/lumix_luts 2026-08-24。仅内部测试使用。"
+    },
+    {
+      "id": "panasonic_film_vintage",
+      "displayName": "胶片复古",
+      "lut": "luts/panasonic-film-vintage.cube",
+      "notes": "LUT-only profile (其余全中性)。Panasonic 中国官方 Real-Time LUT Library「胶片复古」by 郭宾。快照: github.com/fdkevin0/lumix_luts 2026-08-24。仅内部测试使用。"
+    },
+    {
+      "id": "panasonic_bw_old_film",
+      "displayName": "黑白旧胶片",
+      "lut": "luts/panasonic-bw-old-film.cube",
+      "notes": "LUT-only profile (其余全中性)。Panasonic 中国官方 Real-Time LUT Library「黑白旧胶片」by 海螺壳。快照: github.com/fdkevin0/lumix_luts 2026-08-24。仅内部测试使用。"
+    },
+    {
+      "id": "panasonic_food_film",
+      "displayName": "美食胶片",
+      "lut": "luts/panasonic-food-film.cube",
+      "notes": "LUT-only profile (其余全中性)。Panasonic 中国官方 Real-Time LUT Library「美食胶片」by 郭宾。快照: github.com/fdkevin0/lumix_luts 2026-08-24。仅内部测试使用。"
+    },
+    {
+      "id": "panasonic_aesthetic_portrait",
+      "displayName": "唯美人像",
+      "lut": "luts/panasonic-aesthetic-portrait.cube",
+      "notes": "LUT-only profile (其余全中性)。Panasonic 中国官方 Real-Time LUT Library「唯美人像」by 郭宾。快照: github.com/fdkevin0/lumix_luts 2026-08-24。仅内部测试使用。"
+    },
+    {
+      "id": "panasonic_snow_portrait",
+      "displayName": "雪天人像",
+      "lut": "luts/panasonic-snow-portrait.cube",
+      "notes": "LUT-only profile (其余全中性)。Panasonic 中国官方 Real-Time LUT Library「雪天人像」by 郭宾。快照: github.com/fdkevin0/lumix_luts 2026-08-24。仅内部测试使用。"
+    },
+    {
+      "id": "panasonic_healing_light",
+      "displayName": "治愈光影",
+      "lut": "luts/panasonic-healing-light.cube",
+      "notes": "LUT-only profile (其余全中性)。Panasonic 中国官方 Real-Time LUT Library「治愈光影」by 张恒。快照: github.com/fdkevin0/lumix_luts 2026-08-24。仅内部测试使用。"
+    },
+    {
+      "id": "panasonic_forest_green_cool",
+      "displayName": "森绿清冷",
+      "lut": "luts/panasonic-forest-green-cool.cube",
+      "notes": "LUT-only profile (其余全中性)。Panasonic 中国官方 Real-Time LUT Library「森绿清冷」by 波子Booz。快照: github.com/fdkevin0/lumix_luts 2026-08-24。仅内部测试使用。"
+    },
+    {
+      "id": "panasonic_y2000",
+      "displayName": "y2000",
+      "lut": "luts/panasonic-y2000.cube",
+      "notes": "LUT-only profile (其余全中性)。Panasonic 中国官方 Real-Time LUT Library 25周年「y2000」by plady。快照: github.com/fdkevin0/lumix_luts 2026-08-24。仅内部测试使用。"
+    },
+    {
+      "id": "panasonic_txd_agfaphoto_lebox",
+      "displayName": "TXD AgfaPhoto LeBox",
+      "lut": "luts/panasonic-txd-agfaphoto-lebox.cube",
+      "notes": "LUT-only profile (其余全中性)。Panasonic 中国官方 Real-Time LUT Library 25周年「TXD AgfaPhoto LeBox」by 兔小呆。快照: github.com/fdkevin0/lumix_luts 2026-08-24。仅内部测试使用。"
     }
   ]
 }

@@ -970,7 +970,7 @@
           "red": {
             "hue": -3,
             "saturation": 1.14,
-            "luminance": 1.0
+            "luminance": 1
           },
           "orange": {
             "hue": -2,
@@ -985,7 +985,7 @@
           "green": {
             "hue": 4,
             "saturation": 0.98,
-            "luminance": 1.0
+            "luminance": 1
           },
           "cyan": {
             "hue": -4,
@@ -1000,7 +1000,7 @@
           "magenta": {
             "hue": 3,
             "saturation": 1.14,
-            "luminance": 1.0
+            "luminance": 1
           }
         },
         "lut": "absolute-hero",
@@ -1060,11 +1060,26 @@
         "contrast": 1,
         "blackPoint": 0,
         "curve": [
-          [0, 0],
-          [0.25, 0.25],
-          [0.5, 0.5],
-          [0.75, 0.75],
-          [1, 1]
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.75
+          ],
+          [
+            1,
+            1
+          ]
         ],
         "exposureBias": 0
       },
@@ -1073,21 +1088,58 @@
         "temperature": 0,
         "tint": 0,
         "hueBands": {
-          "red": { "hue": 0, "saturation": 1, "luminance": 1 },
-          "orange": { "hue": 0, "saturation": 1, "luminance": 1 },
-          "yellow": { "hue": 0, "saturation": 1, "luminance": 1 },
-          "green": { "hue": 0, "saturation": 1, "luminance": 1 },
-          "cyan": { "hue": 0, "saturation": 1, "luminance": 1 },
-          "blue": { "hue": 0, "saturation": 1, "luminance": 1 },
-          "magenta": { "hue": 0, "saturation": 1, "luminance": 1 }
+          "red": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "orange": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "yellow": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "green": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "cyan": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "blue": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "magenta": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          }
         },
         "lut": "panasonic-cneg-std",
         "lutIntensity": 1
       },
       "texture": {
-        "grain": { "amount": 0, "size": 0.25 },
-        "vignette": { "amount": 0, "radius": 0.75 },
-        "halation": { "amount": 0, "radius": 0.2 }
+        "grain": {
+          "amount": 0,
+          "size": 0.25
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.75
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
       },
       "displayName": "CNEGSTD",
       "developmentReference": {
@@ -1125,11 +1177,26 @@
         "contrast": 1,
         "blackPoint": 0,
         "curve": [
-          [0, 0],
-          [0.25, 0.25],
-          [0.5, 0.5],
-          [0.75, 0.75],
-          [1, 1]
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.75
+          ],
+          [
+            1,
+            1
+          ]
         ],
         "exposureBias": 0
       },
@@ -1138,21 +1205,58 @@
         "temperature": 0,
         "tint": 0,
         "hueBands": {
-          "red": { "hue": 0, "saturation": 1, "luminance": 1 },
-          "orange": { "hue": 0, "saturation": 1, "luminance": 1 },
-          "yellow": { "hue": 0, "saturation": 1, "luminance": 1 },
-          "green": { "hue": 0, "saturation": 1, "luminance": 1 },
-          "cyan": { "hue": 0, "saturation": 1, "luminance": 1 },
-          "blue": { "hue": 0, "saturation": 1, "luminance": 1 },
-          "magenta": { "hue": 0, "saturation": 1, "luminance": 1 }
+          "red": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "orange": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "yellow": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "green": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "cyan": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "blue": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "magenta": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          }
         },
         "lut": "panasonic-leicastd",
         "lutIntensity": 1
       },
       "texture": {
-        "grain": { "amount": 0, "size": 0.25 },
-        "vignette": { "amount": 0, "radius": 0.75 },
-        "halation": { "amount": 0, "radius": 0.2 }
+        "grain": {
+          "amount": 0,
+          "size": 0.25
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.75
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
       },
       "displayName": "LEICASTD",
       "developmentReference": {
@@ -1160,6 +1264,1527 @@
         "lutSource": "https://github.com/shenmintao/V-Log-Alchemy",
         "lutLicense": "Apache-2.0",
         "inputSpace": "LUMIXPHOTOSTYLE STD (standard photo, not V-Log)"
+      }
+    },
+    {
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "露营",
+        "accent": "#8FAE8B",
+        "dialStyle": "compact",
+        "personality": "soft",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
+        "curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.75
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "orange": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "yellow": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "green": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "cyan": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "blue": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "magenta": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          }
+        },
+        "lut": "panasonic-camping-vibe",
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": {
+          "amount": 0,
+          "size": 0.25
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.75
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
+      },
+      "id": "panasonic_camping_vibe",
+      "name": "露营氛围",
+      "displayName": "露营氛围",
+      "developmentReference": {
+        "target": "LUT-only profile（其余全中性）。松下中国官方 Real-Time LUT Library「露营氛围」by 郭宾，33pt cube。输入空间: 标准照片（Lumix Real-Time LUT 预设）。来源快照: github.com/fdkevin0/lumix_luts (2026-08-24)，SHA256 851a90fa54e4…",
+        "lutSource": "https://github.com/fdkevin0/lumix_luts",
+        "lutOrigin": "Panasonic China official Real-Time LUT Library (panasonicshuma.cn)",
+        "internalTestOnly": true
+      }
+    },
+    {
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "青绿",
+        "accent": "#8FAE8B",
+        "dialStyle": "compact",
+        "personality": "soft",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
+        "curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.75
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "orange": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "yellow": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "green": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "cyan": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "blue": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "magenta": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          }
+        },
+        "lut": "panasonic-verdant-scenery",
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": {
+          "amount": 0,
+          "size": 0.25
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.75
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
+      },
+      "id": "panasonic_verdant_scenery",
+      "name": "青绿风景",
+      "displayName": "青绿风景",
+      "developmentReference": {
+        "target": "LUT-only profile（其余全中性）。松下中国官方 Real-Time LUT Library「青绿风景」by 郭宾，33pt cube。输入空间: 标准照片（Lumix Real-Time LUT 预设）。来源快照: github.com/fdkevin0/lumix_luts (2026-08-24)，SHA256 9646aa8ad7b1…",
+        "lutSource": "https://github.com/fdkevin0/lumix_luts",
+        "lutOrigin": "Panasonic China official Real-Time LUT Library (panasonicshuma.cn)",
+        "internalTestOnly": true
+      }
+    },
+    {
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "黄昏",
+        "accent": "#B49A78",
+        "dialStyle": "compact",
+        "personality": "soft",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
+        "curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.75
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "orange": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "yellow": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "green": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "cyan": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "blue": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "magenta": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          }
+        },
+        "lut": "panasonic-dusk-atmosphere",
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": {
+          "amount": 0,
+          "size": 0.25
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.75
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
+      },
+      "id": "panasonic_dusk_atmosphere",
+      "name": "黄昏氛围",
+      "displayName": "黄昏氛围",
+      "developmentReference": {
+        "target": "LUT-only profile（其余全中性）。松下中国官方 Real-Time LUT Library「黄昏氛围」by 郭宾，33pt cube。输入空间: 标准照片（Lumix Real-Time LUT 预设）。来源快照: github.com/fdkevin0/lumix_luts (2026-08-24)，SHA256 b0b4e2a432b3…",
+        "lutSource": "https://github.com/fdkevin0/lumix_luts",
+        "lutOrigin": "Panasonic China official Real-Time LUT Library (panasonicshuma.cn)",
+        "internalTestOnly": true
+      }
+    },
+    {
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "正片",
+        "accent": "#A8987F",
+        "dialStyle": "compact",
+        "personality": "soft",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
+        "curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.75
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "orange": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "yellow": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "green": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "cyan": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "blue": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "magenta": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          }
+        },
+        "lut": "panasonic-positive-film",
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": {
+          "amount": 0,
+          "size": 0.25
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.75
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
+      },
+      "id": "panasonic_positive_film",
+      "name": "正片",
+      "displayName": "正片",
+      "developmentReference": {
+        "target": "LUT-only profile（其余全中性）。松下中国官方 Real-Time LUT Library「正片」by 海螺壳，32pt cube。输入空间: 标准照片（Lumix Real-Time LUT 预设）。来源快照: github.com/fdkevin0/lumix_luts (2026-08-24)，SHA256 c9960b9e954e…",
+        "lutSource": "https://github.com/fdkevin0/lumix_luts",
+        "lutOrigin": "Panasonic China official Real-Time LUT Library (panasonicshuma.cn)",
+        "internalTestOnly": true
+      }
+    },
+    {
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "复古",
+        "accent": "#A8987F",
+        "dialStyle": "compact",
+        "personality": "soft",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
+        "curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.75
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "orange": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "yellow": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "green": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "cyan": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "blue": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "magenta": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          }
+        },
+        "lut": "panasonic-film-vintage",
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": {
+          "amount": 0,
+          "size": 0.25
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.75
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
+      },
+      "id": "panasonic_film_vintage",
+      "name": "胶片复古",
+      "displayName": "胶片复古",
+      "developmentReference": {
+        "target": "LUT-only profile（其余全中性）。松下中国官方 Real-Time LUT Library「胶片复古」by 郭宾，33pt cube。输入空间: 标准照片（Lumix Real-Time LUT 预设）。来源快照: github.com/fdkevin0/lumix_luts (2026-08-24)，SHA256 81213f6d895e…",
+        "lutSource": "https://github.com/fdkevin0/lumix_luts",
+        "lutOrigin": "Panasonic China official Real-Time LUT Library (panasonicshuma.cn)",
+        "internalTestOnly": true
+      }
+    },
+    {
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "黑白",
+        "accent": "#9A9A9F",
+        "dialStyle": "compact",
+        "personality": "soft",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
+        "curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.75
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "orange": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "yellow": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "green": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "cyan": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "blue": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "magenta": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          }
+        },
+        "lut": "panasonic-bw-old-film",
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": {
+          "amount": 0,
+          "size": 0.25
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.75
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
+      },
+      "id": "panasonic_bw_old_film",
+      "name": "黑白旧胶片",
+      "displayName": "黑白旧胶片",
+      "developmentReference": {
+        "target": "LUT-only profile（其余全中性）。松下中国官方 Real-Time LUT Library「黑白旧胶片」by 海螺壳，32pt cube。输入空间: 标准照片（Lumix Real-Time LUT 预设）。来源快照: github.com/fdkevin0/lumix_luts (2026-08-24)，SHA256 46facdd466ad…",
+        "lutSource": "https://github.com/fdkevin0/lumix_luts",
+        "lutOrigin": "Panasonic China official Real-Time LUT Library (panasonicshuma.cn)",
+        "internalTestOnly": true
+      }
+    },
+    {
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "美食",
+        "accent": "#C9A66B",
+        "dialStyle": "compact",
+        "personality": "soft",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
+        "curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.75
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "orange": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "yellow": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "green": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "cyan": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "blue": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "magenta": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          }
+        },
+        "lut": "panasonic-food-film",
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": {
+          "amount": 0,
+          "size": 0.25
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.75
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
+      },
+      "id": "panasonic_food_film",
+      "name": "美食胶片",
+      "displayName": "美食胶片",
+      "developmentReference": {
+        "target": "LUT-only profile（其余全中性）。松下中国官方 Real-Time LUT Library「美食胶片」by 郭宾，33pt cube。输入空间: 标准照片（Lumix Real-Time LUT 预设）。来源快照: github.com/fdkevin0/lumix_luts (2026-08-24)，SHA256 de025d0d33ae…",
+        "lutSource": "https://github.com/fdkevin0/lumix_luts",
+        "lutOrigin": "Panasonic China official Real-Time LUT Library (panasonicshuma.cn)",
+        "internalTestOnly": true
+      }
+    },
+    {
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "唯美",
+        "accent": "#C99A8E",
+        "dialStyle": "compact",
+        "personality": "soft",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
+        "curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.75
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "orange": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "yellow": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "green": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "cyan": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "blue": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "magenta": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          }
+        },
+        "lut": "panasonic-aesthetic-portrait",
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": {
+          "amount": 0,
+          "size": 0.25
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.75
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
+      },
+      "id": "panasonic_aesthetic_portrait",
+      "name": "唯美人像",
+      "displayName": "唯美人像",
+      "developmentReference": {
+        "target": "LUT-only profile（其余全中性）。松下中国官方 Real-Time LUT Library「唯美人像」by 郭宾，33pt cube。输入空间: 标准照片（Lumix Real-Time LUT 预设）。来源快照: github.com/fdkevin0/lumix_luts (2026-08-24)，SHA256 92030e3a9fb2…",
+        "lutSource": "https://github.com/fdkevin0/lumix_luts",
+        "lutOrigin": "Panasonic China official Real-Time LUT Library (panasonicshuma.cn)",
+        "internalTestOnly": true
+      }
+    },
+    {
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "雪天",
+        "accent": "#A9B8C4",
+        "dialStyle": "compact",
+        "personality": "soft",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
+        "curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.75
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "orange": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "yellow": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "green": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "cyan": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "blue": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "magenta": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          }
+        },
+        "lut": "panasonic-snow-portrait",
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": {
+          "amount": 0,
+          "size": 0.25
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.75
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
+      },
+      "id": "panasonic_snow_portrait",
+      "name": "雪天人像",
+      "displayName": "雪天人像",
+      "developmentReference": {
+        "target": "LUT-only profile（其余全中性）。松下中国官方 Real-Time LUT Library「雪天人像」by 郭宾，33pt cube。输入空间: 标准照片（Lumix Real-Time LUT 预设）。来源快照: github.com/fdkevin0/lumix_luts (2026-08-24)，SHA256 8ad735b1f6c4…",
+        "lutSource": "https://github.com/fdkevin0/lumix_luts",
+        "lutOrigin": "Panasonic China official Real-Time LUT Library (panasonicshuma.cn)",
+        "internalTestOnly": true
+      }
+    },
+    {
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "治愈",
+        "accent": "#C9B9A0",
+        "dialStyle": "compact",
+        "personality": "soft",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
+        "curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.75
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "orange": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "yellow": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "green": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "cyan": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "blue": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "magenta": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          }
+        },
+        "lut": "panasonic-healing-light",
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": {
+          "amount": 0,
+          "size": 0.25
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.75
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
+      },
+      "id": "panasonic_healing_light",
+      "name": "治愈光影",
+      "displayName": "治愈光影",
+      "developmentReference": {
+        "target": "LUT-only profile（其余全中性）。松下中国官方 Real-Time LUT Library「治愈光影」by 张恒，33pt cube。输入空间: 标准照片（Lumix Real-Time LUT 预设）。来源快照: github.com/fdkevin0/lumix_luts (2026-08-24)，SHA256 692a138dae52…",
+        "lutSource": "https://github.com/fdkevin0/lumix_luts",
+        "lutOrigin": "Panasonic China official Real-Time LUT Library (panasonicshuma.cn)",
+        "internalTestOnly": true
+      }
+    },
+    {
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "森绿",
+        "accent": "#7F9E8F",
+        "dialStyle": "compact",
+        "personality": "soft",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
+        "curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.75
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "orange": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "yellow": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "green": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "cyan": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "blue": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "magenta": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          }
+        },
+        "lut": "panasonic-forest-green-cool",
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": {
+          "amount": 0,
+          "size": 0.25
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.75
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
+      },
+      "id": "panasonic_forest_green_cool",
+      "name": "森绿清冷",
+      "displayName": "森绿清冷",
+      "developmentReference": {
+        "target": "LUT-only profile（其余全中性）。松下中国官方 Real-Time LUT Library「森绿清冷」by 波子Booz，33pt cube。输入空间: 标准照片（Lumix Real-Time LUT 预设）。来源快照: github.com/fdkevin0/lumix_luts (2026-08-24)，SHA256 e5e0a3d2ee5a…",
+        "lutSource": "https://github.com/fdkevin0/lumix_luts",
+        "lutOrigin": "Panasonic China official Real-Time LUT Library (panasonicshuma.cn)",
+        "internalTestOnly": true
+      }
+    },
+    {
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "Y2K",
+        "accent": "#C7A163",
+        "dialStyle": "compact",
+        "personality": "soft",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
+        "curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.75
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "orange": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "yellow": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "green": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "cyan": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "blue": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "magenta": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          }
+        },
+        "lut": "panasonic-y2000",
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": {
+          "amount": 0,
+          "size": 0.25
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.75
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
+      },
+      "id": "panasonic_y2000",
+      "name": "y2000",
+      "displayName": "y2000",
+      "developmentReference": {
+        "target": "LUT-only profile（其余全中性）。松下中国官方 Real-Time LUT Library「y2000」by plady，33pt cube。输入空间: 标准照片（Lumix Real-Time LUT 预设）。来源快照: github.com/fdkevin0/lumix_luts (2026-08-24)，SHA256 f8ab0427bd4a…",
+        "lutSource": "https://github.com/fdkevin0/lumix_luts",
+        "lutOrigin": "Panasonic China official Real-Time LUT Library (panasonicshuma.cn)",
+        "internalTestOnly": true
+      }
+    },
+    {
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "Agfa",
+        "accent": "#B4554D",
+        "dialStyle": "compact",
+        "personality": "soft",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
+        "curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.75
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "orange": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "yellow": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "green": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "cyan": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "blue": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "magenta": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          }
+        },
+        "lut": "panasonic-txd-agfaphoto-lebox",
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": {
+          "amount": 0,
+          "size": 0.25
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.75
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
+      },
+      "id": "panasonic_txd_agfaphoto_lebox",
+      "name": "TXD AgfaPhoto LeBox",
+      "displayName": "TXD AgfaPhoto LeBox",
+      "developmentReference": {
+        "target": "LUT-only profile（其余全中性）。松下中国官方 Real-Time LUT Library「TXD AgfaPhoto LeBox」by 兔小呆，33pt cube。输入空间: 标准照片（Lumix Real-Time LUT 预设）。来源快照: github.com/fdkevin0/lumix_luts (2026-08-24)，SHA256 46669a6c553a…",
+        "lutSource": "https://github.com/fdkevin0/lumix_luts",
+        "lutOrigin": "Panasonic China official Real-Time LUT Library (panasonicshuma.cn)",
+        "internalTestOnly": true
       }
     }
   ]
