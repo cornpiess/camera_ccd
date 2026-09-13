@@ -153,7 +153,7 @@ npm run prepackage  # 打包门槛：verify + export 基线 + Swift 配平 + aut
 | `npm run lint` | 0 error 0 warning |
 | `npm run doctor` | **20/20 checks passed** |
 | `npx expo install --check` | 依赖版本一致 |
-| `npx expo export --platform ios --output-dir dist-check` | **619 modules**（基线，数字异常先查清原因）；用完 `rm -rf dist-check` |
+| `npx expo export --platform ios --output-dir dist-check` | **747 modules**（2026-09-14 实测基线，数字异常先查清原因）；用完 `rm -rf dist-check` |
 
 **Swift 代码**：本机（Windows）**没有 `swift` / `swiftc`**。只能做括号/字符串配平级别的结构自查，**语法与类型只能等 CI 构建（或 EAS Build）验证**。
 

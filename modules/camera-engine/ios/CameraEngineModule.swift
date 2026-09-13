@@ -186,11 +186,11 @@ final class ApertureController {
   /// getCapabilities for display.
   ///
   /// Real-device hardening (no iPhone 18 Pro in the loop during development):
-  ///  - the auto sentinels are resolved through a THREE-TIER fallback (iOS 27 class
-  ///    properties → iOS 27 instance properties via KVC → the public
-  ///    AVCaptureExposureDurationCurrent / AVCaptureISOCurrent constants), so the call
-  ///    works regardless of which exact form Apple shipped the sentinels in — and on
-  ///    mismatch it degrades to an honest `.apertureUnsupported`, never a crash;
+  ///  - the auto sentinels are resolved through a TWO-TIER fallback (dynamic probe of
+  ///    dedicated "auto" class properties → the public AVCaptureDevice
+  ///    currentExposureDuration / currentISO sentinels), so the call works regardless
+  ///    of which exact form Apple shipped — and on mismatch it degrades to an honest
+  ///    `.apertureUnsupported`, never a crash;
   ///  - the hardware acknowledges through the setter's completion handler; a 3s
   ///    watchdog settles success if the ack never arrives, so the JS promise can never
   ///    hang (first settle wins).
@@ -210,7 +210,7 @@ final class ApertureController {
       completion(.failure(.apertureUnsupported))
       return
     }
-    let auto = autoSentinels(for: device)
+    let auto = autoSentinels()
     do {
       try device.lockForConfiguration()
       defer { device.unlockForConfiguration() }
@@ -236,17 +236,18 @@ final class ApertureController {
     }
   }
 
-  /// Resolve the "keep automatic" sentinels for shutter/ISO. Order: iOS 27 class
-  /// properties (`AVCaptureDevice.autoExposureDuration` / `.autoISO`) → iOS 27 instance
-  /// properties (KVC; struct values arrive NSValue/NSNumber-boxed) → the long-standing
-  /// public constants (`AVCaptureExposureDurationCurrent` / `AVCaptureISOCurrent`,
-  /// available since iOS 8, semantics "leave automatic" for the setExposureModeCustom
-  /// family). Every tier validates its values; KVC is only attempted behind a
-  /// responds-check so a missing key can never raise.
-  private func autoSentinels(for device: AVCaptureDevice) -> (duration: CMTime, iso: Float) {
+  /// Resolve the "keep automatic" sentinels for shutter/ISO. Order:
+  ///  1. Forward-compat dynamic probe of `autoExposureDuration` / `autoISO` class
+  ///     properties (responds-checked, never referenced at link time — compiles on
+  ///     every SDK; if a future iOS ships dedicated "auto" sentinels, they win).
+  ///  2. The long-standing "keep current" sentinels. Xcode 26.3 RENAMED the global
+  ///     constants AVCaptureExposureDurationCurrent / AVCaptureISOCurrent into these
+  ///     AVCaptureDevice class properties (TestFlight run 43 compile errors → per the
+  ///     compiler fixit). Semantics: shutter/ISO freeze at the momentary metered
+  ///     values — an honest aperture-priority degradation, never a crash.
+  private func autoSentinels() -> (duration: CMTime, iso: Float) {
     let durationSel = NSSelectorFromString("autoExposureDuration")
     let isoSel = NSSelectorFromString("autoISO")
-
     let deviceClass: AnyObject = AVCaptureDevice.self
     if deviceClass.responds(to: durationSel), deviceClass.responds(to: isoSel),
        let durationImp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), durationSel) as IMP?,
@@ -257,15 +258,7 @@ final class ApertureController {
       let iso = unsafeBitCast(isoImp, to: ClassFloatGetter.self)(deviceClass, isoSel)
       if duration.isValid, iso.isFinite { return (duration, iso) }
     }
-
-    if device.responds(to: durationSel), device.responds(to: isoSel),
-       let boxedDuration = device.value(forKey: "autoExposureDuration") as? NSValue,
-       let boxedIso = device.value(forKey: "autoISO") as? NSNumber,
-       boxedDuration.cmTimeValue.isValid, boxedIso.floatValue.isFinite {
-      return (boxedDuration.cmTimeValue, boxedIso.floatValue)
-    }
-
-    return (AVCaptureExposureDurationCurrent, AVCaptureISOCurrent)
+    return (AVCaptureDevice.currentExposureDuration, AVCaptureDevice.currentISO)
   }
 }
 
@@ -738,6 +731,11 @@ public final class CameraEngineView: ExpoView {
       try device.lockForConfiguration()
       defer { device.unlockForConfiguration() }
       CameraEngineView.applyAutoModes(to: device)
+      // Cap the stream at 30fps to match the viewfinder — min duration 1/30 ⇒ at most
+      // 30fps. Device-level API: the connection-level videoMinFrameDuration /
+      // isVideoMinFrameDurationSupported are UNAVAILABLE in the current iOS SDK
+      // (TestFlight run 43 compile errors).
+      device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
     } catch {
       throw CameraEngineError.configurationFailed
     }
@@ -782,12 +780,8 @@ public final class CameraEngineView: ExpoView {
         session.addOutput(videoOutput)
       }
     }
-    // The viewfinder draws at 30fps — frames beyond that are pure GPU/battery waste.
-    // Supported-check first: setting frame duration on a connection that lacks it raises.
-    if let videoConnection = videoOutput.connection(with: .video),
-       videoConnection.isVideoMinFrameDurationSupported {
-      videoConnection.videoMinFrameDuration = CMTime(value: 1, timescale: 30)
-    }
+    // The 30fps cap for this stream is set device-wide in configureSession's
+    // lockForConfiguration block (activeVideoMinFrameDuration).
     setOrientation(on: videoOutput, photoOutput: output)
 
     session.commitConfiguration()
