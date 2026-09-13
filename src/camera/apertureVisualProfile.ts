@@ -5,7 +5,9 @@
  *
  *   aperture → physical aperture (hardware, iOS 27+)
  *            + bloom (halation) strength      — strong wide open, restrained stopped down
- *            + starburst strength             — absent wide open, strongest stopped down
+ *            + starburst strength             — SIMULATION ONLY, fixed-lens devices; forced
+ *                                               to 0 on real variable-aperture hardware
+ *                                               (the optics already produce real spikes)
  *
  * Depth is deliberately NOT software-simulated (repo red line 4: no fake bokeh without
  * physical hardware) — on real variable-aperture hardware the optics do it themselves.
@@ -27,9 +29,11 @@ const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
 /**
  * Map the current f-stop onto visual factors. t=0 (wide open) → strong bloom, no
- * starburst; t=1 (stopped down) → the expert's reference table inverted: bloom ~0.25-0.5,
- * starburst 1.0. Neutral (1, 1) when the device has no variable aperture, so fixed-lens
- * profiles render exactly as calibrated.
+ * starburst; t=1 (stopped down) → the expert's reference table inverted: bloom ~0.25-0.5.
+ * Starburst is a FIXED-LENS simulation factor only — always 0 on real variable-aperture
+ * hardware so synthetic spikes never stack on the real diffraction ones. Neutral (1, 1)
+ * when the device has no variable aperture, so fixed-lens profiles render exactly as
+ * calibrated.
  */
 export function apertureVisualFactors(
   currentAperture: number,
@@ -41,9 +45,15 @@ export function apertureVisualFactors(
     return { bloom: 1, starburst: 1 };
   }
   const t = clamp01((currentAperture - minAperture) / (maxAperture - minAperture));
+  // Real variable-aperture hardware (iPhone 18 Pro): stopped-down star spikes are REAL
+  // diffraction around the blade edges — the synthetic starburst stage must never stack
+  // on top of them (double flare, worse than the system camera). The optics own the
+  // starburst; the synthetic layer exists only for fixed-lens demo simulation.
+  // Bloom stays linked: film-halation stylization mirrors the real wide-open veiling
+  // flare direction without claiming to be the optics.
   return {
     bloom: lerp(1.3, 0.55, t),
-    starburst: lerp(0.1, 1.0, t),
+    starburst: 0,
   };
 }
 
