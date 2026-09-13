@@ -328,14 +328,14 @@ public final class CameraEngineModule: Module {
       var bundledLuts: Set<String> = []
       for container in [Bundle(for: CameraEngineView.self), Bundle.main] {
         // pod resource_bundles packaging: CameraEngineLUTs.bundle next to the module…
-        if let bundleURL = container?.url(forResource: "CameraEngineLUTs", withExtension: "bundle"),
+        if let bundleURL = container.url(forResource: "CameraEngineLUTs", withExtension: "bundle"),
            let contents = try? FileManager.default.contentsOfDirectory(at: bundleURL, includingPropertiesForKeys: nil) {
           for url in contents where url.pathExtension == "cube" {
             bundledLuts.insert(url.deletingPathExtension().lastPathComponent)
           }
         }
         // …or resources landing directly in the module / main bundle.
-        if let urls = container?.urls(forResourcesWithExtension: "cube", subdirectory: nil) {
+        if let urls = container.urls(forResourcesWithExtension: "cube", subdirectory: nil) {
           for url in urls { bundledLuts.insert(url.deletingPathExtension().lastPathComponent) }
         }
       }
