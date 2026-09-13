@@ -1486,7 +1486,9 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     exif.removeValue(forKey: kCGImagePropertyExifPixelXDimension)
     exif.removeValue(forKey: kCGImagePropertyExifPixelYDimension)
     if equivalentFocalMM > 0 {
-      exif[kCGImagePropertyExifFocalLengthIn35mmFilm] = equivalentFocalMM
+      // ImageIO exposes no Swift-importable constant for this EXIF key (same class as the
+      // 'Orientation' literal below — run 35): the key literally is "FocalLengthIn35mmFilm".
+      exif["FocalLengthIn35mmFilm" as CFString] = equivalentFocalMM
     }
     // The rendered pixels are ALREADY upright (orientation applied during CIImage decode),
     // but the carried-over EXIF block still says "rotated" — Photos honors that tag and
