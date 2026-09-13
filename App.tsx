@@ -29,7 +29,7 @@ import {
   type CameraAuthorizationStatus,
 } from './src/camera/CameraEngine';
 // LoadCameraState, focal model, aperture visual linkage
-import { loadCameraState, rememberAperture, saveCameraState, type CameraState } from './src/camera/cameraStateStore';
+import { loadCameraState, saveCameraState, type CameraState } from './src/camera/cameraStateStore';
 import { buildFocalStops, defaultFocalStop, type FocalStop, type DeviceKind } from './src/camera/focalLadder';
 import { apertureVisualFactors, applyApertureVisual } from './src/camera/apertureVisualProfile';
 import { deriveSkin, isLightColor } from './src/theme/skin';
@@ -215,7 +215,7 @@ function CameraAppScreen(): React.JSX.Element {
 
   // Persisted camera memory: last profile + per-profile last user-chosen aperture.
   // Loaded async once on mount; restore happens after both profiles and state are ready.
-  const cameraStateRef = useRef<CameraState>({ lastProfileId: null, lastApertures: {} });
+  const cameraStateRef = useRef<CameraState>({ lastProfileId: null });
   const [cameraStateLoaded, setCameraStateLoaded] = useState(false);
   const restoreAttemptedRef = useRef(false);
   useEffect(() => {
@@ -234,8 +234,6 @@ function CameraAppScreen(): React.JSX.Element {
 
   // Flash curtain effect
   const shutterFlashAnim = useRef(new Animated.Value(0)).current;
-  // Throttle for aperture-memory persistence during continuous ring drags.
-  const lastAperturePersistRef = useRef<number>(0);
 
   // -------------------------------------------------------------
   // 3. Transient Error Overlay (Running Errors: profile/apply/aperture/capture/save)
@@ -480,25 +478,6 @@ function CameraAppScreen(): React.JSX.Element {
     const applyCurrentProfile = async () => {
       try {
         await CameraEngine.applyProfile(effectiveProfile);
-
-        // Aperture memory (Iteration 4): the JSON preferredAperture is only the first-touch
-        // default — a user's last chosen f-stop for this profile wins.
-        const target =
-          cameraStateRef.current.lastApertures[activeProfile.id] ??
-          activeProfile.aperture?.preferred;
-
-        // If variable aperture is supported, clamp the target and update
-        if (supportsVariableAperture && target != null) {
-          const min = capabilitiesRef.current?.minAperture ?? apertureRange?.min ?? target;
-          const max = capabilitiesRef.current?.maxAperture ?? apertureRange?.max ?? target;
-          const clamped = Math.min(Math.max(target, min), max);
-
-          await CameraEngine.setAperture(clamped);
-          if (isMounted) {
-            setCurrentAperture(clamped);
-            setActiveAperture(clamped);
-          }
-        }
       } catch (err: unknown) {
         if (isMounted) {
           showTransientError(resolveErrorMessage(err));
@@ -510,7 +489,32 @@ function CameraAppScreen(): React.JSX.Element {
     return () => {
       isMounted = false;
     };
-  }, [effectiveProfile, activeProfile, isCameraRunning, supportsVariableAperture, apertureRange, showTransientError]);
+  }, [effectiveProfile, activeProfile, isCameraRunning, showTransientError]);
+
+  // Recommended-aperture default (product decision 2026-09-13): SELECTING a camera snaps
+  // the ring to that profile's aperture.preferred (e.g. Ricoh GR → ƒ/2.8); the user then
+  // adjusts from there. Guarded by profile id so the aperture-driven effectiveProfile
+  // re-renders never re-apply it mid-drag (the effect would otherwise fight the finger).
+  const preferredApertureProfileRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isCameraRunning || !activeProfile) return;
+    if (preferredApertureProfileRef.current === activeProfile.id) return;
+    preferredApertureProfileRef.current = activeProfile.id;
+    const preferred = activeProfile.aperture?.preferred;
+    if (typeof preferred !== 'number' || !Number.isFinite(preferred) || preferred <= 0) return;
+    if (supportsVariableAperture) {
+      const min = capabilitiesRef.current?.minAperture ?? apertureRange?.min ?? preferred;
+      const max = capabilitiesRef.current?.maxAperture ?? apertureRange?.max ?? preferred;
+      const clamped = Math.min(Math.max(preferred, min), max);
+      CameraEngine.setAperture(clamped).catch(() => {});
+      setCurrentAperture(clamped);
+      setActiveAperture(clamped);
+    } else {
+      // Demo/fixed lenses: visual-only snap — the capture stays at the fixed aperture.
+      setCurrentAperture(preferred);
+      setActiveAperture(preferred);
+    }
+  }, [activeProfile, isCameraRunning, supportsVariableAperture, apertureRange]);
 
   // Profile validation/import/reload errors shown as transient overlay while running
   useEffect(() => {
@@ -558,16 +562,6 @@ function CameraAppScreen(): React.JSX.Element {
     setActiveAperture(clamped);
     try {
       await CameraEngine.setAperture(clamped);
-      // Persist the user's choice, throttled: the continuous ring fires many updates
-      // per drag, and each persistence is a read-modify-write of the state file.
-      if (activeProfile) {
-        cameraStateRef.current.lastApertures[activeProfile.id] = clamped;
-        const now = Date.now();
-        if (now - lastAperturePersistRef.current > 1500) {
-          lastAperturePersistRef.current = now;
-          rememberAperture(activeProfile.id, clamped);
-        }
-      }
     } catch (err: unknown) {
       setCurrentAperture(previous);
       setActiveAperture(previous);

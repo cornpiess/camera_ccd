@@ -162,12 +162,15 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                 const isActive = profile.id === activeProfileId;
                 const accent = profile.ui?.accent || '#FFFFFF';
                 const displayName = profileDisplayName(profile);
+                const preferred = profile.aperture?.preferred;
                 return (
                   <Pressable
                     key={profile.id}
                     accessibilityRole="button"
                     accessibilityState={{ selected: isActive }}
-                    accessibilityLabel={`${displayName}${isActive ? ', selected' : ''}`}
+                    accessibilityLabel={`${displayName}${isActive ? ', selected' : ''}${
+                      typeof preferred === 'number' ? `, recommended ƒ/${preferred}` : ''
+                    }`}
                     onPress={() => handleSelect(profile)}
                     style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                   >
@@ -182,6 +185,18 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                     <Text style={[styles.rowName, isActive && styles.rowNameActive]} numberOfLines={1}>
                       {displayName}
                     </Text>
+                    {typeof preferred === 'number' && Number.isFinite(preferred) ? (
+                      // Recommended aperture, snapped-to on selection (Ricoh GR → ƒ/2.8).
+                      <Text
+                        style={[
+                          styles.rowAperture,
+                          isActive && { color: accent },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {`ƒ/${preferred.toFixed(1).replace(/\.0$/, '')}`}
+                      </Text>
+                    ) : null}
                     {isActive ? (
                       <View style={[styles.activeDot, { backgroundColor: accent }]} />
                     ) : null}
@@ -278,6 +293,12 @@ const styles = StyleSheet.create({
   },
   rowNameActive: {
     fontWeight: '800',
+  },
+  rowAperture: {
+    color: 'rgba(255, 255, 255, 0.45)',
+    fontSize: 11,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
   },
   activeDot: {
     width: 7,

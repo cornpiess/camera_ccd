@@ -118,7 +118,7 @@
       "id": "ricoh_positive",
       "name": "Ricoh Positive",
       "aperture": {
-        "preferred": 4,
+        "preferred": 2.8,
         "starZone": 4
       },
       "ui": {
@@ -231,7 +231,7 @@
       "id": "ricoh_negative",
       "name": "Ricoh Negative",
       "aperture": {
-        "preferred": 4,
+        "preferred": 2.8,
         "starZone": 4
       },
       "ui": {
