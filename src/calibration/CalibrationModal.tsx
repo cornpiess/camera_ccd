@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import { useProfiles } from '../profiles';
+import { CameraEngine } from '../camera/CameraEngine';
 import { getDiagLogText } from '../utils/diagLog';
 
 export interface CalibrationModalProps {
@@ -47,6 +48,7 @@ export function CalibrationModal({ visible, onClose, apertureDemoMode = false, o
   const { applyText, clearErrors, document, errors, exportJson, importJson, loading, reload, reset } = useProfiles();
   const [text, setText] = useState('');
   const [diagText, setDiagText] = useState<string | null>(null);
+  const [engineDiag, setEngineDiag] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
 
   const run = useCallback(async (action: () => Promise<boolean>, clearOnSuccess = false): Promise<void> => {
@@ -72,6 +74,42 @@ export function CalibrationModal({ visible, onClose, apertureDemoMode = false, o
     clearErrors();
     onClose();
   }, [clearErrors, onClose]);
+
+  // Engine triage: everything needed to tell apart "the feature is broken" from "this
+  // build is stale" — LUT bundle inventory vs the profiles the JS layer advertises, the
+  // add-only photo permission, and the hardware aperture report (demo-mode input).
+  const loadEngineDiag = useCallback(async (): Promise<void> => {
+    try {
+      const d = await CameraEngine.getDiagnostics();
+      const expected = Array.from(
+        new Set(
+          ((document?.profiles ?? []) as unknown as { color?: { lut?: string | null } }[])
+            .map((p) => p.color?.lut ?? '')
+            .filter((lut) => lut !== ''),
+        ),
+      );
+      const missing = expected.filter((lut) => !d.bundledLuts.includes(lut));
+      const apertureLine = d.supportsVariableAperture
+        ? `variable ƒ/${d.minAperture}–ƒ/${d.maxAperture}`
+        : 'fixed (hardware)';
+      const lines = [
+        `iOS: ${d.osVersion}`,
+        `Device: ${d.deviceModel ?? '?'}`,
+        `Aperture: ${apertureLine}, active ƒ/${d.activeAperture ?? '?'}`,
+        `Aperture Demo mode: ${apertureDemoMode ? 'ON' : 'OFF'}`,
+        `Photos add permission: ${d.photoAddAuthorization}${
+          d.photoAddAuthorization === 'denied' ? '  → 设置 > 隐私与安全性 > 照片 > 添加照片' : ''
+        }`,
+        `LUTs bundled this build: ${d.bundledLuts.length}`,
+        missing.length > 0
+          ? `MISSING LUTs (${missing.length}) — JS 列表比原生资源新，需重新出包: ${missing.join(', ')}`
+          : 'All profile LUTs present in the native bundle ✓',
+      ];
+      setEngineDiag(lines.join('\n'));
+    } catch (err: unknown) {
+      setEngineDiag(`getDiagnostics failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [apertureDemoMode, document]);
 
   const busy = working || loading;
 
@@ -154,6 +192,21 @@ export function CalibrationModal({ visible, onClose, apertureDemoMode = false, o
             </View>
           ) : null}
 
+          <Text style={styles.label}>Engine diagnostics</Text>
+          <ActionButton disabled={engineDiag !== null} label="Load Engine Diagnostics" onPress={() => { void loadEngineDiag(); }} />
+          {engineDiag !== null ? (
+            <TextInput
+              accessibilityLabel="Engine diagnostics content"
+              editable={false}
+              multiline
+              scrollEnabled
+              selectTextOnFocus
+              style={[styles.editor, styles.diagEditor]}
+              textAlignVertical="top"
+              value={engineDiag}
+            />
+          ) : null}
+
           <Text style={styles.label}>Diagnostic log</Text>
           <ActionButton
             disabled={diagText !== null}
@@ -195,6 +248,7 @@ const styles = StyleSheet.create({
   destructiveText: { color: '#ffb6b6' },
   label: { color: '#e8e9ed', fontSize: 15, fontWeight: '600', marginTop: 4 },
   editor: { minHeight: 260, borderColor: '#3b3e45', borderWidth: 1, borderRadius: 10, backgroundColor: '#17191d', color: '#f4f4f5', fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }), fontSize: 13, lineHeight: 19, padding: 12 },
+  diagEditor: { minHeight: 150 },
   editorActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   progress: { marginVertical: 8 },
   errorBox: { borderRadius: 9, borderWidth: 1, borderColor: '#8b4444', backgroundColor: '#30191c', padding: 12, gap: 5 },

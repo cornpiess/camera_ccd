@@ -20,6 +20,20 @@ export type CameraCapabilities = {
   model: string;
 };
 
+export type EngineDiagnostics = {
+  /** Every .cube name the native side can actually load this build. */
+  bundledLuts: string[];
+  /** add-only Photos permission: authorized | limited | denied | restricted | notDetermined | unknown */
+  photoAddAuthorization: string;
+  osVersion: string;
+  supportsVariableAperture?: boolean;
+  minAperture?: number | null;
+  maxAperture?: number | null;
+  activeAperture?: number;
+  supportedApertures?: number[] | null;
+  deviceModel?: string;
+};
+
 export type CapturedPhoto = {
   /** Temporary processed JPEG. Copy it if it must outlive the current app cache lifecycle. */
   fileUri: string;
@@ -62,6 +76,8 @@ type NativeCameraEngine = {
   /** Normalized (0..1) tap position in the video frame; keeps AF/AE continuous around that point. */
   setFocusPoint(x: number, y: number): Promise<void>;
   getCapabilities(): Promise<CameraCapabilities>;
+  /** On-device triage: LUT bundle inventory, add-only photo permission, aperture report. */
+  getDiagnostics(): Promise<EngineDiagnostics>;
   applyProfile(profile: CameraProfile): Promise<void>;
   /** Read-only authorization probe; the system dialog only fires from startCamera. */
   getCameraAuthorizationStatus(): Promise<CameraAuthorizationStatus>;
@@ -139,6 +155,7 @@ const unavailableModule: NativeCameraEngine = {
   setAperture: () => Promise.reject(unavailableError()),
   setFocusPoint: () => Promise.reject(unavailableError()),
   getCapabilities: () => Promise.reject(unavailableError()),
+  getDiagnostics: () => Promise.reject(unavailableError()),
   applyProfile: () => Promise.reject(unavailableError()),
   getCameraAuthorizationStatus: () => Promise.reject(unavailableError()),
   getAvailableLenses: () => Promise.reject(unavailableError()),
@@ -170,6 +187,7 @@ export const capturePhoto = (): Promise<CapturedPhoto> => typed(NativeModule.cap
 export const setAperture = (fStop: number): Promise<void> => typed(NativeModule.setAperture(fStop));
 export const setFocusPoint = (x: number, y: number): Promise<void> => typed(NativeModule.setFocusPoint(x, y));
 export const getCapabilities = (): Promise<CameraCapabilities> => typed(NativeModule.getCapabilities());
+export const getDiagnostics = (): Promise<EngineDiagnostics> => typed(NativeModule.getDiagnostics());
 export const applyProfile = (profile: CameraProfile): Promise<void> => typed(NativeModule.applyProfile(profile));
 export const getCameraAuthorizationStatus = (): Promise<CameraAuthorizationStatus> =>
   typed(NativeModule.getCameraAuthorizationStatus());
@@ -186,6 +204,7 @@ export const CameraEngine = {
   setAperture,
   setFocusPoint,
   getCapabilities,
+  getDiagnostics,
   applyProfile,
   getCameraAuthorizationStatus,
   getAvailableLenses,
@@ -200,6 +219,7 @@ export type CameraEngineHandle = {
   setAperture: typeof setAperture;
   setFocusPoint: typeof setFocusPoint;
   getCapabilities: typeof getCapabilities;
+  getDiagnostics: typeof getDiagnostics;
   applyProfile: typeof applyProfile;
   getCameraAuthorizationStatus: typeof getCameraAuthorizationStatus;
   getAvailableLenses: typeof getAvailableLenses;
@@ -232,6 +252,7 @@ export const CameraEngineView = forwardRef<CameraEngineHandle, CameraEngineViewP
     setAperture,
     setFocusPoint,
     getCapabilities,
+    getDiagnostics,
     applyProfile,
     getCameraAuthorizationStatus,
     getAvailableLenses,

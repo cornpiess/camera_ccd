@@ -333,7 +333,17 @@ function CameraAppScreen(): React.JSX.Element {
         const capabilities: CameraCapabilities = await CameraEngine.getCapabilities();
         capabilitiesRef.current = capabilities;
         if (capabilities) {
-          const variable = Boolean(capabilities.supportsVariableAperture);
+          // iOS 27 quirk guard: a fixed-aperture lens that still publishes a near-degenerate
+          // lens-aperture range must NOT flip the ring into hardware mode — with a tiny span
+          // the ring renders no ticks, attaches no gesture and hides the DEMO caption, which
+          // reads exactly as "the aperture demo disappeared". Real variable hardware spans
+          // ƒ/1.4–ƒ/4 (span 2.6), so 0.3 separates them safely.
+          const reportedStops = Array.isArray(capabilities.supportedApertures) ? capabilities.supportedApertures : [];
+          const spanOK =
+            capabilities.minAperture != null && capabilities.maxAperture != null
+              ? capabilities.maxAperture - capabilities.minAperture >= 0.3
+              : reportedStops.length > 1;
+          const variable = Boolean(capabilities.supportsVariableAperture) && spanOK;
           setSupportsVariableAperture(variable);
           const aperture = capabilities.activeAperture ?? capabilities.activeLensAperture ?? 1.8;
           setActiveAperture(aperture);
@@ -1006,16 +1016,26 @@ function CameraAppScreen(): React.JSX.Element {
                     <ThumbnailPreview
                       uri={latestThumbnail}
                       onPress={() => {
-                        // photos-redirect is a semi-private scheme iOS may refuse; be
-                        // honest on failure instead of silently doing nothing.
-                        Linking.canOpenURL('photos-redirect://')
-                          .then((ok) => {
-                            if (!ok) throw new Error('unsupported');
-                            return Linking.openURL('photos-redirect://');
-                          })
-                          .catch(() => {
+                        // photos-redirect:// opens the Photos app. canOpenURL is useless here:
+                        // iOS requires the scheme in LSApplicationQueriesSchemes and returns
+                        // false otherwise, which read as "the thumbnail tap is dead". openURL
+                        // directly, fall back to the legacy scheme, then say so honestly.
+                        const tryOpen = async (): Promise<boolean> => {
+                          for (const url of ['photos-redirect://', 'photos://']) {
+                            try {
+                              await Linking.openURL(url);
+                              return true;
+                            } catch {
+                              // scheme refused — try the next one
+                            }
+                          }
+                          return false;
+                        };
+                        void tryOpen().then((opened) => {
+                          if (!opened) {
                             showTransientError("Couldn't open Photos from here — open it from the Home Screen.");
-                          });
+                          }
+                        });
                       }}
                     />
                   ) : null}

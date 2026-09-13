@@ -319,6 +319,51 @@ public final class CameraEngineModule: Module {
       }
     }
 
+    /// On-device P0 triage in one round trip: the LUT bundle inventory (a JS/native version
+    /// mismatch — camera list updated with the JS bundle while CameraEngineLUTs still holds
+    /// the old build's resources — presents as "the LUT has no effect"), the add-only photo
+    /// permission state (the top cause of "photos never reach the library"), and the
+    /// hardware aperture report as the session currently sees it.
+    AsyncFunction("getDiagnostics") { (promise: Promise) in
+      var bundledLuts: Set<String> = []
+      for container in [Bundle(for: CameraEngineView.self), Bundle.main] {
+        // pod resource_bundles packaging: CameraEngineLUTs.bundle next to the module…
+        if let bundleURL = container?.url(forResource: "CameraEngineLUTs", withExtension: "bundle"),
+           let contents = try? FileManager.default.contentsOfDirectory(at: bundleURL, includingPropertiesForKeys: nil) {
+          for url in contents where url.pathExtension == "cube" {
+            bundledLuts.insert(url.deletingPathExtension().lastPathComponent)
+          }
+        }
+        // …or resources landing directly in the module / main bundle.
+        if let urls = container?.urls(forResourcesWithExtension: "cube", subdirectory: nil) {
+          for url in urls { bundledLuts.insert(url.deletingPathExtension().lastPathComponent) }
+        }
+      }
+      let addStatus: String
+      switch PHPhotoLibrary.authorizationStatus(for: .addOnly) {
+      case .authorized: addStatus = "authorized"
+      case .limited: addStatus = "limited"
+      case .denied: addStatus = "denied"
+      case .restricted: addStatus = "restricted"
+      case .notDetermined: addStatus = "notDetermined"
+      @unknown default: addStatus = "unknown"
+      }
+      var payload: [String: Any] = [
+        "bundledLuts": bundledLuts.sorted(),
+        "photoAddAuthorization": addStatus,
+        "osVersion": ProcessInfo.processInfo.operatingSystemVersionString,
+      ]
+      let finish: (Result<[String: Any], CameraEngineError>) -> Void = { result in
+        if case .success(let caps) = result { payload.merge(caps) { _, newest in newest } }
+        promise.resolve(payload)
+      }
+      if let view = self.activeView {
+        view.capabilities(controller: self.apertureController, completion: finish)
+      } else {
+        finish(.success(self.apertureController.getCapabilities(device: AVCaptureDevice.default(for: .video)).asDictionary))
+      }
+    }
+
     /// Rear lenses present on this device, in focal-length order (0.5× → 2×).
     AsyncFunction("getAvailableLenses") { (promise: Promise) in
       guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
