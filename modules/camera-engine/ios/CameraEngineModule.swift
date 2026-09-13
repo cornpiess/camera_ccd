@@ -722,7 +722,8 @@ public final class CameraEngineView: ExpoView {
     }
     setOrientation(on: videoOutput, photoOutput: output)
 
-    session.commitConfiguration()    camera = device
+    session.commitConfiguration()
+    camera = device
     configured = true
   }
 
@@ -768,7 +769,7 @@ public final class CameraEngineView: ExpoView {
       // connection to the physical device orientation so buffers arrive already upright and
       // the saved JPEG needs no EXIF rotation fix-up.
       if let videoConnection = self.output.connection(with: .video) {
-        if let orientation = currentDeviceOrientation() {
+        if let orientation = self.currentDeviceOrientation() {
           videoConnection.videoOrientation = orientation
         }
       }
@@ -1564,7 +1565,7 @@ private enum CameraDNARenderer {
   // Fuses, per profile: base LUT × lutIntensity → temperature/tint → saturation →
   // 7-band HSL fine trim — into ONE 33³ cube, cached by profile identity. Profile
   // switching only swaps cube + tone; nothing is regenerated per frame.
-  private struct EffectiveCubeKey: Equatable {
+  private struct EffectiveCubeKey: Hashable {
     let id: String
     let revision: Int
   }
@@ -1680,7 +1681,7 @@ private enum CameraDNARenderer {
         values[o + 2] = Float(min(1.0, max(0.0, b)))
       }
     }
-    return (dim, Data(bytes: values, count: values.count * MemoryLayout<Float>.size))
+    return (dim, values.withUnsafeBufferPointer { Data(buffer: $0) })
   }
 
   private static func number(_ values: [String: Any], _ key: String, _ fallback: Double, _ range: ClosedRange<Double>) -> Double {
