@@ -1,0 +1,1583 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Look Tuner — 相机风格调参台</title>
+<style>
+  :root { --bg:#141414; --panel:#1d1d1f; --line:#2e2e30; --txt:#e8e8e8; --dim:#9a9a9f; --acc:#d9b98a; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--txt); font:14px/1.5 "Segoe UI",system-ui,sans-serif; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+  header { display:flex; gap:10px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:15px; font-weight:600; margin-right:8px; }
+  .btn { background:#2a2a2c; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 12px; cursor:pointer; font-size:13px; }
+  .btn:hover { background:#353537; }
+  .btn.acc { background:var(--acc); color:#111; border-color:transparent; font-weight:600; }
+  .btn.acc:hover { filter:brightness(1.08); }
+  select { background:#2a2a2c; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:13px; }
+  .tag { font-size:12px; color:var(--dim); }
+  main { flex:1; display:flex; min-height:0; }
+  #viewer { flex:1; position:relative; background:#0c0c0c; overflow:hidden; }
+  #gl { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+  #splitHandle { position:absolute; top:0; bottom:0; width:2px; background:var(--acc); cursor:ew-resize; display:none; }
+  #splitHandle::after { content:"◂ ▸"; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:var(--acc); color:#111; font-size:11px; padding:2px 6px; border-radius:10px; white-space:nowrap; }
+  #splitLabel { position:absolute; top:10px; left:12px; font-size:12px; color:var(--acc); background:rgba(0,0,0,.55); padding:3px 8px; border-radius:6px; display:none; }
+  #hint { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--dim); text-align:center; pointer-events:none; }
+  aside { width:340px; background:var(--panel); border-left:1px solid var(--line); overflow-y:auto; padding:12px 14px 40px; }
+  section { margin-bottom:18px; }
+  section h2 { font-size:13px; color:var(--acc); margin-bottom:8px; letter-spacing:.5px; }
+  .row { margin-bottom:10px; }
+  .row label { display:flex; justify-content:space-between; font-size:12px; color:var(--dim); margin-bottom:3px; }
+  .row label b { color:var(--txt); font-weight:500; font-variant-numeric:tabular-nums; }
+  input[type=range] { width:100%; accent-color:var(--acc); height:22px; cursor:pointer; }
+  details { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-bottom:10px; }
+  details summary { cursor:pointer; font-size:13px; color:var(--txt); }
+  .band { display:grid; grid-template-columns:52px 1fr 1fr 1fr; gap:6px; align-items:center; margin-top:6px; font-size:11px; color:var(--dim); }
+  .band input { height:16px; }
+  #curveBox { background:#111; border:1px solid var(--line); border-radius:8px; cursor:crosshair; display:block; margin:4px auto 8px; }
+  #lutFile { color:var(--dim); font-size:12px; }
+  textarea { width:100%; height:180px; background:#111; color:#cfe8cf; border:1px solid var(--line); border-radius:8px; font:11px/1.45 Consolas,monospace; padding:8px; resize:vertical; }
+  .note { font-size:11px; color:var(--dim); margin-top:6px; }
+  .empty { color:var(--dim); font-size:12px; padding:8px; border:1px dashed var(--line); border-radius:8px; text-align:center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Look Tuner</h1>
+  <button class="btn" id="btnSrc">① 上传原图</button>
+  <button class="btn" id="btnRef">② 上传理想参考图</button>
+  <button class="btn" id="btnLut">③ 加载 LUT (.cube)</button>
+  <span id="lutName" class="tag"></span>
+  <select id="preset"><option value="">从现有相机配置起步…</option></select>
+  <button class="btn" id="btnAuto">自动初调</button>
+  <select id="cmpMode">
+    <option value="">对比：关</option>
+    <option value="ref">对比：理想参考图</option>
+    <option value="src">对比：我的原图</option>
+  </select>
+  <span class="tag">拖分割线对比 · 空格键按住看无对比原图</span>
+</header>
+<main>
+  <div id="viewer">
+    <canvas id="gl"></canvas>
+    <div id="splitHandle"></div>
+    <div id="splitLabel"></div>
+    <div id="hint">先上传「原图」，再上传「理想参考图」。<br>可用预设起步，调好后从右侧导出 JSON。</div>
+  </div>
+  <aside>
+    <section>
+      <h2>色调 TONE</h2>
+      <div class="row"><label>曝光 EV <b id="v_exposure"></b></label><input type="range" id="exposure" min="-2" max="2" step="0.01"></div>
+      <div class="row"><label>对比度 <b id="v_contrast"></b></label><input type="range" id="contrast" min="0.6" max="1.8" step="0.01"></div>
+      <div class="row"><label>黑场 <b id="v_blackPoint"></b></label><input type="range" id="blackPoint" min="0" max="0.2" step="0.005"></div>
+      <details open><summary>色调曲线（拖 5 个点，中间点 x 也可拖）</summary>
+        <canvas id="curveBox" width="290" height="180"></canvas>
+        <button class="btn" id="btnCurveReset" style="width:100%">曲线复位</button>
+      </details>
+    </section>
+    <section>
+      <h2>颜色 COLOR</h2>
+      <div class="row"><label>饱和度 <b id="v_saturation"></b></label><input type="range" id="saturation" min="0" max="2" step="0.01"></div>
+      <div class="row"><label>色温偏移 K <b id="v_temperature"></b></label><input type="range" id="temperature" min="-3000" max="3000" step="10"></div>
+      <div class="row"><label>色调（绿↔品红） <b id="v_tint"></b></label><input type="range" id="tint" min="-60" max="60" step="1"></div>
+      <div class="row"><label>LUT 强度 <b id="v_lutIntensity"></b></label><input type="range" id="lutIntensity" min="0" max="1" step="0.01"></div>
+      <details><summary>7 分区色相（红/橙/黄/绿/青/蓝/品红）</summary><div id="bands"></div></details>
+    </section>
+    <section>
+      <h2>质感 TEXTURE</h2>
+      <div class="row"><label>暗角强度 <b id="v_vigAmt"></b></label><input type="range" id="vigAmt" min="0" max="0.6" step="0.01"></div>
+      <div class="row"><label>暗角范围 <b id="v_vigRad"></b></label><input type="range" id="vigRad" min="0.3" max="1" step="0.01"></div>
+      <div class="row"><label>颗粒强度 <b id="v_grainAmt"></b></label><input type="range" id="grainAmt" min="0" max="0.5" step="0.01"></div>
+      <div class="row"><label>颗粒粗细 <b id="v_grainSize"></b></label><input type="range" id="grainSize" min="0" max="1" step="0.01"></div>
+      <div class="row"><label>光晕 halation <b id="v_halAmt"></b></label><input type="range" id="halAmt" min="0" max="0.3" step="0.01"></div>
+      <div class="row"><label>光晕半径 <b id="v_halRad"></b></label><input type="range" id="halRad" min="0.05" max="0.5" step="0.01"></div>
+    </section>
+    <section>
+      <h2>导出 EXPORT</h2>
+      <div id="exportEmpty" class="empty">调整任意参数后，这里会出现可复制的 JSON</div>
+      <div id="exportBox" style="display:none">
+        <textarea id="jsonOut" readonly></textarea>
+        <button class="btn acc" id="btnCopy" style="width:100%;margin-top:8px">复制 JSON</button>
+        <div class="note">把 tone / color / texture 三段合并进 assets/camera-profiles.json 里对应相机的 Profile（保留原 raw 段不动），然后跑 npm run verify。</div>
+      </div>
+    </section>
+  </aside>
+</main>
+<script>
+"use strict";
+const PROFILES = {
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "canon_g7x2",
+      "name": "Canon G7X II",
+      "aperture": {
+        "preferred": 1.8,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "G7X",
+        "accent": "#D9B98A",
+        "dialStyle": "compact",
+        "personality": "soft",
+        "markerStyle": "dot",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0.58,
+        "detail": 0.54,
+        "localToneMap": 0.18,
+        "luminanceNoiseReduction": 0.28,
+        "colorNoiseReduction": 0.34
+      },
+      "tone": {
+        "exposure": 0.08,
+        "contrast": 1.14,
+        "blackPoint": 0.025,
+        "curve": [
+          [
+            0,
+            0.01
+          ],
+          [
+            0.25,
+            0.22
+          ],
+          [
+            0.5,
+            0.51
+          ],
+          [
+            0.75,
+            0.79
+          ],
+          [
+            1,
+            0.99
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1.08,
+        "temperature": 120,
+        "tint": 2,
+        "hueBands": {
+          "red": {
+            "hue": -2,
+            "saturation": 1.08,
+            "luminance": 1.02
+          },
+          "orange": {
+            "hue": -3,
+            "saturation": 1.06,
+            "luminance": 1.05
+          },
+          "yellow": {
+            "hue": -4,
+            "saturation": 1.03,
+            "luminance": 1.02
+          },
+          "green": {
+            "hue": 2,
+            "saturation": 0.96,
+            "luminance": 1.01
+          },
+          "cyan": {
+            "hue": -2,
+            "saturation": 1.02,
+            "luminance": 1.02
+          },
+          "blue": {
+            "hue": 1,
+            "saturation": 1.05,
+            "luminance": 0.98
+          },
+          "magenta": {
+            "hue": 2,
+            "saturation": 1.04,
+            "luminance": 1.01
+          }
+        },
+        "lut": "canon-g7x2"
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.08,
+          "size": 0.22
+        },
+        "vignette": {
+          "amount": 0.12,
+          "radius": 0.74
+        },
+        "halation": {
+          "amount": 0.02,
+          "radius": 0.18
+        }
+      },
+      "displayName": "Canon G7X II",
+      "developmentReference": {
+        "target": "Canon G7 X II"
+      }
+    },
+    {
+      "id": "ricoh_positive",
+      "name": "Ricoh Positive",
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "GR Pos",
+        "accent": "#C7A163",
+        "dialStyle": "snap",
+        "personality": "crisp",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0.66,
+        "detail": 0.61,
+        "localToneMap": 0.26,
+        "luminanceNoiseReduction": 0.18,
+        "colorNoiseReduction": 0.24
+      },
+      "tone": {
+        "exposure": -0.04,
+        "contrast": 1.27,
+        "blackPoint": 0.045,
+        "curve": [
+          [
+            0,
+            0.015
+          ],
+          [
+            0.25,
+            0.18
+          ],
+          [
+            0.5,
+            0.49
+          ],
+          [
+            0.75,
+            0.83
+          ],
+          [
+            1,
+            0.985
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1.16,
+        "temperature": 180,
+        "tint": 3,
+        "hueBands": {
+          "red": {
+            "hue": -4,
+            "saturation": 1.11,
+            "luminance": 0.98
+          },
+          "orange": {
+            "hue": -6,
+            "saturation": 1.13,
+            "luminance": 1.04
+          },
+          "yellow": {
+            "hue": -8,
+            "saturation": 1.08,
+            "luminance": 1.01
+          },
+          "green": {
+            "hue": 8,
+            "saturation": 0.93,
+            "luminance": 0.97
+          },
+          "cyan": {
+            "hue": -5,
+            "saturation": 1.04,
+            "luminance": 0.98
+          },
+          "blue": {
+            "hue": -3,
+            "saturation": 1.1,
+            "luminance": 0.93
+          },
+          "magenta": {
+            "hue": 3,
+            "saturation": 1.07,
+            "luminance": 0.99
+          }
+        },
+        "lut": "ricoh-positive"
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.14,
+          "size": 0.3
+        },
+        "vignette": {
+          "amount": 0.18,
+          "radius": 0.68
+        },
+        "halation": {
+          "amount": 0.03,
+          "radius": 0.2
+        }
+      },
+      "displayName": "Ricoh Positive",
+      "developmentReference": {
+        "target": "Ricoh Positive"
+      }
+    },
+    {
+      "id": "ricoh_negative",
+      "name": "Ricoh Negative",
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "GR Neg",
+        "accent": "#8FC7A0",
+        "dialStyle": "snap",
+        "personality": "cool",
+        "markerStyle": "diamond",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0.6,
+        "detail": 0.57,
+        "localToneMap": 0.2,
+        "luminanceNoiseReduction": 0.22,
+        "colorNoiseReduction": 0.27
+      },
+      "tone": {
+        "exposure": 0.02,
+        "contrast": 1.08,
+        "blackPoint": 0.035,
+        "curve": [
+          [
+            0,
+            0.025
+          ],
+          [
+            0.25,
+            0.23
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.76
+          ],
+          [
+            1,
+            0.965
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 0.94,
+        "temperature": -80,
+        "tint": -2,
+        "hueBands": {
+          "red": {
+            "hue": 3,
+            "saturation": 0.95,
+            "luminance": 1.03
+          },
+          "orange": {
+            "hue": 4,
+            "saturation": 0.97,
+            "luminance": 1.07
+          },
+          "yellow": {
+            "hue": 6,
+            "saturation": 0.9,
+            "luminance": 1.05
+          },
+          "green": {
+            "hue": -7,
+            "saturation": 0.88,
+            "luminance": 1.02
+          },
+          "cyan": {
+            "hue": 6,
+            "saturation": 0.95,
+            "luminance": 1.04
+          },
+          "blue": {
+            "hue": 5,
+            "saturation": 0.92,
+            "luminance": 1.01
+          },
+          "magenta": {
+            "hue": -3,
+            "saturation": 0.93,
+            "luminance": 1.03
+          }
+        },
+        "lut": "ricoh-negative"
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.2,
+          "size": 0.38
+        },
+        "vignette": {
+          "amount": 0.15,
+          "radius": 0.72
+        },
+        "halation": {
+          "amount": 0.04,
+          "radius": 0.25
+        }
+      },
+      "displayName": "Ricoh Negative",
+      "developmentReference": {
+        "target": "Ricoh Negative"
+      }
+    },
+    {
+      "id": "leica_m9",
+      "name": "Leica M9",
+      "aperture": {
+        "preferred": 2.8,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "M9",
+        "accent": "#B5443C",
+        "dialStyle": "engraved",
+        "personality": "classic",
+        "markerStyle": "ring",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0.72,
+        "detail": 0.68,
+        "localToneMap": 0.12,
+        "luminanceNoiseReduction": 0.1,
+        "colorNoiseReduction": 0.16
+      },
+      "tone": {
+        "exposure": -0.06,
+        "contrast": 1.23,
+        "blackPoint": 0.055,
+        "curve": [
+          [
+            0,
+            0.008
+          ],
+          [
+            0.25,
+            0.19
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.82
+          ],
+          [
+            1,
+            0.992
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1.05,
+        "temperature": 90,
+        "tint": 5,
+        "hueBands": {
+          "red": {
+            "hue": -5,
+            "saturation": 1.12,
+            "luminance": 0.97
+          },
+          "orange": {
+            "hue": -2,
+            "saturation": 1.07,
+            "luminance": 1.03
+          },
+          "yellow": {
+            "hue": -3,
+            "saturation": 0.98,
+            "luminance": 1.02
+          },
+          "green": {
+            "hue": 4,
+            "saturation": 0.91,
+            "luminance": 0.98
+          },
+          "cyan": {
+            "hue": -4,
+            "saturation": 0.97,
+            "luminance": 1.01
+          },
+          "blue": {
+            "hue": 3,
+            "saturation": 1.04,
+            "luminance": 0.95
+          },
+          "magenta": {
+            "hue": -2,
+            "saturation": 1.08,
+            "luminance": 0.98
+          }
+        },
+        "lut": "leica-m9"
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.11,
+          "size": 0.27
+        },
+        "vignette": {
+          "amount": 0.22,
+          "radius": 0.64
+        },
+        "halation": {
+          "amount": 0.025,
+          "radius": 0.2
+        }
+      },
+      "displayName": "Leica M9",
+      "developmentReference": {
+        "target": "Leica M9"
+      }
+    },
+    {
+      "id": "fuji_classic_chrome",
+      "name": "Fuji Classic Chrome",
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "Fuji CC",
+        "accent": "#8C979C",
+        "dialStyle": "knurled",
+        "personality": "restrained",
+        "markerStyle": "dot",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0.55,
+        "detail": 0.58,
+        "localToneMap": 0.14,
+        "luminanceNoiseReduction": 0.2,
+        "colorNoiseReduction": 0.25
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1.1,
+        "blackPoint": 0.04,
+        "curve": [
+          [
+            0,
+            0.02
+          ],
+          [
+            0.25,
+            0.22
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.77
+          ],
+          [
+            1,
+            0.97
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 0.86,
+        "temperature": -40,
+        "tint": 1,
+        "hueBands": {
+          "red": {
+            "hue": 2,
+            "saturation": 0.92,
+            "luminance": 1.02
+          },
+          "orange": {
+            "hue": -2,
+            "saturation": 0.94,
+            "luminance": 1.05
+          },
+          "yellow": {
+            "hue": -6,
+            "saturation": 0.86,
+            "luminance": 1.03
+          },
+          "green": {
+            "hue": 7,
+            "saturation": 0.82,
+            "luminance": 0.99
+          },
+          "cyan": {
+            "hue": -8,
+            "saturation": 0.9,
+            "luminance": 1.03
+          },
+          "blue": {
+            "hue": -6,
+            "saturation": 0.88,
+            "luminance": 0.98
+          },
+          "magenta": {
+            "hue": 4,
+            "saturation": 0.91,
+            "luminance": 1.01
+          }
+        },
+        "lut": "fuji-classic-chrome"
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.16,
+          "size": 0.32
+        },
+        "vignette": {
+          "amount": 0.1,
+          "radius": 0.78
+        },
+        "halation": {
+          "amount": 0.025,
+          "radius": 0.22
+        }
+      },
+      "displayName": "Fuji Classic Chrome",
+      "developmentReference": {
+        "target": "Fuji Classic Chrome"
+      }
+    },
+    {
+      "id": "fuji_classic_negative",
+      "name": "Fuji Classic Negative",
+      "aperture": {
+        "preferred": 2.8,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "Fuji CN",
+        "accent": "#97A06A",
+        "dialStyle": "knurled",
+        "personality": "nostalgic",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0.57,
+        "detail": 0.56,
+        "localToneMap": 0.22,
+        "luminanceNoiseReduction": 0.19,
+        "colorNoiseReduction": 0.24
+      },
+      "tone": {
+        "exposure": -0.03,
+        "contrast": 1.2,
+        "blackPoint": 0.05,
+        "curve": [
+          [
+            0,
+            0.018
+          ],
+          [
+            0.25,
+            0.19
+          ],
+          [
+            0.5,
+            0.48
+          ],
+          [
+            0.75,
+            0.8
+          ],
+          [
+            1,
+            0.975
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 0.97,
+        "temperature": 110,
+        "tint": -3,
+        "hueBands": {
+          "red": {
+            "hue": 5,
+            "saturation": 1.03,
+            "luminance": 0.97
+          },
+          "orange": {
+            "hue": -5,
+            "saturation": 1.02,
+            "luminance": 1.04
+          },
+          "yellow": {
+            "hue": -10,
+            "saturation": 0.91,
+            "luminance": 1.01
+          },
+          "green": {
+            "hue": 9,
+            "saturation": 0.86,
+            "luminance": 0.96
+          },
+          "cyan": {
+            "hue": -7,
+            "saturation": 1.04,
+            "luminance": 0.97
+          },
+          "blue": {
+            "hue": -5,
+            "saturation": 1.07,
+            "luminance": 0.92
+          },
+          "magenta": {
+            "hue": 6,
+            "saturation": 0.96,
+            "luminance": 0.98
+          }
+        },
+        "lut": "fuji-classic-negative"
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.22,
+          "size": 0.4
+        },
+        "vignette": {
+          "amount": 0.14,
+          "radius": 0.7
+        },
+        "halation": {
+          "amount": 0.05,
+          "radius": 0.28
+        }
+      },
+      "displayName": "Fuji Classic Negative",
+      "developmentReference": {
+        "target": "Fuji Classic Negative"
+      }
+    },
+    {
+      "id": "hasselblad_natural",
+      "name": "Hasselblad Natural",
+      "aperture": {
+        "preferred": 2.8,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "Hassel",
+        "accent": "#CBBFA8",
+        "dialStyle": "medium-format",
+        "personality": "clean",
+        "markerStyle": "diamond",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0.63,
+        "detail": 0.7,
+        "localToneMap": 0.1,
+        "luminanceNoiseReduction": 0.24,
+        "colorNoiseReduction": 0.3
+      },
+      "tone": {
+        "exposure": 0.1,
+        "contrast": 1.04,
+        "blackPoint": 0.018,
+        "curve": [
+          [
+            0,
+            0.012
+          ],
+          [
+            0.25,
+            0.245
+          ],
+          [
+            0.5,
+            0.515
+          ],
+          [
+            0.75,
+            0.765
+          ],
+          [
+            1,
+            0.99
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1.02,
+        "temperature": 60,
+        "tint": 2,
+        "hueBands": {
+          "red": {
+            "hue": 0,
+            "saturation": 1.02,
+            "luminance": 1.02
+          },
+          "orange": {
+            "hue": -1,
+            "saturation": 1.03,
+            "luminance": 1.06
+          },
+          "yellow": {
+            "hue": -2,
+            "saturation": 0.98,
+            "luminance": 1.04
+          },
+          "green": {
+            "hue": 2,
+            "saturation": 0.97,
+            "luminance": 1.03
+          },
+          "cyan": {
+            "hue": -1,
+            "saturation": 0.98,
+            "luminance": 1.04
+          },
+          "blue": {
+            "hue": 1,
+            "saturation": 1.01,
+            "luminance": 1.02
+          },
+          "magenta": {
+            "hue": -1,
+            "saturation": 1.02,
+            "luminance": 1.03
+          }
+        },
+        "lut": "hasselblad-natural"
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.06,
+          "size": 0.2
+        },
+        "vignette": {
+          "amount": 0.08,
+          "radius": 0.82
+        },
+        "halation": {
+          "amount": 0.015,
+          "radius": 0.16
+        }
+      },
+      "displayName": "Hasselblad Natural",
+      "developmentReference": {
+        "target": "Hasselblad Natural"
+      }
+    },
+    {
+      "id": "cinestill_800t",
+      "name": "CineStill 800T",
+      "aperture": {
+        "preferred": 1.48,
+        "starZone": 2.8
+      },
+      "ui": {
+        "shortName": "800T",
+        "accent": "#B49BC8",
+        "dialStyle": "cinema",
+        "personality": "cinematic",
+        "markerStyle": "ring",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0.42,
+        "detail": 0.48,
+        "localToneMap": 0.16,
+        "luminanceNoiseReduction": 0.08,
+        "colorNoiseReduction": 0.12
+      },
+      "tone": {
+        "exposure": 0.06,
+        "contrast": 1.18,
+        "blackPoint": 0.042,
+        "curve": [
+          [
+            0,
+            0.03
+          ],
+          [
+            0.25,
+            0.2
+          ],
+          [
+            0.5,
+            0.49
+          ],
+          [
+            0.75,
+            0.81
+          ],
+          [
+            1,
+            0.98
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1.12,
+        "temperature": -720,
+        "tint": 10,
+        "hueBands": {
+          "red": {
+            "hue": -7,
+            "saturation": 1.18,
+            "luminance": 1.03
+          },
+          "orange": {
+            "hue": -8,
+            "saturation": 1.12,
+            "luminance": 1.05
+          },
+          "yellow": {
+            "hue": -6,
+            "saturation": 1.04,
+            "luminance": 1.02
+          },
+          "green": {
+            "hue": 10,
+            "saturation": 0.84,
+            "luminance": 0.97
+          },
+          "cyan": {
+            "hue": -12,
+            "saturation": 1.14,
+            "luminance": 0.96
+          },
+          "blue": {
+            "hue": -8,
+            "saturation": 1.2,
+            "luminance": 0.93
+          },
+          "magenta": {
+            "hue": 8,
+            "saturation": 1.16,
+            "luminance": 0.98
+          }
+        },
+        "lut": "cinestill-800t"
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.38,
+          "size": 0.56
+        },
+        "vignette": {
+          "amount": 0.24,
+          "radius": 0.62
+        },
+        "halation": {
+          "amount": 0.42,
+          "radius": 0.58
+        },
+        "starburst": {
+          "threshold": 0.82,
+          "strength": 0.3,
+          "length": 0.42,
+          "rays": 4
+        }
+      },
+      "displayName": "CineStill 800T",
+      "developmentReference": {
+        "target": "CineStill 800T"
+      }
+    },
+    {
+      "id": "absolute_hero",
+      "name": "Absolute Hero",
+      "aperture": {
+        "preferred": 1.8,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "HERO",
+        "accent": "#7FA8E8",
+        "dialStyle": "editorial",
+        "personality": "vivid",
+        "markerStyle": "dot",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0.68,
+        "detail": 0.62,
+        "localToneMap": 0.22,
+        "luminanceNoiseReduction": 0.3,
+        "colorNoiseReduction": 0.34
+      },
+      "tone": {
+        "exposure": 0.12,
+        "contrast": 1.16,
+        "blackPoint": 0.03,
+        "curve": [
+          [
+            0,
+            0.012
+          ],
+          [
+            0.25,
+            0.235
+          ],
+          [
+            0.5,
+            0.53
+          ],
+          [
+            0.75,
+            0.8
+          ],
+          [
+            1,
+            0.995
+          ]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1.2,
+        "temperature": 90,
+        "tint": 4,
+        "hueBands": {
+          "red": {
+            "hue": -3,
+            "saturation": 1.14,
+            "luminance": 1.0
+          },
+          "orange": {
+            "hue": -2,
+            "saturation": 1.1,
+            "luminance": 1.06
+          },
+          "yellow": {
+            "hue": -4,
+            "saturation": 1.06,
+            "luminance": 1.04
+          },
+          "green": {
+            "hue": 4,
+            "saturation": 0.98,
+            "luminance": 1.0
+          },
+          "cyan": {
+            "hue": -4,
+            "saturation": 1.16,
+            "luminance": 0.99
+          },
+          "blue": {
+            "hue": -2,
+            "saturation": 1.24,
+            "luminance": 0.97
+          },
+          "magenta": {
+            "hue": 3,
+            "saturation": 1.14,
+            "luminance": 1.0
+          }
+        },
+        "lut": "absolute-hero",
+        "lutIntensity": 0.85
+      },
+      "texture": {
+        "grain": {
+          "amount": 0.06,
+          "size": 0.2
+        },
+        "vignette": {
+          "amount": 0.1,
+          "radius": 0.76
+        },
+        "halation": {
+          "amount": 0.035,
+          "radius": 0.24
+        },
+        "starburst": {
+          "threshold": 0.86,
+          "strength": 0.14,
+          "length": 0.3,
+          "rays": 4
+        }
+      },
+      "displayName": "Absolute Hero",
+      "developmentReference": {
+        "target": "PixCake CameraRecipe 140501 direction (vivid glossy urban portrait); original approximation, no commercial data measured",
+        "analysis": "相机模拟分析/01_分析报告"
+      }
+    }
+  ]
+};
+
+// ---------- state ----------
+const P = { // 当前参数，字段名与 camera-profiles.json 完全一致
+  tone:{ exposure:0, contrast:1, blackPoint:0, curve:[[0,0],[0.25,0.25],[0.5,0.5],[0.75,0.75],[1,1]] },
+  color:{ saturation:1, temperature:0, tint:0, lutIntensity:1,
+    hueBands:Object.fromEntries(["red","orange","yellow","green","cyan","blue","magenta"].map(k=>[k,{hue:0,saturation:1,luminance:1}])) },
+  texture:{ grain:{amount:0,size:0.25}, vignette:{amount:0,radius:0.75}, halation:{amount:0,radius:0.2} }
+};
+let lutName = null;
+let srcImg=null, refImg=null;      // HTMLImageElement
+let srcTex=null, refTex=null, lutTex=null, curveTex=null;
+let lutDim=0, lutData=null;
+let splitX=0.5, cmpMode="";
+const glCanvas = document.getElementById("gl");
+const gl = glCanvas.getContext("webgl2", {preserveDrawingBuffer:true});
+if (!gl) { document.getElementById("hint").textContent = "此浏览器不支持 WebGL2，请用新版 Chrome/Edge。"; }
+
+// ---------- shader ----------
+const VS = `#version 300 es
+in vec2 aPos; out vec2 vUV;
+void main(){ vUV = aPos*0.5+0.5; vUV.y = 1.0-vUV.y; gl_Position = vec4(aPos,0.,1.); }`;
+
+const FS = `#version 300 es
+precision highp float;
+in vec2 vUV; out vec4 frag;
+uniform sampler2D uImg, uOther, uCurve;
+uniform highp sampler3D uLUT;
+uniform vec2 uRes;
+uniform float uExposure,uContrast,uBlack,uSat,uTemp,uTint,uLutAmt;
+uniform float uVigAmt,uVigRad,uGrainAmt,uGrainSize,uHalAmt,uHalRad;
+uniform int uHasLUT,uHasOther,uBandsOn;
+uniform float uBandH[7], uBandS[7], uBandL[7];
+uniform float uLutN;
+uniform float uSplit;
+
+vec3 rgb2hsl(vec3 c){
+  float mx=max(c.r,max(c.g,c.b)), mn=min(c.r,min(c.g,c.b)), l=(mx+mn)*0.5, h=0.0, s=0.0, d=mx-mn;
+  if(d>1e-5){
+    s = l>0.5 ? d/(2.0-mx-mn) : d/(mx+mn);
+    if(mx==c.r) h = (c.g-c.b)/d + (c.g<c.b?6.0:0.0);
+    else if(mx==c.g) h = (c.b-c.r)/d + 2.0;
+    else h = (c.r-c.g)/d + 4.0;
+    h /= 6.0;
+  }
+  return vec3(h,s,l);
+}
+float hue2rgb(float p,float q,float t){
+  if(t<0.0)t+=1.0; if(t>1.0)t-=1.0;
+  if(t<1.0/6.0) return p+(q-p)*6.0*t;
+  if(t<0.5) return q;
+  if(t<2.0/3.0) return p+(q-p)*(2.0/3.0-t)*6.0;
+  return p;
+}
+vec3 hsl2rgb(vec3 h){
+  if(h.y<=1e-5) return vec3(h.z);
+  float q = h.z<0.5 ? h.z*(1.0+h.y) : h.z+h.y-h.z*h.y;
+  float p = 2.0*h.z-q;
+  return vec3(hue2rgb(p,q,h.x+1.0/3.0), hue2rgb(p,q,h.x), hue2rgb(p,q,h.x-1.0/3.0));
+}
+int bandOf(float hDeg){
+  hDeg = mod(hDeg,360.0);
+  if(hDeg<15.0||hDeg>=345.0) return 0;      // red
+  if(hDeg<45.0)  return 1;                  // orange
+  if(hDeg<70.0)  return 2;                  // yellow
+  if(hDeg<165.0) return 3;                  // green
+  if(hDeg<200.0) return 4;                  // cyan
+  if(hDeg<260.0) return 5;                  // blue
+  return 6;                                 // magenta
+}
+float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+void main(){
+  vec3 c = texture(uImg, vUV).rgb;
+  // tone
+  c *= exp2(uExposure);
+  c = (c-0.5)*uContrast+0.5;
+  c = (c-uBlack)/(1.0-uBlack);
+  c = vec3(texture(uCurve,vec2(clamp(c.r,0.001,0.999),0.5)).r,
+           texture(uCurve,vec2(clamp(c.g,0.001,0.999),0.5)).r,
+           texture(uCurve,vec2(clamp(c.b,0.001,0.999),0.5)).r);
+  // color
+  float lum = dot(c, vec3(0.2126,0.7152,0.0722));
+  c = mix(vec3(lum), c, uSat);
+  float t = uTemp/6500.0;
+  c *= vec3(1.0+0.30*t, 1.0+0.05*t, 1.0-0.30*t);
+  c.g *= 1.0-0.006*uTint; c.r += 0.0015*uTint; c.b += 0.0015*uTint;
+  if(uBandsOn==1){
+    vec3 hsl = rgb2hsl(clamp(c,0.0,1.0));
+    float hDeg = hsl.x*360.0;
+    float s0 = hsl.s, l0 = hsl.z;
+    // 相邻分区平滑：对每个分区按 hue 距离取权重
+    vec3 acc = vec3(0.0); float wsum=0.0;
+    for(int i=0;i<7;i++){
+      float center = float(i)*45.0 + (i==0?0.0:0.0);
+      float centers[7]; centers[0]=0.0; centers[1]=30.0; centers[2]=57.0; centers[3]=117.0; centers[4]=182.0; centers[5]=230.0; centers[6]=302.0;
+      float d = abs(hDeg-centers[i]); d = min(d, 360.0-d);
+      float w = max(0.0, 1.0-d/45.0);
+      float hh = hsl.x + uBandH[i]/360.0;
+      float ss = clamp(s0*uBandS[i],0.0,1.0);
+      float ll = clamp(l0*uBandL[i],0.0,1.0);
+      acc += w * hsl2rgb(vec3(fract(hh),ss,ll));
+      wsum += w;
+    }
+    if(wsum>0.001) c = acc/wsum;
+  }
+  c = clamp(c,0.0,1.0);
+  // LUT (sRGB 空间，与 CIColorCubeWithColorSpace 一致)
+  if(uHasLUT==1){
+    vec3 lc = c*(uLutN-1.0)/uLutN + 0.5/uLutN;
+    vec3 l = texture(uLUT, lc).rgb;
+    c = mix(c, l, uLutAmt);
+  }
+  // vignette
+  if(uVigAmt>0.001){
+    vec2 p = vUV-0.5; p.x *= uRes.x/uRes.y;
+    float d = length(p)*1.6;
+    float s = 1.6*uVigRad;
+    c *= 1.0 - uVigAmt*2.0*smoothstep(s*0.55, s*0.55+0.7, d);
+  }
+  // halation（环形采样近似高斯）
+  if(uHalAmt>0.001){
+    vec3 sum = vec3(0.0);
+    float rad = 2.0 + uHalRad*38.0;
+    vec2 px = rad/uRes;
+    for(int i=0;i<12;i++){
+      float a = float(i)/12.0*6.28318;
+      vec2 off = vec2(cos(a),sin(a))*px;
+      vec3 s2 = texture(uImg, clamp(vUV+off,vec2(0.0),vec2(1.0))).rgb;
+      vec3 hi = clamp((s2-0.5)*3.0-0.5, 0.0, 1.0) * vec3(1.0,0.35,0.12);
+      sum += hi;
+    }
+    vec3 glow = (sum/12.0)*(uHalAmt*0.65)*4.0;
+    c = 1.0-(1.0-clamp(c,0.0,1.0))*(1.0-clamp(glow,0.0,1.0));
+  }
+  // grain（软光混合）
+  if(uGrainAmt>0.001){
+    float scale = 0.5+uGrainSize*3.5;
+    vec2 gp = floor(vUV*uRes/max(scale*2.0,1.0));
+    float n = hash(gp)-0.5;
+    float nc = n*(1.0+uGrainAmt*2.0)*0.5+0.5;
+    vec3 soft = mix(2.0*c*nc, 1.0-2.0*(1.0-c)*(1.0-nc), step(0.5,nc));
+    c = mix(c, soft, uGrainAmt*0.35);
+  }
+  c = clamp(c,0.0,1.0);
+  // 对比分割
+  if(uHasOther==1 && vUV.x < uSplit){
+    c = texture(uOther, vUV).rgb;
+  }
+  frag = vec4(c,1.0);
+}`;
+
+function compile(type,src){ const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s)); return s; }
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER,VS));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER,FS));
+gl.linkProgram(prog);
+if(!gl.getProgramParameter(prog,gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+const loc = gl.getAttribLocation(prog,"aPos");
+gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+const U = n => gl.getUniformLocation(prog,n);
+const uni = {};
+["uImg","uOther","uCurve","uLUT","uRes","uExposure","uContrast","uBlack","uSat","uTemp","uTint","uLutAmt",
+ "uVigAmt","uVigRad","uGrainAmt","uGrainSize","uHalAmt","uHalRad","uHasLUT","uHasOther","uBandsOn",
+ "uBandH[0]","uBandS[0]","uBandL[0]","uSplit","uLutN"].forEach(n=>uni[n.replace("[0]","")]=U(n));
+
+// ---------- textures ----------
+function makeTex(unit, tex){ if(!tex) tex=gl.createTexture(); gl.activeTexture(gl.TEXTURE0+unit); gl.bindTexture(gl.TEXTURE_2D,tex);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE); return tex; }
+function imgToTex(img,unit,tex){ tex=makeTex(unit,tex); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,img); return tex; }
+
+// 5 点曲线 → 256 LUT（单调三次插值，与 CIToneCurve 观感对齐）
+function buildCurveLUT(pts){
+  const xs=pts.map(p=>p[0]), ys=pts.map(p=>p[1]);
+  const data=new Uint8Array(256*4);
+  for(let i=0;i<256;i++){
+    const x=i/255;
+    let k=0; while(k<xs.length-2 && x>xs[k+1]) k++;
+    const h=xs[k+1]-xs[k], t=(x-xs[k])/h;
+    // Catmull-Rom（端点用相邻点）
+    const p0=ys[Math.max(0,k-1)], p1=ys[k], p2=ys[k+1], p3=ys[Math.min(ys.length-1,k+2)];
+    let y = 0.5*((2*p1)+(-p0+p2)*t+(2*p0-5*p1+4*p2-p3)*t*t+(-p0+3*p1-3*p2+p3)*t*t*t);
+    y=Math.max(0,Math.min(1,y));
+    data[i*4]=data[i*4+1]=data[i*4+2]=Math.round(y*255); data[i*4+3]=255;
+  }
+  curveTex=makeTex(2,curveTex);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,256,1,0,gl.RGBA,gl.UNSIGNED_BYTE,data);
+}
+
+// ---------- UI ----------
+const $=id=>document.getElementById(id);
+const SLIDERS=[
+  ["exposure","tone.exposure"],["contrast","tone.contrast"],["blackPoint","tone.blackPoint"],
+  ["saturation","color.saturation"],["temperature","color.temperature"],["tint","color.tint"],["lutIntensity","color.lutIntensity"],
+  ["vigAmt","texture.vignette.amount"],["vigRad","texture.vignette.radius"],
+  ["grainAmt","texture.grain.amount"],["grainSize","texture.grain.size"],
+  ["halAmt","texture.halation.amount"],["halRad","texture.halation.radius"]];
+function get(path){ return path.split(".").reduce((o,k)=>o[k],P); }
+function set(path,v){ const ks=path.split("."); const o=ks.slice(0,-1).reduce((o,k)=>o[k],P); o[ks[ks.length-1]]=v; }
+const FMT = { temperature:v=>(v>0?"+":"")+v, exposure:v=>(v>0?"+":"")+v.toFixed(2), tint:v=>(v>0?"+":"")+v };
+function refreshSliders(){
+  for(const [id,path] of SLIDERS){ $(id).value=get(path); $("v_"+id).textContent=(FMT[path.split(".").pop()]||(v=>v.toFixed(2)))(get(path)); }
+  refreshBands();
+}
+const BAND_KEYS=["red","orange","yellow","green","cyan","blue","magenta"];
+const BAND_CN={red:"红",orange:"橙",yellow:"黄",green:"绿",cyan:"青",blue:"蓝",magenta:"品红"};
+function refreshBands(){
+  BAND_KEYS.forEach((k,i)=>{
+    ["hue","saturation","luminance"].forEach(f=>{
+      const el=document.querySelector(`[data-band="${k}"][data-f="${f}"]`);
+      if(el) el.value=P.color.hueBands[k][f];
+    });
+  });
+}
+function buildBands(){
+  const box=$("bands"); box.innerHTML="";
+  box.insertAdjacentHTML("beforeend",`<div class="band" style="grid-template-columns:52px 1fr 1fr 1fr"><span></span><span>色相</span><span>饱和</span><span>明度</span></div>`);
+  for(const k of BAND_KEYS){
+    const b=P.color.hueBands[k];
+    box.insertAdjacentHTML("beforeend",`<div class="band"><span>${BAND_CN[k]}</span>
+      <input type="range" min="-30" max="30" step="1" data-band="${k}" data-f="hue">
+      <input type="range" min="0.5" max="1.6" step="0.01" data-band="${k}" data-f="saturation">
+      <input type="range" min="0.5" max="1.6" step="0.01" data-band="${k}" data-f="luminance"></div>`);
+  }
+  box.querySelectorAll("input").forEach(el=>{
+    el.addEventListener("input",()=>{ P.color.hueBands[el.dataset.band][el.dataset.f]=parseFloat(el.value); onParam(); });
+  });
+  refreshBands();
+}
+for(const [id,path] of SLIDERS){
+  $(id).addEventListener("input",e=>{ set(path,parseFloat(e.target.value)); onParam(); });
+}
+
+// 曲线编辑器
+const cv=$("curveBox"), cx=cv.getContext("2d");
+let dragPt=-1;
+function curveXY(p){ const w=cv.width,h=cv.height; return [p[0]*(w-20)+10, h-10-p[1]*(h-20)]; }
+function invXY(mx,my){ const w=cv.width,h=cv.height; return [(mx-10)/(w-20), (h-10-my)/(h-20)]; }
+function drawCurve(){
+  cx.clearRect(0,0,cv.width,cv.height);
+  cx.strokeStyle="#2e2e30"; cx.strokeRect(10,10,cv.width-20,cv.height-20);
+  cx.strokeStyle="#3a3a3c";
+  for(let i=1;i<4;i++){ const t=10+i*(cv.width-20)/4; cx.beginPath(); cx.moveTo(t,10); cx.lineTo(t,cv.height-10); cx.stroke();
+    const u=10+i*(cv.height-20)/4; cx.beginPath(); cx.moveTo(10,u); cx.lineTo(cv.width-10,u); cx.stroke(); }
+  // 平滑曲线
+  const lut=curveSample();
+  cx.strokeStyle="#d9b98a"; cx.lineWidth=2; cx.beginPath();
+  for(let i=0;i<256;i++){ const [px,py]=curveXY([i/255,lut[i]]); i?cx.lineTo(px,py):cx.moveTo(px,py); }
+  cx.stroke(); cx.lineWidth=1;
+  P.tone.curve.forEach((p,i)=>{ const [px,py]=curveXY(p);
+    cx.fillStyle=i===dragPt?"#fff":"#d9b98a"; cx.beginPath(); cx.arc(px,py,5,0,7); cx.fill(); });
+}
+function curveSample(){ // 重用 buildCurveLUT 的插值，返回 256 浮点
+  const xs=P.tone.curve.map(p=>p[0]), ys=P.tone.curve.map(p=>p[1]);
+  const out=new Float32Array(256);
+  for(let i=0;i<256;i++){
+    const x=i/255; let k=0; while(k<xs.length-2&&x>xs[k+1])k++;
+    const t=(x-xs[k])/(xs[k+1]-xs[k]);
+    const p0=ys[Math.max(0,k-1)],p1=ys[k],p2=ys[k+1],p3=ys[Math.min(ys.length-1,k+2)];
+    let y=0.5*((2*p1)+(-p0+p2)*t+(2*p0-5*p1+4*p2-p3)*t*t+(-p0+3*p1-3*p2+p3)*t*t*t);
+    out[i]=Math.max(0,Math.min(1,y));
+  }
+  return out;
+}
+cv.addEventListener("pointerdown",e=>{
+  const r=cv.getBoundingClientRect(), mx=(e.clientX-r.left)*cv.width/r.width, my=(e.clientY-r.top)*cv.height/r.height;
+  dragPt=-1; let best=18;
+  P.tone.curve.forEach((p,i)=>{ const [px,py]=curveXY(p); const d=Math.hypot(px-mx,py-my); if(d<best){best=d;dragPt=i;} });
+  if(dragPt>=0) cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener("pointermove",e=>{
+  if(dragPt<0) return;
+  const r=cv.getBoundingClientRect(), mx=(e.clientX-r.left)*cv.width/r.width, my=(e.clientY-r.top)*cv.height/r.height;
+  let [x,y]=invXY(mx,my); x=Math.max(0,Math.min(1,x)); y=Math.max(0,Math.min(1,y));
+  const i=dragPt, xs=P.tone.curve.map(p=>p[0]);
+  if(i===0)x=0; if(i===4)x=1;
+  x=Math.max(xs[i-1]??0, Math.min(xs[i+1]??1, x));
+  P.tone.curve[i]=[Math.round(x*1000)/1000, Math.round(y*1000)/1000];
+  drawCurve(); onParam(true);
+});
+cv.addEventListener("pointerup",()=>dragPt=-1);
+$("btnCurveReset").onclick=()=>{ P.tone.curve=[[0,0],[0.25,0.25],[0.5,0.5],[0.75,0.75],[1,1]]; drawCurve(); onParam(); };
+
+// ---------- 渲染 ----------
+function resizeCanvas(){
+  const box=$("viewer"); if(!srcImg) return;
+  const s=Math.min(box.clientWidth/srcImg.width, box.clientHeight/srcImg.height);
+  glCanvas.style.width=(srcImg.width*s)+"px"; glCanvas.style.height=(srcImg.height*s)+"px";
+  glCanvas.width=Math.round(srcImg.width*Math.min(s,1)); glCanvas.height=Math.round(srcImg.height*Math.min(s,1));
+  gl.viewport(0,0,glCanvas.width,glCanvas.height);
+}
+function render(){
+  if(!srcImg) return;
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,srcTex); gl.uniform1i(uni.uImg,0);
+  gl.activeTexture(gl.TEXTURE1);
+  let hasOther=0;
+  if(cmpMode==="ref"&&refTex){ gl.bindTexture(gl.TEXTURE_2D,refTex); hasOther=1; }
+  else if(cmpMode==="src"){ gl.bindTexture(gl.TEXTURE_2D,srcTex); hasOther=1; }
+  else { gl.bindTexture(gl.TEXTURE_2D,refTex||srcTex); }
+  gl.uniform1i(uni.uOther,1);
+  gl.uniform1i(uni.uHasOther, hasOther);
+  gl.uniform1i(uni.uCurve,2);
+  gl.uniform1i(uni.uLUT,3);
+  gl.uniform1i(uni.uHasLUT, lutTex?1:0);
+  gl.uniform1f(uni.uLutN, lutDim||2);
+  gl.uniform2f(uni.uRes, glCanvas.width, glCanvas.height);
+  gl.uniform1f(uni.uExposure,P.tone.exposure); gl.uniform1f(uni.uContrast,P.tone.contrast); gl.uniform1f(uni.uBlack,P.tone.blackPoint);
+  gl.uniform1f(uni.uSat,P.color.saturation); gl.uniform1f(uni.uTemp,P.color.temperature); gl.uniform1f(uni.uTint,P.color.tint);
+  gl.uniform1f(uni.uLutAmt,P.color.lutIntensity);
+  gl.uniform1f(uni.uVigAmt,P.texture.vignette.amount); gl.uniform1f(uni.uVigRad,P.texture.vignette.radius);
+  gl.uniform1f(uni.uGrainAmt,P.texture.grain.amount); gl.uniform1f(uni.uGrainSize,P.texture.grain.size);
+  gl.uniform1f(uni.uHalAmt,P.texture.halation.amount); gl.uniform1f(uni.uHalRad,P.texture.halation.radius);
+  const bandsOn = BAND_KEYS.some(k=>P.color.hueBands[k].hue!==0||P.color.hueBands[k].saturation!==1||P.color.hueBands[k].luminance!==1);
+  gl.uniform1i(uni.uBandsOn, bandsOn?1:0);
+  const bh=new Float32Array(7), bs=new Float32Array(7), bl=new Float32Array(7);
+  BAND_KEYS.forEach((k,i)=>{ bh[i]=P.color.hueBands[k].hue; bs[i]=P.color.hueBands[k].saturation; bl[i]=P.color.hueBands[k].luminance; });
+  gl.uniform1fv(uni.uBandH, bh); gl.uniform1fv(uni.uBandS, bs); gl.uniform1fv(uni.uBandL, bl);
+  gl.uniform1f(uni.uSplit, splitX);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+}
+let dirty=false;
+function onParam(skipCurve){ buildCurveLUT(P.tone.curve); refreshSliders(); exportJSON(); if(!skipCurve) drawCurve(); if(!dirty){ dirty=true; requestAnimationFrame(()=>{ dirty=false; render(); }); } }
+
+// ---------- 文件上传 ----------
+function pickFile(accept,cb){ const i=document.createElement("input"); i.type="file"; i.accept=accept;
+  i.onchange=()=>{ if(i.files[0]) cb(i.files[0]); }; i.click(); }
+$("btnSrc").onclick=()=>pickFile("image/*",f=>{
+  const img=new Image(); img.onload=()=>{ srcImg=img; srcTex=imgToTex(img,0,srcTex);
+    $("hint").style.display="none"; resizeCanvas(); onParam(); }; img.src=URL.createObjectURL(f); });
+$("btnRef").onclick=()=>pickFile("image/*",f=>{
+  const img=new Image(); img.onload=()=>{ refImg=img; refTex=imgToTex(img,1,refTex); onParam(); }; img.src=URL.createObjectURL(f); });
+$("btnLut").onclick=()=>pickFile(".cube",f=>{
+  const rd=new FileReader(); rd.onload=()=>{
+    const text=rd.result;
+    let dim=0, flat=[];
+    for(const line of text.split(/\r?\n/)){
+      const s=line.trim(); if(!s||s.startsWith("#")) continue;
+      const tk=s.split(/\s+/);
+      if(tk[0].toUpperCase()==="LUT_3D_SIZE"){ dim=parseInt(tk[1]); continue; }
+      if(/^(TITLE|DOMAIN_|LUT_1D)/i.test(tk[0])) continue;
+      if(tk.length>=3&&!isNaN(parseFloat(tk[0]))) flat.push(parseFloat(tk[0]),parseFloat(tk[1]),parseFloat(tk[2]));
+    }
+    if(!dim||flat.length!==dim*dim*dim*3){ alert("LUT 解析失败（期望 3D cube）"); return; }
+    // .cube: r 变化最快 → 3D 纹理 (x=r,y=g,z=b)。用 RGBA8：WebGL2 核心支持 8 位纹理线性过滤
+    const data=new Uint8Array(dim*dim*dim*4);
+    for(let i=0;i<dim*dim*dim;i++){
+      data[i*4]=Math.round(Math.max(0,Math.min(1,flat[i*3]))*255);
+      data[i*4+1]=Math.round(Math.max(0,Math.min(1,flat[i*3+1]))*255);
+      data[i*4+2]=Math.round(Math.max(0,Math.min(1,flat[i*3+2]))*255);
+      data[i*4+3]=255;
+    }
+    lutDim=dim;
+    const tex=gl.createTexture();
+    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_3D,tex);
+    gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_MIN_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_WRAP_R,gl.CLAMP_TO_EDGE);
+    gl.texImage3D(gl.TEXTURE_3D,0,gl.RGBA8,dim,dim,dim,0,gl.RGBA,gl.UNSIGNED_BYTE,data);
+    lutTex=tex; $("lutName").textContent="LUT: "+f.name; lutName=f.name.replace(/\.cube$/i,"");
+    onParam();
+  };
+  rd.readAsText(f); });
+
+// ---------- 预设 ----------
+const sel=$("preset");
+(PROFILES?PROFILES.profiles:[]).forEach(p=>{
+  const o=document.createElement("option"); o.value=p.id; o.textContent=p.displayName||p.name; sel.appendChild(o);
+});
+sel.onchange=()=>{
+  const p=(PROFILES?PROFILES.profiles:[]).find(x=>x.id===sel.value); if(!p) return;
+  P.tone=JSON.parse(JSON.stringify(p.tone));
+  P.color=JSON.parse(JSON.stringify(p.color)); P.color.lutIntensity=p.color.lutIntensity??1;
+  P.texture=JSON.parse(JSON.stringify(p.texture));
+  // 自动找仓库 LUT 提示
+  $("lutName").textContent = "请在 assets/LUTs/ 里找 "+p.color.lut+".cube 并用「③ 加载 LUT」载入";
+  lutName=p.color.lut;
+  onParam();
+};
+
+// ---------- 自动初调 ----------
+function avgOf(img){
+  const c=document.createElement("canvas"); const S=64; c.width=S;c.height=S;
+  const g=c.getContext("2d"); g.drawImage(img,0,0,S,S);
+  const d=g.getImageData(0,0,S,S).data;
+  let r=0,gg=0,b=0; for(let i=0;i<d.length;i+=4){ r+=d[i];gg+=d[i+1];b+=d[i+2]; }
+  const n=d.length/4; return [r/n/255,gg/n/255,b/n/255];
+}
+$("btnAuto").onclick=()=>{
+  if(!srcImg||!refImg){ alert("需要先上传原图和理想参考图"); return; }
+  const a=avgOf(srcImg), b=avgOf(refImg);
+  const la=a[0]*0.2126+a[1]*0.7152+a[2]*0.0722, lb=b[0]*0.2126+b[1]*0.7152+b[2]*0.0722;
+  P.tone.exposure=Math.max(-2,Math.min(2,Math.log2(Math.max(lb,0.02)/Math.max(la,0.02))));
+  P.color.temperature=Math.max(-3000,Math.min(3000,Math.round(2600*Math.log2((b[0]/Math.max(b[2],0.02))/(a[0]/Math.max(a[2],0.02))))));
+  P.color.saturation=Math.max(0,Math.min(2, P.color.saturation * (Math.max(...b)-Math.min(...b))/Math.max(Math.max(...a)-Math.min(...a),0.05)));
+  onParam();
+};
+
+// ---------- 对比 ----------
+$("cmpMode").onchange=e=>{ cmpMode=e.target.value; $("splitHandle").style.display=cmpMode?"block":"none"; $("splitLabel").style.display=cmpMode?"block":"none";
+  if(cmpMode) $("splitHandle").style.left="50%";
+  onParam(); };
+let dragging=false;
+$("splitHandle").addEventListener("pointerdown",e=>{dragging=true;e.target.setPointerCapture(e.pointerId);});
+window.addEventListener("pointermove",e=>{
+  if(!dragging) return;
+  const r=glCanvas.getBoundingClientRect();
+  splitX=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
+  $("splitHandle").style.left=(r.left+splitX*r.width-$("viewer").getBoundingClientRect().left)+"px";
+  $("splitLabel").textContent = cmpMode==="ref"?"左：理想参考 | 右：当前效果":"左：我的原图 | 右：当前效果";
+  render();
+});
+window.addEventListener("pointerup",()=>dragging=false);
+window.addEventListener("keydown",e=>{ if(e.code==="Space"&&cmpMode){ splitX=0; render(); e.preventDefault(); } });
+window.addEventListener("keyup",e=>{ if(e.code==="Space"&&cmpMode){ splitX=0.5; render(); } });
+window.addEventListener("resize",()=>{ resizeCanvas(); render(); });
+
+// ---------- 导出 ----------
+function exportJSON(){
+  if(!srcImg){ return; }
+  $("exportEmpty").style.display="none"; $("exportBox").style.display="block";
+  const out={
+    tone: P.tone,
+    color: { ...P.color, lut: lutName || "(填相机 Profile 原有的 lut 名)" },
+    texture: P.texture
+  };
+  out.tone.curve = P.tone.curve.map(p=>[Math.round(p[0]*1000)/1000, Math.round(p[1]*1000)/1000]);
+  $("jsonOut").value=JSON.stringify(out,null,2);
+}
+$("btnCopy").onclick=async()=>{ await navigator.clipboard.writeText($("jsonOut").value); $("btnCopy").textContent="已复制 ✓"; setTimeout(()=>$("btnCopy").textContent="复制 JSON",1200); };
+
+// ---------- init ----------
+buildBands(); refreshSliders(); drawCurve();
+if(!gl) throw new Error("no webgl2");
+</script>
+</body>
+</html>
