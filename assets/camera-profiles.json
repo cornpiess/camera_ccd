@@ -1031,6 +1031,136 @@
         "target": "PixCake CameraRecipe 140501 direction (vivid glossy urban portrait); original approximation, no commercial data measured",
         "analysis": "相机模拟分析/01_分析报告"
       }
+    },
+    {
+      "id": "panasonic_cneg_std",
+      "name": "CNEGSTD",
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "CNEG",
+        "accent": "#6E8FB4",
+        "dialStyle": "compact",
+        "personality": "soft",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
+        "curve": [
+          [0, 0],
+          [0.25, 0.25],
+          [0.5, 0.5],
+          [0.75, 0.75],
+          [1, 1]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": { "hue": 0, "saturation": 1, "luminance": 1 },
+          "orange": { "hue": 0, "saturation": 1, "luminance": 1 },
+          "yellow": { "hue": 0, "saturation": 1, "luminance": 1 },
+          "green": { "hue": 0, "saturation": 1, "luminance": 1 },
+          "cyan": { "hue": 0, "saturation": 1, "luminance": 1 },
+          "blue": { "hue": 0, "saturation": 1, "luminance": 1 },
+          "magenta": { "hue": 0, "saturation": 1, "luminance": 1 }
+        },
+        "lut": "panasonic-cneg-std",
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": { "amount": 0, "size": 0.25 },
+        "vignette": { "amount": 0, "radius": 0.75 },
+        "halation": { "amount": 0, "radius": 0.2 }
+      },
+      "displayName": "CNEGSTD",
+      "developmentReference": {
+        "target": "LUT-only profile: Panasonic V-Log pipeline -> Fujifilm Classic Neg, baked for Standard (display-referred) input. LUT: V-Log Alchemy Samples/Panasonic-Standard/Generated-LUTs/CNEGSTD.cube (Apache-2.0, github.com/shenmintao/V-Log-Alchemy), S1RII v1.6 global fit, 33pt",
+        "lutSource": "https://github.com/shenmintao/V-Log-Alchemy",
+        "lutLicense": "Apache-2.0",
+        "inputSpace": "LUMIXPHOTOSTYLE STD (standard photo, not V-Log)"
+      }
+    },
+    {
+      "id": "panasonic_leicastd",
+      "name": "LEICASTD",
+      "aperture": {
+        "preferred": 4,
+        "starZone": 4
+      },
+      "ui": {
+        "shortName": "LCLS",
+        "accent": "#B4554D",
+        "dialStyle": "compact",
+        "personality": "crisp",
+        "markerStyle": "line",
+        "labelStyle": "minimal",
+        "glassTintStrength": 0.06
+      },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
+        "curve": [
+          [0, 0],
+          [0.25, 0.25],
+          [0.5, 0.5],
+          [0.75, 0.75],
+          [1, 1]
+        ],
+        "exposureBias": 0
+      },
+      "color": {
+        "saturation": 1,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": { "hue": 0, "saturation": 1, "luminance": 1 },
+          "orange": { "hue": 0, "saturation": 1, "luminance": 1 },
+          "yellow": { "hue": 0, "saturation": 1, "luminance": 1 },
+          "green": { "hue": 0, "saturation": 1, "luminance": 1 },
+          "cyan": { "hue": 0, "saturation": 1, "luminance": 1 },
+          "blue": { "hue": 0, "saturation": 1, "luminance": 1 },
+          "magenta": { "hue": 0, "saturation": 1, "luminance": 1 }
+        },
+        "lut": "panasonic-leicastd",
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": { "amount": 0, "size": 0.25 },
+        "vignette": { "amount": 0, "radius": 0.75 },
+        "halation": { "amount": 0, "radius": 0.2 }
+      },
+      "displayName": "LEICASTD",
+      "developmentReference": {
+        "target": "LUT-only profile: Panasonic V-Log pipeline -> Leica Classic, baked for Standard (display-referred) input. LUT: V-Log Alchemy Samples/Panasonic-Standard/Generated-LUTs/LEICASTD.cube (Apache-2.0, github.com/shenmintao/V-Log-Alchemy), S1RII v1.6 global fit, 33pt",
+        "lutSource": "https://github.com/shenmintao/V-Log-Alchemy",
+        "lutLicense": "Apache-2.0",
+        "inputSpace": "LUMIXPHOTOSTYLE STD (standard photo, not V-Log)"
+      }
     }
   ]
 }

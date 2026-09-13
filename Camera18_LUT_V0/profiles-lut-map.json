@@ -56,6 +56,18 @@
       "displayName": "Absolute Hero (PixCake 140501 direction)",
       "lut": "luts/absolute-hero.cube",
       "notes": "Vivid glossy portrait direction: bright clean mids, cobalt-blue boost, luminous warm skin, cool shadows, warm highlight glow. Generator: generate-absolute-hero.js."
+    },
+    {
+      "id": "panasonic_cneg_std",
+      "displayName": "CNEGSTD",
+      "lut": "luts/panasonic-cneg-std.cube",
+      "notes": "LUT-only profile (all other stages neutral). Panasonic S1RII v1.6 Standard -> V-Log -> Fujifilm Classic Neg baked single 33pt LUT. Source: V-Log Alchemy (github.com/shenmintao/V-Log-Alchemy), Apache-2.0. Input space: standard display-referred photo (LUMIXPHOTOSTYLE STD), NOT V-Log."
+    },
+    {
+      "id": "panasonic_leicastd",
+      "displayName": "LEICASTD",
+      "lut": "luts/panasonic-leicastd.cube",
+      "notes": "LUT-only profile (all other stages neutral). Panasonic S1RII v1.6 Standard -> V-Log -> Leica Classic baked single 33pt LUT. Source: V-Log Alchemy (github.com/shenmintao/V-Log-Alchemy), Apache-2.0. Input space: standard display-referred photo (LUMIXPHOTOSTYLE STD), NOT V-Log."
     }
   ]
 }
