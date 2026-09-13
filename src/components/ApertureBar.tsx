@@ -23,13 +23,16 @@ export interface ApertureBarProps {
   readonly demoMode?: boolean;
   /** Camera identity accent — pointer line, value and iris rim wear the camera skin. */
   readonly accent?: string;
+  /**
+   * Developer-mode extra: show the side-view lens cross-section above the tick scale.
+   * OFF by default — the tick scale alone is the control.
+   */
+  readonly sideViewEnabled?: boolean;
 }
 
 const BAR_HEIGHT = 96;
-/** Top half of the strip: the side-view lens cross-section ("cut the lens open"). */
+/** Height of the side-view cross-section row when enabled (developer mode). */
 const SIDE_H = 40;
-/** Bottom half of the strip: the tick scale — THE aperture control. */
-const SCALE_H = BAR_HEIGHT - SIDE_H;
 const TRACK_WIDTH = 252;
 /** Drag distance that spans the whole range. */
 const FULL_DRAG_PX = 170;
@@ -67,8 +70,13 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   onApertureChange,
   demoMode = false,
   accent,
+  sideViewEnabled = false,
 }) => {
   const { width: screenWidth } = useWindowDimensions();
+  // Tick scale is the control and owns the whole strip; the side view, when enabled
+  // (developer mode), takes a 40pt row above it.
+  const topInset = sideViewEnabled ? SIDE_H : 8;
+  const scaleH = BAR_HEIGHT - topInset;
   const lo = Math.min(minAperture, maxAperture);
   const hi = Math.max(minAperture, maxAperture);
   const logLo = toLog(lo);
@@ -180,25 +188,25 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
 
   return (
     // Whole-bar drag surface (pointerEvents auto): the strip BETWEEN the finder and the
-    // shutter is the entire aperture control — tick scale in the bottom half, side-view
-    // cross-section in the top half. Nothing ever floats over the finder or the focal
-    // chips. Children that must not grab touches are pointerEvents="none".
+    // shutter is the aperture control — the tick scale owns it end to end; the side-view
+    // cross-section, when enabled in developer mode, takes the row above the scale.
+    // Children that must not grab touches are pointerEvents="none".
     <View style={styles.bar} pointerEvents="auto" {...(interactive ? panResponder.panHandlers : {})}>
-      {/* Side-view cross-section: top half of the strip, live with the ring value */}
-      {interactive ? (
-        <View style={[styles.sideSlot, { left: sideLeft, width: sideWidth }]} pointerEvents="none">
+      {/* Side-view cross-section: developer-mode only, row above the scale */}
+      {interactive && sideViewEnabled ? (
+        <View style={[styles.sideSlot, { left: sideLeft, top: 1, height: SIDE_H - 4, width: sideWidth }]} pointerEvents="none">
           <ApertureSideView openness={openness} accent={accent} label={formatF(currentAperture)} width={sideWidth} />
         </View>
       ) : null}
 
       {/* Iris: the physical diaphragm (f/1.4 → big hole; f/4 → tiny hole) */}
-      <View style={[styles.iris, { left: irisLeft }]} pointerEvents="none">
+      <View style={[styles.iris, { left: irisLeft, top: topInset + (scaleH - 44) / 2 }]} pointerEvents="none">
         <IrisGlyph size={44} openness={interactive ? openness : 0.55} accent={accent} />
       </View>
 
       {/* The tick scale — THE control — scrolls under the fixed pointer (shutter axis) */}
-      <View style={[styles.trackClip, { left: trackLeft }]}>
-        <Animated.View style={[styles.band, { transform: [{ translateX }] }]} pointerEvents="none">
+      <View style={[styles.trackClip, { left: trackLeft, top: topInset, height: scaleH }]}>
+        <Animated.View style={[styles.band, { height: scaleH, transform: [{ translateX }] }]} pointerEvents="none">
           {interactive
             ? ticks.map((tick) => (
                 <View key={tick.key} style={[styles.tickSlot, { left: tick.x }]}>
@@ -215,19 +223,19 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
             : null}
         </Animated.View>
         {/* engaged value rides above the pointer */}
-        <Text style={[styles.valueText, accent ? { color: accent } : null]} numberOfLines={1}>
+        <Text style={[styles.valueText, { top: topInset + 3 }, accent ? { color: accent } : null]} numberOfLines={1}>
           {formatF(currentAperture)}
         </Text>
         {/* THE pointer: thin, exactly centered, camera accent */}
         <View
           pointerEvents="none"
-          style={[styles.pointer, accent ? { backgroundColor: accent } : null]}
+          style={[styles.pointer, { top: topInset + scaleH - 30 }, accent ? { backgroundColor: accent } : null]}
         />
       </View>
 
       {(!isVariableAperture || demoMode) ? (
         <View
-          style={[styles.demoBadge, demoMode && accent ? { borderColor: hexToRgba(accent, 0.55) } : null]}
+          style={[styles.demoBadge, { top: topInset + 3 }, demoMode && accent ? { borderColor: hexToRgba(accent, 0.55) } : null]}
           pointerEvents="none"
         >
           <Text style={[styles.demoBadgeText, demoMode && accent ? { color: accent } : null]}>
@@ -246,21 +254,16 @@ const styles = StyleSheet.create({
   },
   sideSlot: {
     position: 'absolute',
-    top: 1,
-    height: SIDE_H - 4,
     justifyContent: 'center',
   },
   trackClip: {
     position: 'absolute',
-    top: SIDE_H,
-    height: SCALE_H,
     overflow: 'hidden',
   },
   band: {
     position: 'absolute',
     top: 0,
     left: 0,
-    height: SCALE_H,
     width: TRACK_WIDTH * 3,
   },
   tickSlot: {
@@ -269,15 +272,17 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: 1,
     alignItems: 'center',
+    justifyContent: 'flex-end',
   },
   tick: {
-    marginTop: SCALE_H - 26,
+    marginBottom: 16,
     width: 1.5,
     height: 9,
     borderRadius: 0.75,
     backgroundColor: 'rgba(255, 255, 255, 0.45)',
   },
   tickMajor: {
+    marginBottom: 14,
     width: 2,
     height: 13,
     backgroundColor: 'rgba(255, 255, 255, 0.8)',
@@ -286,8 +291,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 1)',
   },
   tickLabel: {
-    position: 'absolute',
-    bottom: 4,
+    marginBottom: 2,
     color: 'rgba(255, 255, 255, 0.85)',
     fontSize: 11,
     fontWeight: '700',
@@ -295,7 +299,6 @@ const styles = StyleSheet.create({
   },
   valueText: {
     position: 'absolute',
-    top: SIDE_H + 3,
     left: 0,
     right: 0,
     textAlign: 'center',
@@ -306,7 +309,6 @@ const styles = StyleSheet.create({
   },
   pointer: {
     position: 'absolute',
-    top: SIDE_H + SCALE_H - 30,
     bottom: 6,
     left: TRACK_WIDTH / 2 - 0.75,
     width: 1.5,
@@ -315,7 +317,6 @@ const styles = StyleSheet.create({
   },
   iris: {
     position: 'absolute',
-    top: SIDE_H + (SCALE_H - 44) / 2,
     width: 44,
     height: 44,
     alignItems: 'center',
@@ -323,7 +324,6 @@ const styles = StyleSheet.create({
   },
   demoBadge: {
     position: 'absolute',
-    top: SIDE_H + 3,
     right: 10,
     borderRadius: 6,
     borderWidth: 1,

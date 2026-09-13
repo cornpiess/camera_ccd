@@ -22,6 +22,9 @@ export interface CalibrationModalProps {
   /** Aperture demo mode (fixed-lens test): ring is interactive, capture stays fixed. */
   readonly apertureDemoMode?: boolean;
   readonly onToggleApertureDemo?: () => void;
+  /** Developer-mode extra: side-view lens cross-section above the tick scale. */
+  readonly apertureSideView?: boolean;
+  readonly onToggleApertureSideView?: () => void;
 }
 
 interface ActionButtonProps {
@@ -44,7 +47,7 @@ function ActionButton({ label, onPress, disabled = false, destructive = false }:
   );
 }
 
-export function CalibrationModal({ visible, onClose, apertureDemoMode = false, onToggleApertureDemo }: CalibrationModalProps): React.JSX.Element {
+export function CalibrationModal({ visible, onClose, apertureDemoMode = false, onToggleApertureDemo, apertureSideView = false, onToggleApertureSideView }: CalibrationModalProps): React.JSX.Element {
   const { applyText, clearErrors, document, errors, exportJson, importJson, loading, reload, reset } = useProfiles();
   const [text, setText] = useState('');
   const [diagText, setDiagText] = useState<string | null>(null);
@@ -151,6 +154,18 @@ export function CalibrationModal({ visible, onClose, apertureDemoMode = false, o
               <Text style={styles.demoHint}>
                 Fixed-lens test mode: the aperture ring becomes interactive (visual only) —
                 photos stay at the lens&apos;s fixed aperture.
+              </Text>
+            </View>
+          ) : null}
+
+          {onToggleApertureSideView ? (
+            <View style={styles.demoRow}>
+              <ActionButton
+                label={apertureSideView ? 'Aperture Side View: ON' : 'Aperture Side View: OFF'}
+                onPress={onToggleApertureSideView}
+              />
+              <Text style={styles.demoHint}>
+                Developer mode: show the side-view lens cross-section above the tick scale.
               </Text>
             </View>
           ) : null}

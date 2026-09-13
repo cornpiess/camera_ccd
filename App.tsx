@@ -271,6 +271,8 @@ function CameraAppScreen(): React.JSX.Element {
    * Depth/bokeh is never faked (red line 4). Toggle off in the calibration panel.
    */
   const [apertureDemoMode, setApertureDemoMode] = useState<boolean>(true);
+  // Developer-mode extra: side-view lens cross-section above the tick scale (default off).
+  const [apertureSideView, setApertureSideView] = useState<boolean>(false);
   /** Continuous demo range for fixed-lens devices (like a fast compact: ƒ/1.48–ƒ/4). */
   const DEMO_APERTURE_RANGE = useMemo(() => ({ min: 1.48, max: 4 }), []);
 
@@ -1014,6 +1016,7 @@ function CameraAppScreen(): React.JSX.Element {
                 isVariableAperture={supportsVariableAperture || apertureDemoMode}
                 onApertureChange={handleApertureChange}
                 demoMode={!supportsVariableAperture && apertureDemoMode}
+                sideViewEnabled={apertureSideView}
                 accent={skin.accent}
               />
 
@@ -1094,6 +1097,8 @@ function CameraAppScreen(): React.JSX.Element {
             onClose={() => setIsCalibrationOpen(false)}
             apertureDemoMode={apertureDemoMode}
             onToggleApertureDemo={() => setApertureDemoMode((mode) => !mode)}
+            apertureSideView={apertureSideView}
+            onToggleApertureSideView={() => setApertureSideView((enabled) => !enabled)}
           />
 
           {/* Full-screen photo viewer: tap the thumbnail to inspect the last shot.
