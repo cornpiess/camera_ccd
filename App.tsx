@@ -1017,6 +1017,7 @@ function CameraAppScreen(): React.JSX.Element {
                 onApertureChange={handleApertureChange}
                 demoMode={!supportsVariableAperture && apertureDemoMode}
                 sideViewEnabled={apertureSideView}
+                onToggleSideView={() => setApertureSideView((enabled) => !enabled)}
                 accent={skin.accent}
               />
 

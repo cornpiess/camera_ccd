@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, PanResponder, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Animated, PanResponder, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { hexToRgba } from '../theme/skin';
 import { IrisGlyph } from './IrisGlyph';
@@ -28,11 +28,11 @@ export interface ApertureBarProps {
    * OFF by default — the tick scale alone is the control.
    */
   readonly sideViewEnabled?: boolean;
+  /** Switch between the tick scale and the side view (the strip's top-right button). */
+  readonly onToggleSideView?: () => void;
 }
 
 const BAR_HEIGHT = 96;
-/** Height of the side-view cross-section row when enabled (developer mode). */
-const SIDE_H = 40;
 const TRACK_WIDTH = 252;
 /** Drag distance that spans the whole range. */
 const FULL_DRAG_PX = 170;
@@ -71,11 +71,10 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   demoMode = false,
   accent,
   sideViewEnabled = false,
+  onToggleSideView,
 }) => {
   const { width: screenWidth } = useWindowDimensions();
-  // Tick scale is the control and owns the whole strip; the side view, when enabled
-  // (developer mode), takes a 40pt row above it.
-  const topInset = sideViewEnabled ? SIDE_H : 8;
+  const topInset = 8;
   const scaleH = BAR_HEIGHT - topInset;
   const lo = Math.min(minAperture, maxAperture);
   const hi = Math.max(minAperture, maxAperture);
@@ -130,8 +129,11 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   const interactive = isVariableAperture && hi > lo;
   const trackLeft = screenWidth / 2 - TRACK_WIDTH / 2;
   const irisLeft = trackLeft - 44 - IRIS_GAP;
-  // Side-view width: centered, clamped to screen margins so the DEMO badge stays clear.
-  const sideWidth = Math.min(TRACK_WIDTH + 56, screenWidth - 48);
+  // Side mode (sideViewEnabled): the cross-section replaces the scale, sized so its height
+  // (44pt) matches the iris glyph — the two sit on the same center line, horizontally level.
+  const sideMode = interactive && sideViewEnabled;
+  const sideWidth = Math.min(124, screenWidth - 190);
+  const sideViewHeight = (sideWidth * 92) / 260;
   const sideLeft = (screenWidth - sideWidth) / 2;
 
   // Live values via refs: the PanResponder must be created ONCE per aperture range. It
@@ -188,54 +190,75 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
 
   return (
     // Whole-bar drag surface (pointerEvents auto): the strip BETWEEN the finder and the
-    // shutter is the aperture control — the tick scale owns it end to end; the side-view
-    // cross-section, when enabled in developer mode, takes the row above the scale.
+    // shutter is the aperture control. Two visuals, switched by the mode button at the
+    // top-right: the tick scale (default) or the side-view cross-section, which sits
+    // VERTICALLY LEVEL with the iris glyph (both centered on the strip's middle line).
     // Children that must not grab touches are pointerEvents="none".
     <View style={styles.bar} pointerEvents="auto" {...(interactive ? panResponder.panHandlers : {})}>
-      {/* Side-view cross-section: developer-mode only, row above the scale */}
-      {interactive && sideViewEnabled ? (
-        <View style={[styles.sideSlot, { left: sideLeft, top: 1, height: SIDE_H - 4, width: sideWidth }]} pointerEvents="none">
+      {/* Side-view cross-section (side mode): level with the iris glyph's center line */}
+      {sideMode ? (
+        <View
+          style={[styles.sideSlot, { left: sideLeft, top: (BAR_HEIGHT - sideViewHeight) / 2, width: sideWidth }]}
+          pointerEvents="none"
+        >
           <ApertureSideView openness={openness} accent={accent} label={formatF(currentAperture)} width={sideWidth} />
         </View>
       ) : null}
 
       {/* Iris: the physical diaphragm (f/1.4 → big hole; f/4 → tiny hole) */}
-      <View style={[styles.iris, { left: irisLeft, top: topInset + (scaleH - 44) / 2 }]} pointerEvents="none">
+      <View style={[styles.iris, { left: irisLeft, top: (BAR_HEIGHT - 44) / 2 }]} pointerEvents="none">
         <IrisGlyph size={44} openness={interactive ? openness : 0.55} accent={accent} />
       </View>
 
-      {/* The tick scale — THE control — scrolls under the fixed pointer (shutter axis) */}
-      <View style={[styles.trackClip, { left: trackLeft, top: topInset, height: scaleH }]}>
-        <Animated.View style={[styles.band, { height: scaleH, transform: [{ translateX }] }]} pointerEvents="none">
-          {interactive
-            ? ticks.map((tick) => (
-                <View key={tick.key} style={[styles.tickSlot, { left: tick.x }]}>
-                  <View
-                    style={[
-                      styles.tick,
-                      tick.major && styles.tickMajor,
-                      dragging && styles.tickBright,
-                    ]}
-                  />
-                  {tick.label ? <Text style={styles.tickLabel}>{tick.label}</Text> : null}
-                </View>
-              ))
-            : null}
-        </Animated.View>
-        {/* engaged value rides above the pointer */}
-        <Text style={[styles.valueText, { top: topInset + 3 }, accent ? { color: accent } : null]} numberOfLines={1}>
-          {formatF(currentAperture)}
-        </Text>
-        {/* THE pointer: thin, exactly centered, camera accent */}
-        <View
-          pointerEvents="none"
-          style={[styles.pointer, { top: topInset + scaleH - 30 }, accent ? { backgroundColor: accent } : null]}
-        />
-      </View>
+      {/* The tick scale (scale mode) — scrolls under the fixed pointer (shutter axis) */}
+      {!sideMode ? (
+        <View style={[styles.trackClip, { left: trackLeft, top: topInset, height: scaleH }]}>
+          <Animated.View style={[styles.band, { height: scaleH, transform: [{ translateX }] }]} pointerEvents="none">
+            {interactive
+              ? ticks.map((tick) => (
+                  <View key={tick.key} style={[styles.tickSlot, { left: tick.x }]}>
+                    <View
+                      style={[
+                        styles.tick,
+                        tick.major && styles.tickMajor,
+                        dragging && styles.tickBright,
+                      ]}
+                    />
+                    {tick.label ? <Text style={styles.tickLabel}>{tick.label}</Text> : null}
+                  </View>
+                ))
+              : null}
+          </Animated.View>
+          {/* engaged value rides above the pointer */}
+          <Text style={[styles.valueText, { top: topInset + 3 }, accent ? { color: accent } : null]} numberOfLines={1}>
+            {formatF(currentAperture)}
+          </Text>
+          {/* THE pointer: thin, exactly centered, camera accent */}
+          <View
+            pointerEvents="none"
+            style={[styles.pointer, { top: topInset + scaleH - 30 }, accent ? { backgroundColor: accent } : null]}
+          />
+        </View>
+      ) : null}
+
+      {/* Mode switch: tap to swap between tick scale and side view */}
+      {onToggleSideView ? (
+        <TouchableOpacity
+          accessibilityLabel={sideMode ? '切换到光圈刻度' : '切换到光圈侧视图'}
+          accessibilityRole="button"
+          hitSlop={6}
+          onPress={onToggleSideView}
+          style={styles.modeButton}
+        >
+          <Text style={[styles.modeButtonText, accent ? { color: accent, borderColor: hexToRgba(accent, 0.55) } : null]}>
+            {sideMode ? '刻度' : '侧视'}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
 
       {(!isVariableAperture || demoMode) ? (
         <View
-          style={[styles.demoBadge, { top: topInset + 3 }, demoMode && accent ? { borderColor: hexToRgba(accent, 0.55) } : null]}
+          style={[styles.demoBadge, { left: irisLeft }, demoMode && accent ? { borderColor: hexToRgba(accent, 0.55) } : null]}
           pointerEvents="none"
         >
           <Text style={[styles.demoBadgeText, demoMode && accent ? { color: accent } : null]}>
@@ -322,9 +345,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  modeButton: {
+    position: 'absolute',
+    top: 4,
+    right: 10,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.22)',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  modeButtonText: {
+    color: 'rgba(255, 255, 255, 0.75)',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
   demoBadge: {
     position: 'absolute',
-    right: 10,
     borderRadius: 6,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.22)',
