@@ -258,8 +258,8 @@ public final class CameraEngineModule: Module {
       }
       // Rounded-rectangle "viewfinder card" (Dazz-style): the radius is set from JS so
       // the card geometry lives with the rest of the layout system.
-      Prop("cornerRadius") { (view: CameraEngineView, radius: CGFloat?) in
-        view.setCornerRadius(radius ?? 0)
+      Prop("cornerRadius") { (view: CameraEngineView, radius: Double?) in
+        view.setCornerRadius(CGFloat(radius ?? 0))
       }
       OnViewDidUpdateProps { view in
         self.activeView = view
@@ -442,6 +442,10 @@ public final class CameraEngineView: ExpoView {
     super.layoutSubviews()
     renderLayer.frame = bounds
     previewView?.frame = bounds
+    // Re-assert the rounded clip on every layout pass: React Native may reset layer
+    // properties during view updates, which previously left the card frame showing
+    // rounded corners while the picture itself overflowed as a square rectangle.
+    applyCornerRadius()
     // A relayout accompanies interface rotation — re-sync the output connections right
     // here so preview framing follows the rotated UI immediately (no-change guarded).
     syncOutputOrientation()
@@ -463,8 +467,12 @@ public final class CameraEngineView: ExpoView {
 
   private func applyCornerRadius() {
     let radius = cornerRadiusStorage
-    for layerItem in [layer, previewView?.layer] {
-      guard let target = layerItem else { continue }
+    // UIView-level clipsToBounds (not just CALayer masks) so the Metal-backed subview
+    // is reliably clipped on every iOS version and view configuration.
+    self.clipsToBounds = radius > 0
+    previewView?.clipsToBounds = radius > 0
+    for target in [layer, previewView?.layer] {
+      guard let target = target else { continue }
       target.cornerRadius = radius
       if radius > 0 {
         target.cornerCurve = .continuous
@@ -578,8 +586,27 @@ public final class CameraEngineView: ExpoView {
     if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { device.whiteBalanceMode = .continuousAutoWhiteBalance }
   }
 
+  /// Apple's canonical smooth-focal solution (AVCam / WWDC guidance): prefer a VIRTUAL
+  /// device (triple/dual camera). One input covers every rear lens and the system performs
+  /// the seamless crossfade between physical cameras when videoZoomFactor crosses their
+  /// boundaries — no manual input swaps, no preview flicker.
+  fileprivate static func preferredCaptureDevice() -> AVCaptureDevice? {
+    let types: [AVCaptureDevice.DeviceType] = [
+      .builtInTripleCamera,
+      .builtInDualCamera,
+      .builtInDualWideCamera,
+      .builtInWideAngleCamera,
+    ]
+    for type in types {
+      if let device = AVCaptureDevice.default(type, for: .video, position: .back) {
+        return device
+      }
+    }
+    return nil
+  }
+
   private func configureSession() throws {
-    guard let device = AVCaptureDevice.default(lensType, for: .video, position: .back) else {
+    guard let device = CameraEngineView.preferredCaptureDevice() else {
       throw CameraEngineError.cameraUnavailable
     }
 
@@ -748,26 +775,32 @@ public final class CameraEngineView: ExpoView {
     }
   }
 
-  /// Rear lenses present on this device, ordered 0.5× → 2×.
-  fileprivate func availableLenses(completion: @escaping (Result<[[String: Any]], CameraEngineError>) -> Void) {
+  /// Focal-ladder info for the JS dial. On a virtual device (triple/dual camera) zoom
+  /// factor 1.0 renders the widest constituent camera (ultra-wide, 13mm-equivalent), so
+  /// the JS side maps mm → zoom as mm/13; single-wide bodies keep the 26mm main native.
+  fileprivate func availableLenses(completion: @escaping (Result<[String: Any], CameraEngineError>) -> Void) {
     sessionQueue.async {
-      let specs: [(id: String, type: AVCaptureDevice.DeviceType, label: String)] = [
-        ("ultraWide", .builtInUltraWideCamera, "0.5×"),
-        ("wide", .builtInWideAngleCamera, "1×"),
-        ("telephoto", .builtInTelephotoCamera, "2×"),
-      ]
-      let lenses: [[String: Any]] = specs.compactMap { spec in
-        guard AVCaptureDevice.default(spec.type, for: .video, position: .back) != nil else { return nil }
-        return ["id": spec.id, "label": spec.label]
+      guard let device = self.camera ?? CameraEngineView.preferredCaptureDevice() else {
+        DispatchQueue.main.async { completion(.failure(.cameraUnavailable)) }
+        return
       }
-      DispatchQueue.main.async { completion(.success(lenses)) }
+      let kind: String
+      switch device.deviceType {
+      case .builtInTripleCamera: kind = "virtual-triple"
+      case .builtInDualCamera: kind = "virtual-dual"
+      case .builtInDualWideCamera: kind = "virtual-dual-wide"
+      default: kind = "single"
+      }
+      DispatchQueue.main.async {
+        completion(.success(["kind": kind, "deviceModel": device.localizedName]))
+      }
     }
   }
 
-  /// Apply a crop zoom on the ACTIVE rear lens (device.videoZoomFactor). Zoom is a
-  /// device-level property, so preview feed and AVCapturePhotoOutput see the exact same
-  /// framing — the WYSIWYG contract holds for digitally-derived focal stops too.
-  /// Clamped to [1, 8] and the hardware ceiling; a freshly switched lens starts at 1.
+  /// Apply a crop zoom on the capture device (device.videoZoomFactor). On a virtual
+  /// device the system performs the seamless physical-camera crossfade when the factor
+  /// crosses lens boundaries — preview feed and AVCapturePhotoOutput see the exact same
+  /// framing (WYSIWYG). Ceiling is the hardware's own videoMaxZoomFactor.
   fileprivate func setZoomFactor(_ factor: Double, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
     sessionQueue.async {
       guard let device = self.camera, device.isConnected else {
@@ -776,8 +809,7 @@ public final class CameraEngineView: ExpoView {
       do {
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
-        let ceiling = min(device.activeFormat.videoMaxZoomFactor, 8.0)
-        device.videoZoomFactor = min(max(1.0, factor), ceiling)
+        device.videoZoomFactor = min(max(1.0, factor), device.activeFormat.videoMaxZoomFactor)
         completion(.success(()))
       } catch {
         completion(.failure(.configurationFailed))
@@ -785,44 +817,15 @@ public final class CameraEngineView: ExpoView {
     }
   }
 
-  /// Switch the active rear lens in place: swap the session input, re-apply auto modes,
-  /// keep every output (photo + preview feed) attached.
+  /// Legacy physical-input swap — superseded by the virtual-device zoom path. On virtual
+  /// devices this MUST NOT run (it would break the seamless switch), so it just succeeds.
   fileprivate func setLens(_ lensId: String, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
     sessionQueue.async {
-      let deviceType: AVCaptureDevice.DeviceType
-      switch lensId {
-      case "ultraWide": deviceType = .builtInUltraWideCamera
-      case "wide": deviceType = .builtInWideAngleCamera
-      case "telephoto": deviceType = .builtInTelephotoCamera
-      default: completion(.failure(.cameraUnavailable)); return
-      }
-      guard let device = AVCaptureDevice.default(deviceType, for: .video, position: .back) else {
-        completion(.failure(.cameraUnavailable))
+      if let device = self.camera, device.deviceType != .builtInWideAngleCamera {
+        completion(.success(()))
         return
       }
-      do {
-        let input = try AVCaptureDeviceInput(device: device)
-        self.session.beginConfiguration()
-        for old in self.session.inputs { self.session.removeInput(old) }
-        guard self.session.canAddInput(input) else {
-          self.session.commitConfiguration()
-          throw CameraEngineError.configurationFailed
-        }
-        self.session.addInput(input)
-        do {
-          try device.lockForConfiguration()
-          defer { device.unlockForConfiguration() }
-          CameraEngineView.applyAutoModes(to: device)
-        }
-        self.session.commitConfiguration()
-        self.camera = device
-        self.lensType = deviceType
-        CameraEngineView.setOrientation(on: self.videoOutput, photoOutput: self.output)
-        if self.sessionShouldRun && !self.session.isRunning { self.session.startRunning() }
-        completion(.success(()))
-      } catch {
-        completion(.failure(.configurationFailed))
-      }
+      completion(.success(()))
     }
   }
 
@@ -1034,6 +1037,24 @@ private enum CameraTempFiles {
     let files = (try? FileManager.default.contentsOfDirectory(at: FileManager.default.temporaryDirectory, includingPropertiesForKeys: nil)) ?? []
     remove(files.filter { $0.lastPathComponent.hasPrefix("camera-engine-") && !kept.contains($0) })
   }
+
+  /// Latest-shot thumbnail persistence (user request: the library chip must survive app
+  /// restarts). Copies the thumbnail to a STABLE Documents path; temp files die with the
+  /// sandbox cache cleaner, which made the chip vanish between launches.
+  static func persistedLatestThumbnailPath() -> URL {
+    let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    return docs.appendingPathComponent("camera18-latest-thumb.jpg")
+  }
+  static func persistLatestThumbnail(from url: URL) -> URL? {
+    let destination = persistedLatestThumbnailPath()
+    try? FileManager.default.removeItem(at: destination)
+    do {
+      try FileManager.default.copyItem(at: url, to: destination)
+      return destination
+    } catch {
+      return nil
+    }
+  }
 }
 
 // MARK: - Photo Capture Delegate (RAW / ProRAW + Processed Fallback)
@@ -1179,9 +1200,13 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
         }) { success, _ in
           guard success else { self.finish(.failure(.saveFailed)); return }
           CameraTempFiles.keep([fileURL, thumbURL])
+          // The thumbnail the UI displays must survive restarts — serve the Documents
+          // copy when persistence succeeds, fall back to the temp file otherwise.
+          let thumbnailURI = CameraTempFiles.persistLatestThumbnail(from: thumbURL)?.absoluteString
+            ?? thumbURL.absoluteString
           self.finish(.success([
             "fileUri": fileURL.absoluteString,
-            "thumbnailUri": thumbURL.absoluteString,
+            "thumbnailUri": thumbnailURI,
             "assetLocalIdentifier": localIdentifier ?? NSNull(),
             "processingFallback": usedFallback
           ]))

@@ -3,7 +3,7 @@
     "name": "Camera 18",
     "slug": "aperture-camera",
     "version": "1.0.0",
-    "orientation": "default",
+    "orientation": "portrait",
     "platforms": [
       "ios"
     ],
@@ -17,9 +17,7 @@
         "CFBundleDisplayName": "Camera 18",
         "ITSAppUsesNonExemptEncryption": false,
         "UISupportedInterfaceOrientations": [
-          "UIInterfaceOrientationPortrait",
-          "UIInterfaceOrientationLandscapeLeft",
-          "UIInterfaceOrientationLandscapeRight"
+          "UIInterfaceOrientationPortrait"
         ],
         "NSCameraUsageDescription": "彩虹相机需要使用相机来取景与拍照。",
         "NSPhotoLibraryAddUsageDescription": "彩虹相机需要把拍好的照片保存到你的相册。",

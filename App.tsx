@@ -30,7 +30,7 @@ import {
 } from './src/camera/CameraEngine';
 // LoadCameraState, focal model, aperture visual linkage
 import { loadCameraState, rememberAperture, saveCameraState, type CameraState } from './src/camera/cameraStateStore';
-import { buildFocalStops, defaultFocalStop, type FocalStop } from './src/camera/focalLadder';
+import { buildFocalStops, defaultFocalStop, type FocalStop, type DeviceKind } from './src/camera/focalLadder';
 import { apertureVisualFactors, applyApertureVisual } from './src/camera/apertureVisualProfile';
 import { deriveSkin, isLightColor } from './src/theme/skin';
 
@@ -68,17 +68,12 @@ const SCREEN_HEIGHT_FALLBACK = Dimensions.get('window').height;
 installDiagLog();
 
 /**
- * Viewfinder layout — CANONICAL camera-app rotation semantics:
+ * Viewfinder layout — the interface is PORTRAIT-LOCKED (the canonical camera-app choice:
+ * controls never move relative to the hand; the capture CONTENT rotates instead via the
+ * native connection orientation). The viewfinder is the exact 4:3 capture frame: a
+ * full-width band below the top capsule, rounded-rect card clipped.
  *
- * The WHOLE interface rotates with the device (app.json orientation=default). The
- * viewfinder is always the exact 4:3 capture frame:
- *   - portrait:  full-width 4:3 band below the top capsule; controls overlay the bottom.
- *   - landscape: full-height 4:3 frame centered horizontally; controls overlay top/bottom
- *                (the system-camera look — no dead black bands).
- *
- * All geometry derives from useWindowDimensions(), so rotation re-lays-out live. The
- * native MTKView letterboxes the 4:3 frame inside this rect; because the rect itself is
- * 4:3, rect == frame — no visible letterbox, and tap-to-focus normalizes against it.
+ * All geometry derives from useWindowDimensions() (defensive for any future rotation).
  */
 const STATUS_BAR_HEIGHT = Platform.OS === 'ios' ? 47 : (StatusBar.currentHeight ?? 24);
 /** Status bar + the camera capsule. */
@@ -94,12 +89,8 @@ interface FinderRect {
 }
 
 function computeFinderRect(width: number, height: number): FinderRect {
-  if (width > height) {
-    // Landscape: full-height 4:3 frame, centered horizontally.
-    const frameWidth = Math.round(height * (4 / 3));
-    return { left: Math.round((width - frameWidth) / 2), top: 0, width: frameWidth, height };
-  }
-  // Portrait: full-width 4:3 below the top band, never colliding with the controls.
+  // Portrait formula (widths > heights never occur with the portrait lock; the math is
+  // width-driven either way so a future landscape policy only needs the band constants).
   const maxWidth = Math.round(Math.min(width, (height - TOP_BAND - MIN_BOTTOM_BAND) * (3 / 4)));
   const frameWidth = Math.max(200, Math.min(width, maxWidth));
   const frameHeight = Math.round(frameWidth * (4 / 3));
@@ -205,10 +196,12 @@ function CameraAppScreen(): React.JSX.Element {
   const [apertureRange, setApertureRange] = useState<{ min: number; max: number } | null>(null);
   const capabilitiesRef = useRef<CameraCapabilities | null>(null);
 
-  // Rear lens inventory → derived focal stops for the dial (13/26/35/52 on dual, 13…192 on Pro).
-  const [currentLensId, setCurrentLensId] = useState<string>('wide');
+  // Rear lens inventory → derived focal stops for the dial (13/26/35/52 on virtual dual,
+  // +78/156 on triple; single-wide bodies get 26/35/52).
   const [focalStops, setFocalStops] = useState<FocalStop[]>([]);
   const [currentFocalMm, setCurrentFocalMm] = useState<number | null>(null);
+  const currentFocalMmRef = useRef<number | null>(null);
+  currentFocalMmRef.current = currentFocalMm;
 
   // Photo Capture & Preview states
   const [capturePhase, setCapturePhase] = useState<CapturePhase>('idle');
@@ -230,6 +223,8 @@ function CameraAppScreen(): React.JSX.Element {
     loadCameraState().then((state) => {
       if (!mounted) return;
       cameraStateRef.current = state;
+      // Restore the latest-shot chip: the thumbnail lives at a STABLE Documents path now.
+      if (state.lastThumbUri) setLatestThumbnail(state.lastThumbUri);
       setCameraStateLoaded(true);
     }).catch(() => setCameraStateLoaded(true));
     return () => {
@@ -365,15 +360,18 @@ function CameraAppScreen(): React.JSX.Element {
         setApertureRange(null);
       }
 
-      // Rear lens list → derive the focal-stop ladder for the dial.
+      // Device kind → derive the focal-stop ladder for the dial (virtual devices get the
+      // seamless system crossfade; zoom re-applies because sessions reset zoom on restart).
       try {
-        const list = await CameraEngine.getAvailableLenses();
-        const lensArray = Array.isArray(list) ? list : [];
-        const stops = buildFocalStops(lensArray.map((lens) => lens.id));
+        const info = await CameraEngine.getAvailableLenses();
+        const kind = (info?.kind ?? 'single') as DeviceKind;
+        const stops = buildFocalStops(kind);
         setFocalStops(stops);
-        setCurrentFocalMm((previous) =>
-          previous ?? defaultFocalStop(lensArray.map((lens) => lens.id)).mm,
-        );
+        setCurrentFocalMm((previous) => previous ?? defaultFocalStop(kind).mm);
+        const engaged = stops.find((stop) => stop.mm === (currentFocalMmRef.current ?? defaultFocalStop(kind).mm));
+        if (engaged) {
+          await CameraEngine.setZoomFactor(engaged.zoom);
+        }
       } catch {
         // Single-lens fallbacks stay on the previous state.
       }
@@ -568,58 +566,17 @@ function CameraAppScreen(): React.JSX.Element {
   };
 
   /**
-   * Focal-stop selection: switch the physical lens first when needed, then apply the
-   * crop zoom on it. Every step is journaled to the diag log; on failure the mm display
-   * REVERTS to the engaged stop so the UI never claims a focal the optics are not at.
+   * Focal-stop selection — the Apple virtual-device path: EVERY stop (including zoom 1.0)
+   * is a videoZoomFactor move, so the system crossfades between physical cameras and no
+   * state can linger (the old "skip when zoom===1" bug left 1.35× residue, making 35→26
+   * a no-op). Journaled to the diag log; the mm display reverts on failure.
    */
   const handleSelectFocal = useCallback(async (stop: FocalStop) => {
     const previousMm = currentFocalMm;
     try {
-      recordDiag('info', `focal: select ${stop.mm}mm (lens=${stop.lensId}, zoom=${stop.zoom}) from ${previousMm}mm`);
-      if (stop.lensId !== currentLensId) {
-        await CameraEngine.setLens(stop.lensId);
-        setCurrentLensId(stop.lensId);
-        recordDiag('info', `focal: lens switched to ${stop.lensId}`);
-        // Per-lens aperture honesty: on iPhone 18 Pro only the main lens has a variable
-        // aperture — ultra-wide/telephoto formats report a degenerate range, so the dial
-        // locks to Fixed ƒ/x. The capability ref must follow the active lens, otherwise
-        // the ApertureVisualProfile factors keep using the previous lens's range.
-        try {
-          const caps = await CameraEngine.getCapabilities();
-          capabilitiesRef.current = caps;
-          const variable = Boolean(caps.supportsVariableAperture);
-          setSupportsVariableAperture(variable);
-          setApertureRange(variable && caps.minAperture != null && caps.maxAperture != null
-            ? { min: caps.minAperture, max: caps.maxAperture }
-            : null);
-          if (variable && activeProfile) {
-            // Returning to the variable lens: restore the user's remembered f-stop.
-            const target = cameraStateRef.current.lastApertures[activeProfile.id] ?? activeProfile.aperture?.preferred;
-            if (target != null) {
-              const min = caps.minAperture ?? target;
-              const max = caps.maxAperture ?? target;
-              const clamped = Math.min(Math.max(target, min), max);
-              await CameraEngine.setAperture(clamped);
-              setActiveAperture(clamped);
-              setCurrentAperture(clamped);
-            } else {
-              const aperture = caps.activeAperture ?? caps.activeLensAperture ?? 1.8;
-              setActiveAperture(aperture);
-              setCurrentAperture(aperture);
-            }
-          } else {
-            const aperture = caps.activeAperture ?? caps.activeLensAperture ?? 1.8;
-            setActiveAperture(aperture);
-            setCurrentAperture(aperture);
-          }
-        } catch {
-          // Keep the previous aperture display; the lens switch itself succeeded.
-        }
-      }
-      if (stop.zoom !== 1) {
-        await CameraEngine.setZoomFactor(stop.zoom);
-        recordDiag('info', `focal: zoom ${stop.zoom} applied on ${stop.lensId}`);
-      }
+      recordDiag('info', `focal: select ${stop.mm}mm (zoom=${stop.zoom}) from ${previousMm}mm`);
+      await CameraEngine.setZoomFactor(stop.zoom);
+      recordDiag('info', `focal: zoom ${stop.zoom} applied`);
       setCurrentFocalMm(stop.mm);
     } catch (err: unknown) {
       recordDiag('error', `focal: select ${stop.mm}mm FAILED: ${err instanceof Error ? err.message : String(err)}`);
@@ -627,7 +584,7 @@ function CameraAppScreen(): React.JSX.Element {
       if (previousMm != null) setCurrentFocalMm(previousMm);
       showTransientError(resolveErrorMessage(err));
     }
-  }, [currentLensId, currentFocalMm, activeProfile, showTransientError]);
+  }, [currentFocalMm, showTransientError]);
 
   const handleCapturePhoto = async () => {
     if (capturePhase === 'capturing') return;
@@ -663,10 +620,12 @@ function CameraAppScreen(): React.JSX.Element {
       setCapturePhase('idle');
       setPhotoPermDenied(false);
       recordDiag('info', `capture: saved (fallback=${Boolean(result?.processingFallback)}, thumb=${Boolean(result?.thumbnailUri)})`);
-      if (result?.thumbnailUri) {
-        setLatestThumbnail(result.thumbnailUri);
-      } else if (result?.fileUri) {
-        setLatestThumbnail(result.fileUri);
+      const thumbUri = result?.thumbnailUri ?? result?.fileUri ?? null;
+      if (thumbUri) {
+        setLatestThumbnail(thumbUri);
+        // Native serves a STABLE Documents copy — persist it so the chip survives restarts.
+        cameraStateRef.current.lastThumbUri = thumbUri;
+        saveCameraState({ lastThumbUri: thumbUri });
       }
       if (result?.processingFallback) {
         showTransientError('Camera DNA processing failed — the original photo was saved.');
@@ -1047,7 +1006,16 @@ function CameraAppScreen(): React.JSX.Element {
                     <ThumbnailPreview
                       uri={latestThumbnail}
                       onPress={() => {
-                        Linking.openURL('photos-redirect://').catch(() => {});
+                        // photos-redirect is a semi-private scheme iOS may refuse; be
+                        // honest on failure instead of silently doing nothing.
+                        Linking.canOpenURL('photos-redirect://')
+                          .then((ok) => {
+                            if (!ok) throw new Error('unsupported');
+                            return Linking.openURL('photos-redirect://');
+                          })
+                          .catch(() => {
+                            showTransientError("Couldn't open Photos from here — open it from the Home Screen.");
+                          });
                       }}
                     />
                   ) : null}
@@ -1057,6 +1025,7 @@ function CameraAppScreen(): React.JSX.Element {
                 <View style={styles.shutterSlot}>
                   <ShutterButton
                     isCapturing={capturePhase === 'capturing'}
+                    accent={skin.accent}
                     onPress={handleCapturePhoto}
                   />
                 </View>

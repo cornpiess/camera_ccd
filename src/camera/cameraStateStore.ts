@@ -10,6 +10,8 @@ import { File, Paths } from 'expo-file-system';
 export interface CameraState {
   lastProfileId: string | null;
   lastApertures: Record<string, number>;
+  /** Stable Documents path of the latest thumbnail (survives restarts). */
+  lastThumbUri?: string | null;
 }
 
 const STATE_FILENAME = 'camera-state.json';
@@ -22,6 +24,7 @@ export async function loadCameraState(): Promise<CameraState> {
     if (!f.exists) return { lastProfileId: null, lastApertures: {} };
     const parsed = JSON.parse(await f.text()) as Partial<CameraState> | null;
     return {
+      lastThumbUri: typeof parsed?.lastThumbUri === 'string' ? parsed.lastThumbUri : null,
       lastProfileId: typeof parsed?.lastProfileId === 'string' ? parsed.lastProfileId : null,
       lastApertures:
         parsed?.lastApertures && typeof parsed.lastApertures === 'object'

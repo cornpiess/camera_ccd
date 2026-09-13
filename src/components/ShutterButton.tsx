@@ -10,6 +10,8 @@ import * as Haptics from 'expo-haptics';
 interface ShutterButtonProps {
   onPress: () => void;
   disabled?: boolean;
+  /** Camera identity accent for the outer ring (same color system as the rest of the UI). */
+  accent?: string;
   isCapturing?: boolean;
 }
 
@@ -23,6 +25,7 @@ export const ShutterButton: React.FC<ShutterButtonProps> = ({
   onPress,
   disabled = false,
   isCapturing = false,
+  accent,
 }: ShutterButtonProps) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const innerScaleAnim = useRef(new Animated.Value(1)).current;
@@ -53,6 +56,7 @@ export const ShutterButton: React.FC<ShutterButtonProps> = ({
       style={[
         styles.outerRing,
         disabled && styles.disabled,
+        accent ? { borderColor: accent } : null,
         { transform: [{ scale: scaleAnim }] },
       ]}
     >
