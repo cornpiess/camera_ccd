@@ -9,7 +9,8 @@ const ROOT = path.join(__dirname, "..");
 const REPO = "fdkevin0/lumix_luts";
 const BRANCH = "main";
 
-// 手工选定的 13 个：跨品类、33/32pt、体积合理；displayName 与 LUT 官方中文名一一对应
+// 手工选定的官方 Real-Time LUT（松下中国官方库快照）：第一批 13 款 + 第二批补全
+// （跳过 16pt 低精度、65pt 巨型文件，以及与 blue-ripple 内容重复的 light-jp-blue）
 const PICKS = [
   { id: "camping-vibe", zh: "露营氛围", short: "露营", accent: "#8FAE8B", cat: "outdoor" },
   { id: "verdant-scenery", zh: "青绿风景", short: "青绿", accent: "#8FAE8B", cat: "outdoor" },
@@ -24,10 +25,46 @@ const PICKS = [
   { id: "forest-green-cool", zh: "森绿清冷", short: "森绿", accent: "#7F9E8F", cat: "portrait" },
   { id: "y2000", zh: "y2000", short: "Y2K", accent: "#C7A163", cat: "anniversary" },
   { id: "txd-agfaphoto-lebox", zh: "TXD AgfaPhoto LeBox", short: "Agfa", accent: "#B4554D", cat: "anniversary" },
+  // --- 第二批：补全官方库剩余的 32/33pt LUT ---
+  { id: "millennium-echo-warm", zh: "千禧回声 Warm", short: "千暖", accent: "#C7A163", cat: "anniversary" },
+  { id: "millennium-echo-cold", zh: "千禧回声 Cold", short: "千冷", accent: "#8FA8C7", cat: "anniversary" },
+  { id: "magenta-old-film", zh: "洋红旧胶片", short: "洋红", accent: "#B47FA6", cat: "indoor" },
+  { id: "white-negative", zh: "白色负片", short: "白负", accent: "#C4C4BC", cat: "indoor" },
+  { id: "film-impression", zh: "胶片印象", short: "印象", accent: "#A8987F", cat: "indoor" },
+  { id: "light-green", zh: "轻柔绿意", short: "绿意", accent: "#9EB48F", cat: "indoor" },
+  { id: "grey-cinema", zh: "灰度电影", short: "灰幕", accent: "#9A9A9F", cat: "outdoor" },
+  { id: "rich-tone", zh: "浓厚格调", short: "浓调", accent: "#8F7F6E", cat: "outdoor" },
+  { id: "summer-breeze", zh: "夏日暖风", short: "夏风", accent: "#9EC4B4", cat: "outdoor" },
+  { id: "fresh-cuisine", zh: "清新美食", short: "清新", accent: "#A8C48F", cat: "outdoor" },
+  { id: "rice-field-village", zh: "稻田乡村", short: "稻乡", accent: "#B4AE8F", cat: "outdoor" },
+  { id: "blue-ripple", zh: "蓝漾", short: "蓝漾", accent: "#7FA8C7", cat: "outdoor" },
+  { id: "patina-of-rain", zh: "苔痕雨季", short: "苔雨", accent: "#8FAE9A", cat: "outdoor" },
+  { id: "sunny-mint", zh: "晴天薄荷", short: "薄荷", accent: "#A8C7B4", cat: "outdoor" },
+  { id: "golden-rice-field", zh: "金色稻田", short: "金稻", accent: "#C7B47F", cat: "outdoor" },
+  { id: "warm-village", zh: "温暖乡村", short: "暖村", accent: "#B49A78", cat: "outdoor" },
+  { id: "summer", zh: "夏日", short: "夏日", accent: "#C7B48F", cat: "outdoor" },
+  { id: "candy-color", zh: "糖果色", short: "糖果", accent: "#C79AB4", cat: "outdoor" },
+  { id: "vintage-blue-tone", zh: "复古蓝调", short: "复蓝", accent: "#7F8FC7", cat: "outdoor" },
+  { id: "tibet-warm-light", zh: "藏区暖光", short: "藏暖", accent: "#B48F7F", cat: "portrait" },
+  { id: "seaside-sunset", zh: "海边夕阳", short: "海夕", accent: "#C79A8F", cat: "portrait" },
+  { id: "vintage-summer", zh: "复古夏日", short: "复夏", accent: "#AE9E8F", cat: "portrait" },
+  { id: "mosslight", zh: "薄暮苔痕", short: "苔痕", accent: "#8FA98F", cat: "portrait" },
+  { id: "txd-eterna", zh: "TXD Eterna", short: "ETE", accent: "#9AAEB4", cat: "portrait" },
+  { id: "txd-grainy-film", zh: "TXD Grainy Film", short: "颗粒", accent: "#A89F8F", cat: "portrait" },
+  { id: "txd-rag-film-cned2", zh: "TXD RaG Film CNED2", short: "RaG", accent: "#B4A48F", cat: "portrait" },
+  { id: "warm-skin-tone", zh: "暖白肤色", short: "暖肤", accent: "#C7A68F", cat: "portrait" },
 ];
 
-const gh = (p) =>
-  execSync(`curl -s --max-time 120 "https://api.github.com/repos/${REPO}/contents/${p}" -H "Accept: application/vnd.github.raw"`, { maxBuffer: 64 * 1024 * 1024 });
+// 下载：优先 jsDelivr CDN（国内可达、快），失败回退 api.github.com raw
+const gh = (p) => {
+  const cdn = `https://cdn.jsdelivr.net/gh/${REPO}@main/${p}`;
+  const api = `https://api.github.com/repos/${REPO}/contents/${p}`;
+  try {
+    return execSync(`curl -sf --max-time 60 "${cdn}"`, { maxBuffer: 64 * 1024 * 1024 });
+  } catch {
+    return execSync(`curl -sf --max-time 120 "${api}" -H "Accept: application/vnd.github.raw"`, { maxBuffer: 64 * 1024 * 1024 });
+  }
+};
 
 const catalog = JSON.parse(fs.readFileSync(path.join(ROOT, ".tmp-luts.json"), "utf8"));
 
@@ -71,20 +108,18 @@ function neutralProfile(lutName, displayName, short, accent) {
     // 1. 元数据
     const meta = catalog.luts.find(l => l.id === pick.id);
     if (!meta) throw new Error("catalog 中找不到 " + pick.id);
-    const file = meta.files.find(f => (f.format === "cube" || f.type === "cube") && f.variant === "default");
+    const file = meta.files.find(f => (f.format === "cube" || f.type === "cube"));
     if (!file) throw new Error(pick.id + " 无 default cube");
     const relPath = "data/" + file.public_path;
 
-    // 2. 下载 .cube 到两处
-    for (const dest of [
-      path.join(ROOT, "modules/camera-engine/ios/LUTs", lutName + ".cube"),
-      path.join(ROOT, "Camera18_LUT_V0/luts", lutName + ".cube"),
-    ]) {
-      if (!fs.existsSync(dest)) {
-        fs.writeFileSync(dest, gh(relPath));
-        console.log("下载:", path.basename(dest), Math.round(fs.statSync(dest).size / 1024) + "KB");
-      }
+    // 下载一次到源目录，本地复制到打包目录（请求数减半）
+    const srcPath = path.join(ROOT, "Camera18_LUT_V0/luts", lutName + ".cube");
+    if (!fs.existsSync(srcPath)) {
+      fs.writeFileSync(srcPath, gh(relPath));
+      console.log("下载:", lutName + ".cube", Math.round(fs.statSync(srcPath).size / 1024) + "KB");
     }
+    const dstPath = path.join(ROOT, "modules/camera-engine/ios/LUTs", lutName + ".cube");
+    if (!fs.existsSync(dstPath)) fs.copyFileSync(srcPath, dstPath);
 
     // 3. 生成 Profile（中性底 + LUT-only）
     const p = neutralProfile(lutName, pick.zh, pick.short, pick.accent);

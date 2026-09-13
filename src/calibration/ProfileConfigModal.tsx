@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Slider from '@react-native-community/slider';
 
 import { useProfiles } from '../profiles';
 import { profileDisplayName } from '../components/types';
@@ -102,6 +103,29 @@ export function ProfileConfigModal({ visible, profileId, onClose }: ProfileConfi
           </View>
 
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+            {profile?.color?.lut ? (
+              // LUT intensity, eye-tuned: drag to change how strongly the camera's LUT
+              // blends over the untouched image; applies (and persists) on release, with
+              // the live preview visible behind the sheet.
+              <View style={styles.lutRow}>
+                <Text style={styles.lutLabel}>LUT 强度</Text>
+                <Slider
+                  accessibilityLabel="LUT intensity"
+                  maximumValue={1}
+                  minimumValue={0}
+                  onSlidingComplete={(value) => {
+                    if (profileId === null) return;
+                    const updated = { ...profile, color: { ...profile.color, lutIntensity: Number(value.toFixed(2)) } };
+                    void run(() => applyProfileText(JSON.stringify(updated), profileId));
+                  }}
+                  step={0.01}
+                  style={styles.lutSlider}
+                  value={Number(profile.color.lutIntensity ?? 1)}
+                />
+                <Text style={styles.lutValue}>{Number(profile.color.lutIntensity ?? 1).toFixed(2)}</Text>
+              </View>
+            ) : null}
+
             <Text style={styles.help}>
               Paste this camera&apos;s JSON (a single object) or a complete profile document, then Apply. Valid
               changes are saved and take effect immediately — tweak, look at the preview, repeat.
@@ -176,6 +200,10 @@ const styles = StyleSheet.create({
   subtitle: { color: '#8e939e', fontSize: 12.5 },
   close: { color: '#8db8ff', fontSize: 16, fontWeight: '600' },
   content: { padding: 20, gap: 12, paddingBottom: 28 },
+  lutRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  lutLabel: { color: '#e8e9ed', fontSize: 15, fontWeight: '600' },
+  lutSlider: { flex: 1, height: 40 },
+  lutValue: { color: '#8db8ff', fontSize: 14, fontWeight: '700', fontVariant: ['tabular-nums'], minWidth: 40, textAlign: 'right' },
   help: { color: '#b8bbc3', fontSize: 13.5, lineHeight: 19 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   button: { minHeight: 42, borderRadius: 9, borderWidth: 1, borderColor: '#4776bd', backgroundColor: '#182840', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
