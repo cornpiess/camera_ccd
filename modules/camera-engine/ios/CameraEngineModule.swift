@@ -1327,8 +1327,9 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     exif.removeValue(forKey: kCGImagePropertyExifPixelYDimension)
     // The rendered pixels are ALREADY upright (orientation applied during CIImage decode),
     // but the carried-over EXIF block still says "rotated" — Photos honors that tag and
-    // displays landscape shots as portrait. Pin the EXIF orientation to 1.
-    exif[kCGImagePropertyExifOrientation] = 1
+    // displays landscape shots as portrait. Pin the EXIF orientation to 1. (ImageIO has no
+    // named constant for the EXIF-dictionary orientation key; it is literally "Orientation".)
+    exif["Orientation" as CFString] = 1
     properties[kCGImagePropertyExifDictionary] = exif
     var tiff = cfProperties(properties[kCGImagePropertyTIFFDictionary])
     tiff[kCGImagePropertyTIFFOrientation] = 1
