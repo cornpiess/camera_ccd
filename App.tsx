@@ -81,8 +81,8 @@ installDiagLog();
 const STATUS_BAR_HEIGHT = Platform.OS === 'ios' ? 47 : (StatusBar.currentHeight ?? 24);
 /** Status bar + the camera capsule. */
 const TOP_BAND = Math.round(STATUS_BAR_HEIGHT + 70);
-/** Minimum room for the hero aperture ring + shutter row. */
-const MIN_BOTTOM_BAND = 200;
+/** Minimum room for the aperture strip (96pt: side view + tick scale) + shutter row. */
+const MIN_BOTTOM_BAND = 256;
 
 interface FinderRect {
   readonly left: number;

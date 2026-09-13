@@ -1061,9 +1061,12 @@ private enum LUTLoader {
       if line.hasPrefix("TITLE") || line.hasPrefix("DOMAIN_") || line.hasPrefix("LUT_1D_SIZE") { continue }
       let parts = line.split(separator: " ")
       guard parts.count >= 3, let r = Float(parts[0]), let g = Float(parts[1]), let b = Float(parts[2]) else { continue }
-      values.append(contentsOf: [r, g, b])
+      // CIColorCube requires FOUR floats (RGBA, premultiplied) per entry — a 3-float RGB
+      // buffer makes the whole LUT stage silently no-op (every camera's LUT dead since
+      // v1; hueBandCube already did this correctly). .cube lines are RGB, alpha = 1.
+      values.append(contentsOf: [r, g, b, 1])
     }
-    guard dimension >= 2, values.count == dimension * dimension * dimension * 3 else { return nil }
+    guard dimension >= 2, values.count == dimension * dimension * dimension * 4 else { return nil }
     return (dimension, Data(bytes: values, count: values.count * MemoryLayout<Float>.size))
   }
 }
@@ -1322,9 +1325,13 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     var exif = cfProperties(properties[kCGImagePropertyExifDictionary])
     exif.removeValue(forKey: kCGImagePropertyExifPixelXDimension)
     exif.removeValue(forKey: kCGImagePropertyExifPixelYDimension)
+    // The rendered pixels are ALREADY upright (orientation applied during CIImage decode),
+    // but the carried-over EXIF block still says "rotated" — Photos honors that tag and
+    // displays landscape shots as portrait. Pin the EXIF orientation to 1.
+    exif[kCGImagePropertyExifOrientation] = 1
     properties[kCGImagePropertyExifDictionary] = exif
     var tiff = cfProperties(properties[kCGImagePropertyTIFFDictionary])
-    tiff.removeValue(forKey: kCGImagePropertyTIFFOrientation)
+    tiff[kCGImagePropertyTIFFOrientation] = 1
     properties[kCGImagePropertyTIFFDictionary] = tiff
 
     CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)

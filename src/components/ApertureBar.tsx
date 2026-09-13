@@ -25,7 +25,11 @@ export interface ApertureBarProps {
   readonly accent?: string;
 }
 
-const BAR_HEIGHT = 64;
+const BAR_HEIGHT = 96;
+/** Top half of the strip: the side-view lens cross-section ("cut the lens open"). */
+const SIDE_H = 40;
+/** Bottom half of the strip: the tick scale — THE aperture control. */
+const SCALE_H = BAR_HEIGHT - SIDE_H;
 const TRACK_WIDTH = 252;
 /** Drag distance that spans the whole range. */
 const FULL_DRAG_PX = 170;
@@ -118,6 +122,9 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   const interactive = isVariableAperture && hi > lo;
   const trackLeft = screenWidth / 2 - TRACK_WIDTH / 2;
   const irisLeft = trackLeft - 44 - IRIS_GAP;
+  // Side-view width: centered, clamped to screen margins so the DEMO badge stays clear.
+  const sideWidth = Math.min(TRACK_WIDTH + 56, screenWidth - 48);
+  const sideLeft = (screenWidth - sideWidth) / 2;
 
   // Live values via refs: the PanResponder must be created ONCE per aperture range. It
   // used to rebuild on EVERY currentAperture/openness change (i.e. every drag update),
@@ -171,42 +178,25 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
     [detentIndexFor, translateX],
   );
 
-  // Side-view aperture simulation: pops in while the ring is dragged (the "cut the lens
-  // in half" cross-section reacting live), fades out shortly after release so the static
-  // camera UI stays clean.
-  const sideViewOpacity = useRef(new Animated.Value(0)).current;
-  const sideViewHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (dragging) {
-      if (sideViewHideRef.current) {
-        clearTimeout(sideViewHideRef.current);
-        sideViewHideRef.current = null;
-      }
-      Animated.timing(sideViewOpacity, { toValue: 1, duration: 120, useNativeDriver: true }).start();
-    } else {
-      sideViewHideRef.current = setTimeout(() => {
-        Animated.timing(sideViewOpacity, { toValue: 0, duration: 350, useNativeDriver: true }).start();
-      }, 900);
-    }
-    return () => {
-      if (sideViewHideRef.current) {
-        clearTimeout(sideViewHideRef.current);
-        sideViewHideRef.current = null;
-      }
-    };
-  }, [dragging, sideViewOpacity]);
-
   return (
-    // Whole-bar drag surface (pointerEvents auto): the 252pt band alone left dead zones at
-    // both edges that read as "the ring is broken". Children that must not grab touches
-    // are pointerEvents="none".
+    // Whole-bar drag surface (pointerEvents auto): the strip BETWEEN the finder and the
+    // shutter is the entire aperture control — tick scale in the bottom half, side-view
+    // cross-section in the top half. Nothing ever floats over the finder or the focal
+    // chips. Children that must not grab touches are pointerEvents="none".
     <View style={styles.bar} pointerEvents="auto" {...(interactive ? panResponder.panHandlers : {})}>
+      {/* Side-view cross-section: top half of the strip, live with the ring value */}
+      {interactive ? (
+        <View style={[styles.sideSlot, { left: sideLeft, width: sideWidth }]} pointerEvents="none">
+          <ApertureSideView openness={openness} accent={accent} label={formatF(currentAperture)} width={sideWidth} />
+        </View>
+      ) : null}
+
       {/* Iris: the physical diaphragm (f/1.4 → big hole; f/4 → tiny hole) */}
       <View style={[styles.iris, { left: irisLeft }]} pointerEvents="none">
         <IrisGlyph size={44} openness={interactive ? openness : 0.55} accent={accent} />
       </View>
 
-      {/* The scale band scrolls under the fixed pointer (pointer == shutter axis) */}
+      {/* The tick scale — THE control — scrolls under the fixed pointer (shutter axis) */}
       <View style={[styles.trackClip, { left: trackLeft }]}>
         <Animated.View style={[styles.band, { transform: [{ translateX }] }]} pointerEvents="none">
           {interactive
@@ -235,13 +225,6 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
         />
       </View>
 
-      {/* Side-view simulation above the ring while dragging (DEMO or real hardware) */}
-      {interactive ? (
-        <Animated.View pointerEvents="none" style={[styles.sideView, { left: trackLeft, opacity: sideViewOpacity }]}>
-          <ApertureSideView openness={openness} accent={accent} label={formatF(currentAperture)} width={TRACK_WIDTH} />
-        </Animated.View>
-      ) : null}
-
       {(!isVariableAperture || demoMode) ? (
         <View
           style={[styles.demoBadge, demoMode && accent ? { borderColor: hexToRgba(accent, 0.55) } : null]}
@@ -261,30 +244,23 @@ const styles = StyleSheet.create({
     height: BAR_HEIGHT,
     width: '100%',
   },
-  sideView: {
+  sideSlot: {
     position: 'absolute',
-    bottom: BAR_HEIGHT + 6,
-    alignItems: 'center',
-  },
-  iris: {
-    position: 'absolute',
-    top: (BAR_HEIGHT - 44) / 2,
-    width: 44,
-    height: 44,
-    alignItems: 'center',
+    top: 1,
+    height: SIDE_H - 4,
     justifyContent: 'center',
   },
   trackClip: {
     position: 'absolute',
-    top: 0,
-    height: BAR_HEIGHT,
+    top: SIDE_H,
+    height: SCALE_H,
     overflow: 'hidden',
   },
   band: {
     position: 'absolute',
     top: 0,
     left: 0,
-    height: BAR_HEIGHT,
+    height: SCALE_H,
     width: TRACK_WIDTH * 3,
   },
   tickSlot: {
@@ -295,51 +271,59 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   tick: {
-    marginTop: BAR_HEIGHT - 20,
-    width: 1,
-    height: 5,
-    borderRadius: 0.5,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    marginTop: SCALE_H - 26,
+    width: 1.5,
+    height: 9,
+    borderRadius: 0.75,
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
   },
   tickMajor: {
-    width: 1.5,
-    height: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+    width: 2,
+    height: 13,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
   },
   tickBright: {
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    backgroundColor: 'rgba(255, 255, 255, 1)',
   },
   tickLabel: {
     position: 'absolute',
-    bottom: 6,
-    color: 'rgba(255, 255, 255, 0.5)',
-    fontSize: 10,
-    fontWeight: '600',
+    bottom: 4,
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontSize: 11,
+    fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },
   valueText: {
     position: 'absolute',
-    top: 4,
+    top: SIDE_H + 3,
     left: 0,
     right: 0,
     textAlign: 'center',
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '800',
     fontVariant: ['tabular-nums'],
   },
   pointer: {
     position: 'absolute',
-    top: BAR_HEIGHT - 24,
-    bottom: 8,
+    top: SIDE_H + SCALE_H - 30,
+    bottom: 6,
     left: TRACK_WIDTH / 2 - 0.75,
     width: 1.5,
     borderRadius: 0.75,
     backgroundColor: '#FFFFFF',
   },
+  iris: {
+    position: 'absolute',
+    top: SIDE_H + (SCALE_H - 44) / 2,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   demoBadge: {
     position: 'absolute',
-    top: 4,
+    top: SIDE_H + 3,
     right: 10,
     borderRadius: 6,
     borderWidth: 1,
