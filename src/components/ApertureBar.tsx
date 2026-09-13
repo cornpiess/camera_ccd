@@ -16,6 +16,12 @@ export interface ApertureBarProps {
   /** Fired continuously while dragging with the exact f-stop under the finger. */
   readonly onApertureChange: (fStop: number) => void;
   /**
+   * Fired ONCE per gesture on release/terminate with the final f-stop — the single
+   * hardware commit point. Per-move updates stay UI-only so the native session queue
+   * is never flooded with lockForConfiguration commands mid-drag.
+   */
+  readonly onApertureSettle?: (fStop: number) => void;
+  /**
    * Demo mode (fixed-lens devices, on by default): the ring is fully draggable for the
    * feel, but the capture stays at the lens's fixed aperture. Always labeled DEMO so the
    * simulation can never be mistaken for hardware control.
@@ -34,9 +40,10 @@ export interface ApertureBarProps {
 
 const BAR_HEIGHT = 96;
 const TRACK_WIDTH = 252;
-/** Drag distance that spans the whole range. */
 /** Drag distance that spans the whole range — deliberately long for a damped, heavy ring feel. */
 const FULL_DRAG_PX = 260;
+/** Scale band: 3× the visible width so the scroll has travel on both sides. */
+const BAND_SPAN = TRACK_WIDTH * 3;
 /** Physical ring feel: 24 detents across the full travel (≈0.15 stop at ƒ/1.4–ƒ/4). */
 const DETENT_COUNT = 24;
 /** Iris sits to the LEFT of the track so the pointer line stays exactly on the shutter axis. */
@@ -69,6 +76,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   currentAperture,
   isVariableAperture,
   onApertureChange,
+  onApertureSettle,
   demoMode = false,
   accent,
   sideViewEnabled = false,
@@ -86,11 +94,9 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   /** 0 = stopped down (ƒ/max), 1 = wide open (ƒ/min). Feeds iris hole + scroll direction. */
   const openness = clamp(1 - (toLog(currentAperture) - logLo) / span, 0, 1);
 
-  // Scale band: ticks from 1/6-stop minors to labeled full stops, spread over a band
-  // 3× the visible width so the scroll has travel on both sides.
-  const BAND_SPAN = TRACK_WIDTH * 3;
+  // Scale band ticks from 1/12-stop minors to labeled full stops, laid out over the band.
   const ticks = useMemo(() => {
-    const list: Array<{ key: string; x: number; major: boolean; label?: string }> = [];
+    const list: { key: string; x: number; major: boolean; label?: string }[] = [];
     if (!(hi > lo)) return list;
     const firstTwelfth = Math.ceil(logLo * 12);
     const lastTwelfth = Math.floor(logHi * 12);
@@ -142,8 +148,16 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   // used to rebuild on EVERY currentAperture/openness change (i.e. every drag update),
   // and a fresh PanResponder resets its internal gestureState.dx accumulation — the
   // computed f-stop snapped back to the grab point each frame ("the ring won't drag").
-  const dragValuesRef = useRef({ openness, currentAperture, onApertureChange, interactive, lo, hi, logLo, span });
-  dragValuesRef.current = { openness, currentAperture, onApertureChange, interactive, lo, hi, logLo, span };
+  const dragValuesRef = useRef({ openness, currentAperture, onApertureChange, onApertureSettle, interactive, lo, hi, logLo, span });
+  dragValuesRef.current = { openness, currentAperture, onApertureChange, onApertureSettle, interactive, lo, hi, logLo, span };
+
+  /** One hardware commit per gesture: re-derive the f-stop from the band's last position. */
+  const settleAtLastPosition = () => {
+    const v = dragValuesRef.current;
+    if (!v.interactive || v.hi <= v.lo) return;
+    const t = clamp(tRef.current, 0, 1);
+    v.onApertureSettle?.(Number(toF(v.logLo + (1 - t) * v.span).toFixed(2)));
+  };
 
   const panResponder = useMemo(
     () =>
@@ -181,10 +195,12 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
         onPanResponderRelease: () => {
           dragState.current.active = false;
           setDragging(false);
+          settleAtLastPosition();
         },
         onPanResponderTerminate: () => {
           dragState.current.active = false;
           setDragging(false);
+          settleAtLastPosition();
         },
       }),
     [detentIndexFor, translateX],

@@ -35,6 +35,7 @@ import {
 import { loadCameraState, saveCameraState, type CameraState } from './src/camera/cameraStateStore';
 import { buildFocalStops, defaultFocalStop, type FocalStop, type DeviceKind } from './src/camera/focalLadder';
 import { apertureVisualFactors, applyApertureVisual } from './src/camera/apertureVisualProfile';
+import { MAX_RING_PROFILES } from './src/components/RadialProfileSelector';
 import { deriveSkin, isLightColor } from './src/theme/skin';
 
 // Profile management provider
@@ -198,6 +199,8 @@ function CameraAppScreen(): React.JSX.Element {
   const [currentAperture, setCurrentAperture] = useState<number>(1.8);
   const [apertureRange, setApertureRange] = useState<{ min: number; max: number } | null>(null);
   const capabilitiesRef = useRef<CameraCapabilities | null>(null);
+  // Last hardware-confirmed f-stop; the ring reverts here when setAperture rejects.
+  const confirmedApertureRef = useRef<number>(1.8);
 
   // Rear lens inventory → derived focal stops for the dial (13/26/35/52 on virtual dual,
   // +78/156 on triple; single-wide bodies get 26/35/52).
@@ -361,6 +364,7 @@ function CameraAppScreen(): React.JSX.Element {
           const variable = Boolean(capabilities.supportsVariableAperture) && spanOK;
           setSupportsVariableAperture(variable);
           const aperture = capabilities.activeAperture ?? capabilities.activeLensAperture ?? 1.8;
+          confirmedApertureRef.current = aperture;
           setActiveAperture(aperture);
           setCurrentAperture(aperture);
 
@@ -380,6 +384,7 @@ function CameraAppScreen(): React.JSX.Element {
         }
       } catch {
         setSupportsVariableAperture(false);
+        confirmedApertureRef.current = 1.8;
         setActiveAperture(1.8);
         setCurrentAperture(1.8);
         setApertureRange(null);
@@ -450,17 +455,31 @@ function CameraAppScreen(): React.JSX.Element {
 
   // -------------------------------------------------------------
   // 6b. Foreground recovery: iOS suspends/interrupts the capture session while
-  // backgrounded (or during a call); startCamera is idempotent, so re-running the
-  // full init on return restores preview, capabilities and error states.
+  // backgrounded. startCamera is IDEMPOTENT natively (configured + running → no-op),
+  // so a lightweight restart call is enough — the old full initializeCameraSession
+  // here reset the user's DEMO aperture and flashed the loading overlay on EVERY
+  // foreground return. Zoom is re-asserted because some iOS versions drop the
+  // videoZoomFactor when they suspend the session.
   // -------------------------------------------------------------
+  const focalStopsRef = useRef<FocalStop[]>([]);
+  focalStopsRef.current = focalStops;
+
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && cameraRunningRef.current) {
-        void initializeCameraSession();
-      }
+      if (state !== 'active' || !cameraRunningRef.current) return;
+      CameraEngine.startCamera()
+        .then(() => {
+          setPermissionState('authorized');
+          const engaged = focalStopsRef.current.find((stop) => stop.mm === currentFocalMmRef.current);
+          if (engaged) CameraEngine.setZoomFactor(engaged.zoom).catch(() => {});
+        })
+        .catch((err: unknown) => {
+          recordDiag('warn', `foreground resume failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
     });
     return () => subscription.remove();
-  }, [initializeCameraSession]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // -------------------------------------------------------------
   // 7. Apply profile in separate effect WITHOUT restarting camera
@@ -488,25 +507,11 @@ function CameraAppScreen(): React.JSX.Element {
     [activeProfile, apertureVisual],
   );
 
-  useEffect(() => {
-    if (!isCameraRunning || !activeProfile || !effectiveProfile) return;
-
-    let isMounted = true;
-    const applyCurrentProfile = async () => {
-      try {
-        await CameraEngine.applyProfile(effectiveProfile);
-      } catch (err: unknown) {
-        if (isMounted) {
-          showTransientError(resolveErrorMessage(err));
-        }
-      }
-    };
-
-    applyCurrentProfile();
-    return () => {
-      isMounted = false;
-    };
-  }, [effectiveProfile, activeProfile, isCameraRunning, showTransientError]);
+  // The profile reaches the renderer through the DECLARATIVE `profile` prop on
+  // <CameraEngineView> alone (below). The old applyProfile effect here was a second
+  // channel onto the same native setProfile — on aperture moves it fired the bridge
+  // twice per tick. The native side additionally fingerprints the color payload, so a
+  // re-applied unchanged profile no longer rebuilds the compiled color cube at all.
 
   // Recommended-aperture default (product decision 2026-09-13): SELECTING a camera snaps
   // the ring to that profile's aperture.preferred (e.g. Ricoh GR → ƒ/2.8); the user then
@@ -523,7 +528,11 @@ function CameraAppScreen(): React.JSX.Element {
       const min = capabilitiesRef.current?.minAperture ?? apertureRange?.min ?? preferred;
       const max = capabilitiesRef.current?.maxAperture ?? apertureRange?.max ?? preferred;
       const clamped = Math.min(Math.max(preferred, min), max);
-      CameraEngine.setAperture(clamped).catch(() => {});
+      CameraEngine.setAperture(clamped)
+        .then(() => {
+          confirmedApertureRef.current = clamped;
+        })
+        .catch(() => {});
       setCurrentAperture(clamped);
       setActiveAperture(clamped);
     } else {
@@ -557,41 +566,44 @@ function CameraAppScreen(): React.JSX.Element {
   // -------------------------------------------------------------
   // 8. Hardware Actions: Aperture, Photo Capture
   // -------------------------------------------------------------
-  const handleApertureChange = async (aperture: number) => {
-    if (!supportsVariableAperture) {
-      if (!apertureDemoMode) {
-        // Fixed devices never call setAperture
-        return;
-      }
-      // DEMO mode: visual + linkage only — the capture stays at the fixed aperture.
-      setCurrentAperture(aperture);
-      setActiveAperture(aperture);
+  // Per-move: update the UI ONLY so the marker tracks the finger at touch rate. The
+  // hardware commit happens exactly once per gesture in handleApertureSettle — the old
+  // code called CameraEngine.setAperture on EVERY move event, queueing dozens of
+  // lockForConfiguration commands on the native session queue per drag (capture lag
+  // right after a drag, and a command storm on real variable-aperture hardware).
+  const handleApertureChange = (aperture: number) => {
+    if (!supportsVariableAperture && !apertureDemoMode) {
+      // Fixed devices without the demo ring never move.
       return;
     }
+    setCurrentAperture(aperture);
+    setActiveAperture(aperture);
+  };
+
+  // Gesture end → ONE hardware commit (aperture-priority: shutter/ISO stay automatic).
+  // Reverts to the last confirmed stop when the hardware rejects, and self-heals a lens
+  // misreported as variable (iOS 27 quirk) by demoting to fixed + DEMO for the session.
+  const handleApertureSettle = (aperture: number) => {
+    if (!supportsVariableAperture) return;
     const min = capabilitiesRef.current?.minAperture ?? apertureRange?.min ?? aperture;
     const max = capabilitiesRef.current?.maxAperture ?? apertureRange?.max ?? aperture;
     const clamped = Math.min(Math.max(aperture, min), max);
-    const previous = currentAperture;
-
-    // Optimistic UI so the marker tracks the finger immediately; revert if the
-    // hardware rejects, so the shown value is always a real confirmed stop.
-    setCurrentAperture(clamped);
-    setActiveAperture(clamped);
-    try {
-      await CameraEngine.setAperture(clamped);
-    } catch (err: unknown) {
-      setCurrentAperture(previous);
-      setActiveAperture(previous);
-      // Self-healing: a fixed-aperture lens misreported as variable (iOS 27 quirk) rejects
-      // EVERY setAperture — demote to fixed + DEMO for the rest of the session so the ring
-      // stays usable instead of snapping back on every drag.
-      if (err instanceof CameraEngineError && err.code === 'ERR_APERTURE_UNSUPPORTED') {
-        setSupportsVariableAperture(false);
-        setApertureDemoMode(true);
-        recordDiag('warn', 'aperture: hardware rejected setAperture — demoted to fixed + DEMO for this session');
-      }
-      showTransientError(resolveErrorMessage(err));
-    }
+    CameraEngine.setAperture(clamped)
+      .then(() => {
+        confirmedApertureRef.current = clamped;
+        setCurrentAperture(clamped);
+        setActiveAperture(clamped);
+      })
+      .catch((err: unknown) => {
+        setCurrentAperture(confirmedApertureRef.current);
+        setActiveAperture(confirmedApertureRef.current);
+        if (err instanceof CameraEngineError && err.code === 'ERR_APERTURE_UNSUPPORTED') {
+          setSupportsVariableAperture(false);
+          setApertureDemoMode(true);
+          recordDiag('warn', 'aperture: hardware rejected setAperture — demoted to fixed + DEMO for this session');
+        }
+        showTransientError(resolveErrorMessage(err));
+      });
   };
 
   /**
@@ -755,7 +767,10 @@ function CameraAppScreen(): React.JSX.Element {
       if (x != null && y != null && origin) {
         const { width: liveW, height: liveH } = screenDimsRef.current;
         const clampedCenter = getClampedCenter(origin, liveW, liveH);
-        const displayProfiles = profilesRef.current.slice(0, 8);
+        // MUST match the ring's own cap (RadialProfileSelector MAX_RING_PROFILES): the
+        // sector math resolves over the SAME node count the ring draws, or nodes 9+ on a
+        // >8-profile library would highlight one camera but select another.
+        const displayProfiles = profilesRef.current.slice(0, MAX_RING_PROFILES);
         const sector = computeRadialSector(x, y, clampedCenter, displayProfiles.length);
 
         if (sector !== null && displayProfiles[sector]) {
@@ -1052,6 +1067,7 @@ function CameraAppScreen(): React.JSX.Element {
                 currentAperture={currentAperture}
                 isVariableAperture={supportsVariableAperture || apertureDemoMode}
                 onApertureChange={handleApertureChange}
+                onApertureSettle={handleApertureSettle}
                 demoMode={!supportsVariableAperture && apertureDemoMode}
                 sideViewEnabled={apertureSideView}
                 onToggleSideView={() => setApertureSideView((enabled) => !enabled)}

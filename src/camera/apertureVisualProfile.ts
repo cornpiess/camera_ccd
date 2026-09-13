@@ -58,10 +58,22 @@ export function apertureVisualFactors(
 }
 
 /**
+ * Whether the aperture→bloom/starburst linkage is actually consumed by the native
+ * renderer. The halation/starburst stages were RETIRED from CameraDNARenderer (star
+ * spikes must come only from the real iPhone 18 Pro aperture optics) and every profile
+ * ships texture.halation.amount = 0 — so cloning the profile per f-stop changed nothing
+ * visible while costing a full native cube invalidation + 33³ rebuild per drag tick.
+ * Keep this OFF until the renderer gains a stage that reads these fields again; flip it
+ * to true in the same change that reintroduces the stages.
+ */
+const APERTURE_VISUAL_LINKAGE_ENABLED = false;
+
+/**
  * Merge the factors into a profile copy for the renderer. Only the two texture amounts
  * are touched; everything else (tone, LUT, color) passes through untouched.
  */
 export function applyApertureVisual<T extends Record<string, unknown>>(profile: T, factors: ApertureVisualFactors): T {
+  if (!APERTURE_VISUAL_LINKAGE_ENABLED) return profile;
   const texture = profile.texture as Record<string, unknown> | undefined;
   if (!texture || (factors.bloom === 1 && factors.starburst === 1)) return profile;
   const halation = texture.halation as Record<string, unknown> | undefined;

@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import type { FocalStop } from '../camera/focalLadder';
-import { hexToRgba, isLightColor } from '../theme/skin';
+import { isLightColor } from '../theme/skin';
 
 export interface FocalCircleRowProps {
   readonly stops: readonly FocalStop[];

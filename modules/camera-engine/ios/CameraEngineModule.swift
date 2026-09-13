@@ -184,6 +184,16 @@ final class ApertureController {
   /// via the auto sentinels). Apple notes the hardware may settle on the nearest real
   /// physical position, which is why callers re-read currentLensAperture through
   /// getCapabilities for display.
+  ///
+  /// Real-device hardening (no iPhone 18 Pro in the loop during development):
+  ///  - the auto sentinels are resolved through a THREE-TIER fallback (iOS 27 class
+  ///    properties → iOS 27 instance properties via KVC → the public
+  ///    AVCaptureExposureDurationCurrent / AVCaptureISOCurrent constants), so the call
+  ///    works regardless of which exact form Apple shipped the sentinels in — and on
+  ///    mismatch it degrades to an honest `.apertureUnsupported`, never a crash;
+  ///  - the hardware acknowledges through the setter's completion handler; a 3s
+  ///    watchdog settles success if the ack never arrives, so the JS promise can never
+  ///    hang (first settle wins).
   func setAperture(_ fStop: Double, on device: AVCaptureDevice?, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
     guard let device = device else {
       completion(.failure(.cameraUnavailable))
@@ -200,33 +210,83 @@ final class ApertureController {
       completion(.failure(.apertureUnsupported))
       return
     }
-    // The auto sentinels (shutter/ISO stay automatic) are iOS 27 class properties, so they
-    // are fetched through dynamic class-method calls too — compiling against an older SDK
-    // never references the symbols at link time.
-    let deviceClass: AnyObject = AVCaptureDevice.self
-    let durationSel = NSSelectorFromString("autoExposureDuration")
-    let isoSel = NSSelectorFromString("autoISO")
-    guard deviceClass.responds(to: durationSel), deviceClass.responds(to: isoSel),
-          let durationImp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), durationSel) as IMP?,
-          let isoImp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), isoSel) as IMP? else {
-      completion(.failure(.apertureUnsupported))
-      return
-    }
-    typealias ClassTimeGetter = @convention(c) (AnyObject, Selector) -> CMTime
-    typealias ClassFloatGetter = @convention(c) (AnyObject, Selector) -> Float
-    let autoDuration = unsafeBitCast(durationImp, to: ClassTimeGetter.self)(deviceClass, durationSel)
-    let autoIso = unsafeBitCast(isoImp, to: ClassFloatGetter.self)(deviceClass, isoSel)
+    let auto = autoSentinels(for: device)
     do {
       try device.lockForConfiguration()
       defer { device.unlockForConfiguration() }
       let imp = device.method(for: setterSel)
       typealias ApertureSetter = @convention(c) (NSObject, Selector, Float, CMTime, Float, ((Error?) -> Void)?) -> Void
       let fn = unsafeBitCast(imp, to: ApertureSetter.self)
-      fn(device, setterSel, target, autoDuration, autoIso, nil)
-      completion(.success(()))
+      let gate = SettleOnceGate(completion: completion)
+      fn(device, setterSel, target, auto.duration, auto.iso) { error in
+        if let error = error {
+          gate.settle(.failure(.configurationFailed))
+          print("[CameraEngine] setExposureModeCustom(lensAperture:) rejected: \(error.localizedDescription)")
+        } else {
+          gate.settle(.success(()))
+        }
+      }
+      DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+        // The optimistic UI already shows the chosen f-stop; getCapabilities re-reads
+        // the hardware truth whenever the UI asks. Never leave the promise pending.
+        gate.settle(.success(()))
+      }
     } catch {
       completion(.failure(.configurationFailed))
     }
+  }
+
+  /// Resolve the "keep automatic" sentinels for shutter/ISO. Order: iOS 27 class
+  /// properties (`AVCaptureDevice.autoExposureDuration` / `.autoISO`) → iOS 27 instance
+  /// properties (KVC; struct values arrive NSValue/NSNumber-boxed) → the long-standing
+  /// public constants (`AVCaptureExposureDurationCurrent` / `AVCaptureISOCurrent`,
+  /// available since iOS 8, semantics "leave automatic" for the setExposureModeCustom
+  /// family). Every tier validates its values; KVC is only attempted behind a
+  /// responds-check so a missing key can never raise.
+  private func autoSentinels(for device: AVCaptureDevice) -> (duration: CMTime, iso: Float) {
+    let durationSel = NSSelectorFromString("autoExposureDuration")
+    let isoSel = NSSelectorFromString("autoISO")
+
+    let deviceClass: AnyObject = AVCaptureDevice.self
+    if deviceClass.responds(to: durationSel), deviceClass.responds(to: isoSel),
+       let durationImp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), durationSel) as IMP?,
+       let isoImp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), isoSel) as IMP? {
+      typealias ClassTimeGetter = @convention(c) (AnyObject, Selector) -> CMTime
+      typealias ClassFloatGetter = @convention(c) (AnyObject, Selector) -> Float
+      let duration = unsafeBitCast(durationImp, to: ClassTimeGetter.self)(deviceClass, durationSel)
+      let iso = unsafeBitCast(isoImp, to: ClassFloatGetter.self)(deviceClass, isoSel)
+      if duration.isValid, iso.isFinite { return (duration, iso) }
+    }
+
+    if device.responds(to: durationSel), device.responds(to: isoSel),
+       let boxedDuration = device.value(forKey: "autoExposureDuration") as? NSValue,
+       let boxedIso = device.value(forKey: "autoISO") as? NSNumber,
+       boxedDuration.cmTimeValue.isValid, boxedIso.floatValue.isFinite {
+      return (boxedDuration.cmTimeValue, boxedIso.floatValue)
+    }
+
+    return (AVCaptureExposureDurationCurrent, AVCaptureISOCurrent)
+  }
+}
+
+/// Settles exactly once: first of (hardware ack, watchdog) wins. The ack may arrive on
+/// an AVF-internal queue while the watchdog fires on main — guarded by a lock.
+private final class SettleOnceGate {
+  private let lock = NSLock()
+  private var settled = false
+  private let completion: (Result<Void, CameraEngineError>) -> Void
+
+  init(completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
+    self.completion = completion
+  }
+
+  func settle(_ result: Result<Void, CameraEngineError>) {
+    lock.lock()
+    let first = !settled
+    settled = true
+    lock.unlock()
+    guard first else { return }
+    DispatchQueue.main.async { self.completion(result) }
   }
 }
 
@@ -707,18 +767,26 @@ public final class CameraEngineView: ExpoView {
     //   output.isAppleProRAWEnabled = true
     // }
 
-    // WYSIWYG preview feed: capped 4:3 buffers rendered through the Camera DNA pipeline.
+    // WYSIWYG preview feed rendered through the Camera DNA pipeline. NOTE:
+    // AVCaptureVideoDataOutput.videoSettings accepts ONLY the pixel-format key — the
+    // kCVPixelBufferWidth/Height hints that used to sit here are silently ignored, and
+    // with the .photo preset the feed arrives at FULL sensor resolution. The pipeline
+    // downscales at its head instead (see captureOutput).
     if !session.outputs.contains(where: { $0 === videoOutput }) {
       videoOutput.videoSettings = [
         kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-        kCVPixelBufferWidthKey as String: 1280,
-        kCVPixelBufferHeightKey as String: 960,
       ]
       videoOutput.alwaysDiscardsLateVideoFrames = true
       videoOutput.setSampleBufferDelegate(self, queue: renderQueue)
       if session.canAddOutput(videoOutput) {
         session.addOutput(videoOutput)
       }
+    }
+    // The viewfinder draws at 30fps — frames beyond that are pure GPU/battery waste.
+    // Supported-check first: setting frame duration on a connection that lacks it raises.
+    if let videoConnection = videoOutput.connection(with: .video),
+       videoConnection.isVideoMinFrameDurationSupported {
+      videoConnection.videoMinFrameDuration = CMTime(value: 1, timescale: 30)
     }
     setOrientation(on: videoOutput, photoOutput: output)
 
@@ -947,6 +1015,17 @@ extension CameraEngineView: AVCaptureVideoDataOutputSampleBufferDelegate {
   public func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
     guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
     var image = CIImage(cvPixelBuffer: pixelBuffer)
+    // Cap the preview work at the display's needs: with the .photo preset the feed
+    // arrives at full sensor resolution (4032×3024), and every CI stage after this
+    // point is priced by the DAG's output bounds — scale at the head, pay preview
+    // prices. (The old kCVPixelBufferWidth/Height videoSettings hints never worked.)
+    let previewCap: CGFloat = 1280
+    let sourceExtent = image.extent
+    let longest = max(sourceExtent.width, sourceExtent.height)
+    if longest > previewCap {
+      let downscale = previewCap / longest
+      image = image.transformed(by: CGAffineTransform(scaleX: downscale, y: downscale))
+    }
     let profile = profileSnapshot()
     if !profile.isEmpty {
       image = CameraDNARenderer.apply(profile, to: image, mode: .preview)
@@ -1035,12 +1114,21 @@ private final class PreviewRenderer: NSObject, MTKViewDelegate {
 private enum LUTLoader {
   private static let lock = NSLock()
   private static var cache: [String: (dimension: Int, data: Data)] = [:]
+  /// LRU order (oldest first). A parsed 33³ cube is ~0.6 MB; the calibration library
+  /// ships 57 cubes, so an uncapped cache accumulated ~35 MB of native memory forever
+  /// once profiles started referencing more of the library. 8 slots hold every active
+  /// profile plus quick switch neighbors with room to spare.
+  private static var cacheOrder: [String] = []
+  private static let cacheLimit = 8
   private static var loggedMissing: Set<String> = []
 
   static func load(_ rawName: String?) -> (dimension: Int, data: Data)? {
     guard let name = rawName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
     lock.lock(); defer { lock.unlock() }
-    if let hit = cache[name] { return hit }
+    if let hit = cache[name] {
+      touch(name)
+      return hit
+    }
     guard let parsed = parseBundleLUT(named: name) else {
       // 静默跳过 LUT 会让"新相机没有效果"无从排查（典型原因：JS 列表热更新了、原生 LUT bundle 还是旧构建的）。
       // 每个名字只报一次，避免逐帧刷日志。
@@ -1051,7 +1139,17 @@ private enum LUTLoader {
       return nil
     }
     cache[name] = parsed
+    touch(name)
+    while cacheOrder.count > cacheLimit, let oldest = cacheOrder.first {
+      cacheOrder.removeFirst()
+      cache.removeValue(forKey: oldest)
+    }
     return parsed
+  }
+
+  private static func touch(_ name: String) {
+    cacheOrder.removeAll { $0 == name }
+    cacheOrder.append(name)
   }
 
   private static func bundleResourceURL(named name: String) -> URL? {
@@ -1571,12 +1669,35 @@ private enum CameraDNARenderer {
   }
   private static var effectiveCubeCache: [EffectiveCubeKey: (dimension: Int, data: Data)] = [:]
   private static var profileRevisions: [String: Int] = [:]
+  /// Last-seen color payload fingerprint per profile id: lets repeated setProfile calls
+  /// with an UNCHANGED profile keep the current revision (no rebuild, no cache growth).
+  private static var profileColorFingerprints: [String: Int] = [:]
   private static let cubeLock = NSLock()
-  /// Bump whenever a profile's color payload changes in place (profile re-apply).
+
+  /// Bump the revision ONLY when a profile's COLOR payload actually changed. setProfile
+  /// runs on every RN prop application AND through applyProfile — historically twice per
+  /// aperture-drag tick, which rebuilt this 33³ cube on the render queue each time and
+  /// leaked one ~0.5 MB cache entry per rebuild. Tone/grain/vignette are read per frame
+  /// from the live profile dict and never need a cube rebuild.
   static func invalidateCompiledProfile(_ profile: [String: Any]) {
     guard let id = profile["id"] as? String else { return }
+    let fingerprint = colorFingerprint(profile["color"])
     cubeLock.lock(); defer { cubeLock.unlock() }
+    if let seen = profileColorFingerprints[id], seen == fingerprint { return }
+    profileColorFingerprints[id] = fingerprint
     profileRevisions[id, default: 0] += 1
+  }
+
+  private static func colorFingerprint(_ color: Any?) -> Int {
+    guard let color else { return 0 }
+    var hasher = Hasher()
+    if let data = try? JSONSerialization.data(withJSONObject: color, options: [.sortedKeys]) {
+      hasher.combine(data)
+    } else {
+      // Unserializable payload: never match a previous fingerprint (forces a rebuild).
+      hasher.combine(UUID().uuidString)
+    }
+    return hasher.finalize()
   }
 
   private static func effectiveColorCube(for profile: [String: Any]) -> (dimension: Int, data: Data)? {
@@ -1596,6 +1717,9 @@ private enum CameraDNARenderer {
     let cube = buildEffectiveCube(profile: profile, base: baseLUT)
     cubeLock.lock()
     effectiveCubeCache[key] = cube
+    // Drop superseded revisions: only the newest cube per profile is reachable, the
+    // rest used to accumulate forever (~0.5 MB per rebuild → Jetsam during long sessions).
+    effectiveCubeCache = effectiveCubeCache.filter { $0.key.id != id || $0.key.revision == revision }
     cubeLock.unlock()
     return cube
   }
@@ -1606,15 +1730,30 @@ private enum CameraDNARenderer {
     var values = floatArray(base.data)
     let count = dim * dim * dim
 
-    // 1. lutIntensity: linear pull-back toward the untouched color (per entry).
+    // 1. lutIntensity: blend each entry toward its own grid coordinate (the identity
+    // mapping), i.e. out = intensity·LUT(coord) + (1−intensity)·coord — the cube form of
+    // the pre-refactor alpha-fade blend over the un-luted image, which is what the
+    // calibrated 0.5–0.6 values were tuned against.
+    //
+    // BUILD 42 CRASH ROOT CAUSE: the previous loop advanced ONE index by 4+4+4+1 per
+    // entry (values[i], then values[i+4], then values[i+8] — not R/G/B of the entry),
+    // both scraping the wrong channels and running off the end of the array: with a
+    // 33³ cube (143,748 floats) the last group read index 143,749 → Swift
+    // index-out-of-range trap → the app died on the FIRST preview frame on device,
+    // exactly "crash right after granting camera permission". Fixed indices per entry
+    // (o, o+1, o+2; alpha untouched) are mandatory in this loop.
     let intensity = Float(number(color, "lutIntensity", 1, 0...1))
     if intensity < 0.999 {
-      var i = 0
-      while i < values.count {
-        values[i] = intensity * values[i] + (1 - intensity); i += 4
-        values[i] = intensity * values[i] + (1 - intensity); i += 4
-        values[i] = intensity * values[i] + (1 - intensity); i += 4
-        i += 1
+      let denominator = Float(dim - 1)
+      // CIColorCube/.cube order: RED varies fastest, then green, then blue.
+      for index in 0..<count {
+        let o = index * 4
+        values[o] = intensity * values[o]
+          + (1 - intensity) * Float(index % dim) / denominator
+        values[o + 1] = intensity * values[o + 1]
+          + (1 - intensity) * Float((index / dim) % dim) / denominator
+        values[o + 2] = intensity * values[o + 2]
+          + (1 - intensity) * Float(index / (dim * dim)) / denominator
       }
     }
 
