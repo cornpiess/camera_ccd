@@ -1,0 +1,99 @@
+{
+  "aperture": {
+    "preferred": 2.8,
+    "starZone": 4
+  },
+  "raw": {
+    "sharpness": 0.42,
+    "detail": 0.54,
+    "localToneMap": 0.14,
+    "luminanceNoiseReduction": 0.1,
+    "colorNoiseReduction": 0.14
+  },
+  "tone": {
+    "exposure": 0.05,
+    "contrast": 1.02,
+    "blackPoint": 0.006,
+    "curve": [
+      [
+        0,
+        0.015
+      ],
+      [
+        0.25,
+        0.275
+      ],
+      [
+        0.5,
+        0.525
+      ],
+      [
+        0.75,
+        0.785
+      ],
+      [
+        1,
+        0.99
+      ]
+    ],
+    "exposureBias": 0
+  },
+  "color": {
+    "saturation": 0.94,
+    "temperature": 0,
+    "tint": 0,
+    "hueBands": {
+      "red": {
+        "hue": 3,
+        "saturation": 0.95,
+        "luminance": 1.02
+      },
+      "orange": {
+        "hue": 1,
+        "saturation": 0.97,
+        "luminance": 1.03
+      },
+      "yellow": {
+        "hue": 0,
+        "saturation": 0.95,
+        "luminance": 1.02
+      },
+      "green": {
+        "hue": 5,
+        "saturation": 0.96,
+        "luminance": 0.98
+      },
+      "cyan": {
+        "hue": 2,
+        "saturation": 0.96,
+        "luminance": 0.99
+      },
+      "blue": {
+        "hue": -1,
+        "saturation": 0.92,
+        "luminance": 1
+      },
+      "magenta": {
+        "hue": 1,
+        "saturation": 0.95,
+        "luminance": 1.01
+      }
+    },
+    "lut": "ricoh-negative",
+    "lutIntensity": 0.55
+  },
+  "texture": {
+    "grain": {
+      "amount": 0.015,
+      "size": 0.35
+    },
+    "vignette": {
+      "amount": 0.01,
+      "radius": 0.88
+    },
+    "halation": {
+      "amount": 0,
+      "radius": 0.2
+    }
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "aperture": {
+    "preferred": 1.8,
+    "starZone": 4
+  },
+  "raw": {
+    "sharpness": 0.3,
+    "detail": 0.5,
+    "localToneMap": 0.08,
+    "luminanceNoiseReduction": 0.06,
+    "colorNoiseReduction": 0.1
+  },
+  "tone": {
+    "exposure": 0.02,
+    "contrast": 1.03,
+    "blackPoint": 0.008,
+    "curve": [
+      [
+        0,
+        0.01
+      ],
+      [
+        0.25,
+        0.235
+      ],
+      [
+        0.5,
+        0.505
+      ],
+      [
+        0.75,
+        0.785
+      ],
+      [
+        1,
+        0.99
+      ]
+    ],
+    "exposureBias": 0
+  },
+  "color": {
+    "saturation": 0.99,
+    "temperature": 5,
+    "tint": 2,
+    "hueBands": {
+      "red": {
+        "hue": -1,
+        "saturation": 1.03,
+        "luminance": 0.99
+      },
+      "orange": {
+        "hue": -1,
+        "saturation": 1,
+        "luminance": 1.02
+      },
+      "yellow": {
+        "hue": -2,
+        "saturation": 0.96,
+        "luminance": 1
+      },
+      "green": {
+        "hue": 1,
+        "saturation": 0.93,
+        "luminance": 0.99
+      },
+      "cyan": {
+        "hue": 0,
+        "saturation": 0.96,
+        "luminance": 1
+      },
+      "blue": {
+        "hue": 0,
+        "saturation": 0.95,
+        "luminance": 0.99
+      },
+      "magenta": {
+        "hue": 0,
+        "saturation": 1.02,
+        "luminance": 1
+      }
+    },
+    "lut": "leica-m9",
+    "lutIntensity": 0.5
+  },
+  "texture": {
+    "grain": {
+      "amount": 0.025,
+      "size": 0.35
+    },
+    "vignette": {
+      "amount": 0.015,
+      "radius": 0.86
+    },
+    "halation": {
+      "amount": 0,
+      "radius": 0.2
+    }
+  }
+}

@@ -503,6 +503,8 @@ public final class CameraEngineView: ExpoView {
   }
 
   fileprivate func setProfile(_ value: [String: Any]) {
+    // New color payload → bump the revision so the cached effectiveColorCube rebuilds.
+    CameraDNARenderer.invalidateCompiledProfile(value)
     profileLock.lock(); profile = value; profileLock.unlock()
   }
 
@@ -697,10 +699,13 @@ public final class CameraEngineView: ExpoView {
     // extra capture latency is acceptable. Never flip this per-capture at runtime.
     output.maxPhotoQualityPrioritization = .balanced
 
-    // Enable Apple ProRAW capability on session output if supported on this hardware & OS
-    if #available(iOS 14.3, *), output.isAppleProRAWSupported {
-      output.isAppleProRAWEnabled = true
-    }
+    // ProRAW capability stays available in code, but is NOT enabled by default (expert
+    // review §3): the current phase targets Preview ≈ Final, and the preview feeds from
+    // Apple's live pipeline. Capture through the same Apple-processed photo until a
+    // dedicated ProRAW normalizer exists.
+    // if #available(iOS 14.3, *), output.isAppleProRAWSupported {
+    //   output.isAppleProRAWEnabled = true
+    // }
 
     // WYSIWYG preview feed: capped 4:3 buffers rendered through the Camera DNA pipeline.
     if !session.outputs.contains(where: { $0 === videoOutput }) {
@@ -1469,15 +1474,12 @@ private enum CameraDNARenderer {
     let raw = dictionary(profile["raw"])
     let tone = dictionary(profile["tone"])
     let color = dictionary(profile["color"])
-    let texture = dictionary(profile["texture"])
-    let grain = dictionary(texture["grain"])
-    let vignette = dictionary(texture["vignette"])
-    let halation = dictionary(texture["halation"])
+    let grain = dictionary(dictionary(profile["texture"])["grain"])
+    let vignette = dictionary(dictionary(profile["texture"])["vignette"])
     var image = source
 
-    // Detail & Deharsh (FINAL-ONLY): softened sharpening / local tone. The live preview
-    // skips these — per-frame convolution is wasted at preview resolution and the film
-    // character lives in the shared color stages.
+    // FINAL-ONLY detail: softened sharpening / local tone. The live preview skips these —
+    // per-frame convolution is wasted at preview resolution.
     if mode == .final && !isRawSource {
       let luminanceNR = number(raw, "luminanceNoiseReduction", 0, 0...1)
       let colorNR = number(raw, "colorNoiseReduction", 0, 0...1)
@@ -1501,7 +1503,20 @@ private enum CameraDNARenderer {
       }
     }
 
-    // Tone: exposure, contrast, black point, five-point tone curve
+    // ── Effective color stage (PRECOMPILED, cached per profile) ──────────────────
+    // One 33³ cube fuses LUT (character) + temperature/tint + saturation + 7-band HSL
+    // (fine trim). Per expert review: the LUT decides the color character, the JSON only
+    // fine-trims it — and the preview runs a SINGLE cube per frame instead of a 17³ HSL
+    // cube + 33³ LUT + several color filters chained.
+    if let effective = effectiveColorCube(for: profile) {
+      image = filter("CIColorCubeWithColorSpace", image, [
+        "inputCubeDimension": effective.dimension,
+        "inputCubeData": effective.data,
+        "inputColorSpace": CameraEngineGPU.sRGBColorSpace,
+      ])
+    }
+
+    // ── Tone: exposure, contrast, black point, five-point curve (JSON-owned) ─────
     image = filter("CIExposureAdjust", image, [kCIInputEVKey: number(tone, "exposure", 0, -5...5)])
     image = filter("CIColorControls", image, [kCIInputSaturationKey: 1.0, kCIInputContrastKey: number(tone, "contrast", 1, 0...4), kCIInputBrightnessKey: 0.0])
     let blackPoint = number(tone, "blackPoint", 0, 0...0.95)
@@ -1518,52 +1533,9 @@ private enum CameraDNARenderer {
       image = filter("CIToneCurve", image, Dictionary(uniqueKeysWithValues: points.enumerated().map { ("inputPoint\($0.offset)", $0.element) }))
     }
 
-    // Global color. Temperature is offset from 6500 K neutral
-    image = filter("CIColorControls", image, [kCIInputSaturationKey: number(color, "saturation", 1, 0...4), kCIInputContrastKey: 1.0, kCIInputBrightnessKey: 0.0])
-    let targetTemperature = min(12_000, max(2_000, 6_500 + number(color, "temperature", 0, -4_500...5_500)))
-    let tint = number(color, "tint", 0, -200...200)
-    if targetTemperature != 6_500 || tint != 0 {
-      image = filter("CITemperatureAndTint", image, [
-        "inputNeutral": CIVector(x: 6500, y: 0),
-        "inputTargetNeutral": CIVector(x: CGFloat(targetTemperature), y: CGFloat(tint))
-      ])
-    }
-
-    // 7-Band Hue adjustments through color cube
-    if let cube = hueBandCube(dictionary(color["hueBands"])) {
-      image = filter("CIColorCube", image, ["inputCubeDimension": cube.dimension, "inputCubeData": cube.data])
-    }
-
-    // SHARED: camera-character LUT (.cube, Camera18_LUT_V0 pack) — applied identically in
-    // preview and final so both outputs share the same color DNA. `lutIntensity` (0..1,
-    // default 1) holds a calibrated look back over the tone-mapped base so characters
-    // layer without a cheap full-strength filter feel.
-    if let lutName = color["lut"] as? String, let cube = LUTLoader.load(lutName) {
-      let luted = filter("CIColorCubeWithColorSpace", image, [
-        "inputCubeDimension": cube.dimension,
-        "inputCubeData": cube.data,
-        "inputColorSpace": CameraEngineGPU.sRGBColorSpace,
-      ])
-      let intensity = number(color, "lutIntensity", 1, 0...1)
-      if intensity < 0.999 {
-        let faded = filter("CIColorMatrix", luted, ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(intensity))])
-        image = filter("CISourceOverCompositing", faded, [kCIInputBackgroundImageKey: image])
-      } else {
-        image = luted
-      }
-    }
-
-    // SHARED: vignette
-    let vignetteAmount = number(vignette, "amount", 0, 0...1)
-    if vignetteAmount > 0 {
-      // CIVignette's inputRadius is a normalized scale (~0.5–2 useful); the JSON value is a 0–1
-      // fraction where larger = falloff starts farther from the center = weaker vignette.
-      let radius = 0.5 + number(vignette, "radius", 0.75, 0...1)
-      image = filter("CIVignette", image, [kCIInputIntensityKey: vignetteAmount * 2.0, kCIInputRadiusKey: radius])
-    }
-
-    // FINAL-ONLY texture: full-strength grain and halation. The preview skips them (they are
-    // heavy per-frame convolutions); the saved photo carries the complete film texture.
+    // FINAL-ONLY texture: grain and (faint) vignette. Halation is retired from the six
+    // core cameras; the software starburst stage is REMOVED entirely — star spikes must
+    // come only from the real iPhone 18 Pro aperture (expert review §2).
     if mode == .final {
       let grainAmount = number(grain, "amount", 0, 0...1)
       if grainAmount > 0, var noise = CIFilter(name: "CIRandomGenerator")?.outputImage {
@@ -1574,55 +1546,12 @@ private enum CameraDNARenderer {
         let faded = filter("CIColorMatrix", mono, ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(grainAmount * 0.35))])
         image = filter("CISoftLightBlendMode", faded, [kCIInputBackgroundImageKey: image]).cropped(to: image.extent)
       }
-      let halationAmount = number(halation, "amount", 0, 0...1)
-      if halationAmount > 0 {
-        let highlights = filter("CIColorControls", image, [kCIInputSaturationKey: 0.0, kCIInputContrastKey: 3.0, kCIInputBrightnessKey: -0.5])
-        let warm = filter("CIColorMatrix", highlights, [
-          "inputRVector": CIVector(x: 1.0, y: 0, z: 0, w: 0),
-          "inputGVector": CIVector(x: 0, y: 0.35, z: 0, w: 0),
-          "inputBVector": CIVector(x: 0, y: 0, z: 0.12, w: 0),
-          "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(halationAmount * 0.65))
-        ])
-        let radius = 2.0 + number(halation, "radius", 0.2, 0...1) * 38.0
-        let glow = filter("CIGaussianBlur", warm, [kCIInputRadiusKey: radius]).cropped(to: image.extent)
-        image = filter("CIScreenBlendMode", glow, [kCIInputBackgroundImageKey: image]).cropped(to: image.extent)
-      }
-
-      // Starburst (FINAL-ONLY): point lights only. Highlight cut-in → multi-direction
-      // motion blur → screen back. Plain walls/skin/sky stay below the threshold and
-      // never streak. Strength is aperture-linked from the JS layer (ApertureVisualProfile):
-      // near-absent wide open, strongest stopped down.
-      let starburst = dictionary(texture["starburst"])
-      let starStrength = number(starburst, "strength", 0, 0...1)
-      if starStrength > 0.001 {
-        let threshold = number(starburst, "threshold", 0.78, 0...1)
-        if threshold < 0.995 {
-          let cutScale = CGFloat(1.0 / max(0.05, 1.0 - threshold))
-          let cutBias = CGFloat(-threshold * cutScale)
-          var cut = filter("CIColorMatrix", image, [
-            "inputRVector": CIVector(x: cutScale, y: 0, z: 0, w: 0),
-            "inputGVector": CIVector(x: 0, y: cutScale, z: 0, w: 0),
-            "inputBVector": CIVector(x: 0, y: 0, z: cutScale, w: 0),
-            "inputBiasVector": CIVector(x: cutBias, y: cutBias, z: cutBias, w: 0)
-          ])
-          cut = filter("CIColorClamp", cut, [
-            "inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 0),
-            "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1)
-          ])
-          // Visible ray points = 2 per blur direction (4-ray = cross, 6, 8 …).
-          let directions = max(2, min(4, Int(number(starburst, "rays", 4, 4...8)) / 2))
-          let streakRadius = CGFloat(6.0 + number(starburst, "length", 0.3, 0...1) * 55.0)
-          var streaks: CIImage? = nil
-          for i in 0..<directions {
-            let angle = CGFloat(Double(i) * Double.pi / Double(directions))
-            let ray = filter("CIMotionBlur", cut, [kCIInputAngleKey: angle, kCIInputRadiusKey: streakRadius]).cropped(to: image.extent)
-            streaks = streaks.map { filter("CIScreenBlendMode", ray, [kCIInputBackgroundImageKey: $0]) } ?? ray
-          }
-          if let streaks = streaks {
-            let faded = filter("CIColorMatrix", streaks, ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(starStrength * 0.85))])
-            image = filter("CIScreenBlendMode", faded, [kCIInputBackgroundImageKey: image]).cropped(to: image.extent)
-          }
-        }
+      let vignetteAmount = number(vignette, "amount", 0, 0...1)
+      if vignetteAmount > 0 {
+        // CIVignette's inputRadius is a normalized scale (~0.5–2 useful); the JSON value is
+        // a 0–1 fraction where larger = falloff starts farther from the center = weaker.
+        let radius = 0.5 + number(vignette, "radius", 0.75, 0...1)
+        image = filter("CIVignette", image, [kCIInputIntensityKey: vignetteAmount * 2.0, kCIInputRadiusKey: radius])
       }
     }
 
@@ -1630,6 +1559,129 @@ private enum CameraDNARenderer {
   }
 
   private static func dictionary(_ value: Any?) -> [String: Any] { value as? [String: Any] ?? [:] }
+
+  // ── Effective color cube (expert review §4) ────────────────────────────────────
+  // Fuses, per profile: base LUT × lutIntensity → temperature/tint → saturation →
+  // 7-band HSL fine trim — into ONE 33³ cube, cached by profile identity. Profile
+  // switching only swaps cube + tone; nothing is regenerated per frame.
+  private struct EffectiveCubeKey: Equatable {
+    let id: String
+    let revision: Int
+  }
+  private static var effectiveCubeCache: [EffectiveCubeKey: (dimension: Int, data: Data)] = [:]
+  private static var profileRevisions: [String: Int] = [:]
+  private static let cubeLock = NSLock()
+  /// Bump whenever a profile's color payload changes in place (profile re-apply).
+  static func invalidateCompiledProfile(_ profile: [String: Any]) {
+    guard let id = profile["id"] as? String else { return }
+    cubeLock.lock(); defer { cubeLock.unlock() }
+    profileRevisions[id, default: 0] += 1
+  }
+
+  private static func effectiveColorCube(for profile: [String: Any]) -> (dimension: Int, data: Data)? {
+    let color = dictionary(profile["color"])
+    guard let lutName = color["lut"] as? String, let baseLUT = LUTLoader.load(lutName) else {
+      // No LUT: fall back to the legacy standalone hue-band cube path (still one cube).
+      return hueBandCube(dictionary(color["hueBands"]))
+    }
+    let id = (profile["id"] as? String) ?? lutName
+    let revision: Int
+    cubeLock.lock()
+    revision = profileRevisions[id] ?? 0
+    let key = EffectiveCubeKey(id: id, revision: revision)
+    if let hit = effectiveCubeCache[key] { cubeLock.unlock(); return hit }
+    cubeLock.unlock()
+
+    let cube = buildEffectiveCube(profile: profile, base: baseLUT)
+    cubeLock.lock()
+    effectiveCubeCache[key] = cube
+    cubeLock.unlock()
+    return cube
+  }
+
+  private static func buildEffectiveCube(profile: [String: Any], base: (dimension: Int, data: Data)) -> (dimension: Int, data: Data) {
+    let color = dictionary(profile["color"])
+    let dim = base.dimension
+    var values = [Float](base.data)
+    let count = dim * dim * dim
+
+    // 1. lutIntensity: linear pull-back toward the untouched color (per entry).
+    let intensity = Float(number(color, "lutIntensity", 1, 0...1))
+    if intensity < 0.999 {
+      var i = 0
+      while i < values.count {
+        values[i] = intensity * values[i] + (1 - intensity); i += 4
+        values[i] = intensity * values[i] + (1 - intensity); i += 4
+        values[i] = intensity * values[i] + (1 - intensity); i += 4
+        i += 1
+      }
+    }
+
+    // 2. Temperature/tint (offset from 6500 K neutral, like the old CITemperatureAndTint).
+    let kelvin = min(12_000.0, max(2_000.0, 6_500.0 + number(color, "temperature", 0, -4_500...5_500)))
+    let tint = number(color, "tint", 0, -200...200)
+    let tempGain: (Double, Double, Double) = {
+      // Approximate CITemperatureAndTint's neutral→target ramp by RGB gain ratios.
+      let t = kelvin / 6_500.0
+      return (min(2.0, pow(t, 0.22)), 1.0, min(2.0, pow(1.0 / t, 0.22)))
+    }()
+    let tintGainG = 1.0 - tint * 0.0006
+    let tintGainRB = 1.0 + tint * 0.0003
+    let needsTemp = abs(kelvin - 6_500.0) > 0.5 || abs(tint) > 0.01
+    // 3. Saturation (luma-preserving, same Rec.709 weights as CIColorControls).
+    let sat = Float(number(color, "saturation", 1, 0...4))
+    // 4. 7-band HSL fine trim.
+    let bandNames = ["red", "orange", "yellow", "green", "cyan", "blue", "magenta"]
+    let bandCenters: [Double] = [0, 30, 57, 117, 182, 230, 302]
+    let adjustments = zip(bandNames, bandCenters).map { name, center -> (Double, Double, Double, Double) in
+      let band = dictionary(color["hueBands"])
+      return (center, number(band, "hue", 0, -180...180), number(band, "saturation", 1, 0...4), number(band, "luminance", 1, 0...4))
+    }
+    let needsHSL = adjustments.contains { abs($0.1) > 0.0001 || abs($0.2 - 1) > 0.0001 || abs($0.3 - 1) > 0.0001 }
+
+    if needsTemp || sat != 1.0 || needsHSL {
+      for index in 0..<count {
+        let o = index * 4
+        var r = Double(values[o]), g = Double(values[o + 1]), b = Double(values[o + 2])
+        if needsTemp {
+          r *= tempGain.0; b *= tempGain.2
+          g *= tintGainG; r *= tintGainRB; b *= tintGainRB
+        }
+        if sat != 1.0 {
+          let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+          r = luma + (r - luma) * Double(sat)
+          g = luma + (g - luma) * Double(sat)
+          b = luma + (b - luma) * Double(sat)
+        }
+        if needsHSL {
+          var hsl = rgbToHSL(min(1, max(0, r)), min(1, max(0, g)), min(1, max(0, b)))
+          var hueShift = 0.0, saturation = 1.0, luminance = 1.0, weightSum = 0.0
+          for item in adjustments {
+            let distance = circularDistance(hsl.h, item.0)
+            let weight = max(0.0, 1.0 - (distance / 42.0))
+            if weight > 0 {
+              let smooth = weight * weight * (3.0 - 2.0 * weight)
+              hueShift += item.1 * smooth
+              saturation += (item.2 - 1.0) * smooth
+              luminance += (item.3 - 1.0) * smooth
+              weightSum += smooth
+            }
+          }
+          if weightSum > 0 {
+            hsl.h = fmod(hsl.h + (hueShift / weightSum) + 360.0, 360.0)
+            hsl.s = min(1.0, max(0.0, hsl.s * max(0.0, saturation)))
+            hsl.l = min(1.0, max(0.0, hsl.l * max(0.0, luminance)))
+          }
+          let rgb = hslToRGB(hsl.h, hsl.s, hsl.l)
+          r = rgb.0; g = rgb.1; b = rgb.2
+        }
+        values[o] = Float(min(1.0, max(0.0, r)))
+        values[o + 1] = Float(min(1.0, max(0.0, g)))
+        values[o + 2] = Float(min(1.0, max(0.0, b)))
+      }
+    }
+    return (dim, Data(bytes: values, count: values.count * MemoryLayout<Float>.size))
+  }
 
   private static func number(_ values: [String: Any], _ key: String, _ fallback: Double, _ range: ClosedRange<Double>) -> Double {
     guard let boxed = values[key] as? NSNumber, CFGetTypeID(boxed) != CFBooleanGetTypeID() else { return fallback }

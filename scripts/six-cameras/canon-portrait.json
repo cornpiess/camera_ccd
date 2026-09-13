@@ -1,0 +1,99 @@
+{
+  "aperture": {
+    "preferred": 1.8,
+    "starZone": 4
+  },
+  "raw": {
+    "sharpness": 0.32,
+    "detail": 0.5,
+    "localToneMap": 0.14,
+    "luminanceNoiseReduction": 0.12,
+    "colorNoiseReduction": 0.18
+  },
+  "tone": {
+    "exposure": 0.04,
+    "contrast": 0.99,
+    "blackPoint": 0.005,
+    "curve": [
+      [
+        0,
+        0.01
+      ],
+      [
+        0.25,
+        0.265
+      ],
+      [
+        0.5,
+        0.515
+      ],
+      [
+        0.75,
+        0.77
+      ],
+      [
+        1,
+        0.99
+      ]
+    ],
+    "exposureBias": 0
+  },
+  "color": {
+    "saturation": 1.02,
+    "temperature": 10,
+    "tint": 3,
+    "hueBands": {
+      "red": {
+        "hue": -1,
+        "saturation": 0.98,
+        "luminance": 1.02
+      },
+      "orange": {
+        "hue": -2,
+        "saturation": 1.01,
+        "luminance": 1.05
+      },
+      "yellow": {
+        "hue": -2,
+        "saturation": 0.96,
+        "luminance": 1.02
+      },
+      "green": {
+        "hue": 0,
+        "saturation": 0.96,
+        "luminance": 1
+      },
+      "cyan": {
+        "hue": 0,
+        "saturation": 0.98,
+        "luminance": 1
+      },
+      "blue": {
+        "hue": 0,
+        "saturation": 0.97,
+        "luminance": 1
+      },
+      "magenta": {
+        "hue": -1,
+        "saturation": 1,
+        "luminance": 1.01
+      }
+    },
+    "lut": "canon-portrait",
+    "lutIntensity": 0.55
+  },
+  "texture": {
+    "grain": {
+      "amount": 0.005,
+      "size": 0.3
+    },
+    "vignette": {
+      "amount": 0.01,
+      "radius": 0.9
+    },
+    "halation": {
+      "amount": 0,
+      "radius": 0.2
+    }
+  }
+}
