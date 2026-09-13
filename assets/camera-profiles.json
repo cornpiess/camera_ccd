@@ -344,7 +344,7 @@
       "id": "leica_m9",
       "name": "Leica M9",
       "aperture": {
-        "preferred": 2.8,
+        "preferred": 1.8,
         "starZone": 4
       },
       "ui": {

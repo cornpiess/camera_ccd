@@ -3,6 +3,7 @@ import { Animated, PanResponder, StyleSheet, Text, View, useWindowDimensions } f
 import * as Haptics from 'expo-haptics';
 import { hexToRgba } from '../theme/skin';
 import { IrisGlyph } from './IrisGlyph';
+import { ApertureSideView } from './ApertureSideView';
 
 export interface ApertureBarProps {
   /** Continuous hardware range lower bound (wide open, smallest f-number). */
@@ -162,6 +163,31 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   const trackLeft = screenWidth / 2 - TRACK_WIDTH / 2;
   const irisLeft = trackLeft - 44 - IRIS_GAP;
 
+  // Side-view aperture simulation: pops in while the ring is dragged (the "cut the lens
+  // in half" cross-section reacting live), fades out shortly after release so the static
+  // camera UI stays clean.
+  const sideViewOpacity = useRef(new Animated.Value(0)).current;
+  const sideViewHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (dragging) {
+      if (sideViewHideRef.current) {
+        clearTimeout(sideViewHideRef.current);
+        sideViewHideRef.current = null;
+      }
+      Animated.timing(sideViewOpacity, { toValue: 1, duration: 120, useNativeDriver: true }).start();
+    } else {
+      sideViewHideRef.current = setTimeout(() => {
+        Animated.timing(sideViewOpacity, { toValue: 0, duration: 350, useNativeDriver: true }).start();
+      }, 900);
+    }
+    return () => {
+      if (sideViewHideRef.current) {
+        clearTimeout(sideViewHideRef.current);
+        sideViewHideRef.current = null;
+      }
+    };
+  }, [dragging, sideViewOpacity]);
+
   return (
     <View style={styles.bar} pointerEvents="box-none">
       {/* Iris: the physical diaphragm (f/1.4 → big hole; f/4 → tiny hole) */}
@@ -198,6 +224,13 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
         />
       </View>
 
+      {/* Side-view simulation above the ring while dragging (DEMO or real hardware) */}
+      {interactive ? (
+        <Animated.View pointerEvents="none" style={[styles.sideView, { left: trackLeft, opacity: sideViewOpacity }]}>
+          <ApertureSideView openness={openness} accent={accent} label={formatF(currentAperture)} width={TRACK_WIDTH} />
+        </Animated.View>
+      ) : null}
+
       {(!isVariableAperture || demoMode) ? (
         <Text style={[styles.caption, demoMode && accent ? { color: accent } : null]}>
           {demoMode ? 'DEMO' : 'FIXED'}
@@ -211,6 +244,11 @@ const styles = StyleSheet.create({
   bar: {
     height: BAR_HEIGHT,
     width: '100%',
+  },
+  sideView: {
+    position: 'absolute',
+    bottom: BAR_HEIGHT + 6,
+    alignItems: 'center',
   },
   iris: {
     position: 'absolute',
