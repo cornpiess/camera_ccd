@@ -1,0 +1,60 @@
+﻿2026-09-13T10:33:22.9004880Z ##[group]Run set -euo pipefail
+2026-09-13T10:33:22.9005300Z [36;1mset -euo pipefail[0m
+2026-09-13T10:33:22.9005610Z [36;1mKEY_FILE="$RUNNER_TEMP/revoke-authkey.p8"[0m
+2026-09-13T10:33:22.9006020Z [36;1mprintf '%s\n' "$ASC_KEY_P8" > "$KEY_FILE"[0m
+2026-09-13T10:33:22.9006300Z [36;1mnode <<'NODE'[0m
+2026-09-13T10:33:22.9006540Z [36;1mconst crypto = require('crypto');[0m
+2026-09-13T10:33:22.9006820Z [36;1mconst fs = require('fs');[0m
+2026-09-13T10:33:22.9007130Z [36;1mconst path = require('path');[0m
+2026-09-13T10:33:22.9007550Z [36;1mconst b64u = (input) => Buffer.from(input).toString('base64')[0m
+2026-09-13T10:33:22.9007970Z [36;1m  .replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');[0m
+2026-09-13T10:33:22.9008740Z [36;1mconst now = Math.floor(Date.now() / 1000);[0m
+2026-09-13T10:33:22.9009210Z [36;1mconst header = b64u(JSON.stringify({ alg: 'ES256', kid: process.env.ASC_KEY_ID, typ: 'JWT' }));[0m
+2026-09-13T10:33:22.9009980Z [36;1mconst payload = b64u(JSON.stringify({ iss: process.env.ASC_ISSUER_ID, iat: now, exp: now + 1200, aud: 'appstoreconnect-v1' }));[0m
+2026-09-13T10:33:22.9010600Z [36;1mconst signer = crypto.createSign('sha256');[0m
+2026-09-13T10:33:22.9010930Z [36;1msigner.update(`${header}.${payload}`);[0m
+2026-09-13T10:33:22.9011280Z [36;1mconst signature = signer[0m
+2026-09-13T10:33:22.9011820Z [36;1m  .sign({ key: fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'revoke-authkey.p8')), dsaEncoding: 'ieee-p1363' }, 'base64')[0m
+2026-09-13T10:33:22.9012450Z [36;1m  .replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');[0m
+2026-09-13T10:33:22.9012890Z [36;1mconst token = `${header}.${payload}.${signature}`;[0m
+2026-09-13T10:33:22.9013370Z [36;1mconst api = 'https://api.appstoreconnect.apple.com/v1/certificates';[0m
+2026-09-13T10:33:22.9014410Z [36;1mconst headers = { Authorization: `*** };[0m
+2026-09-13T10:33:22.9014720Z [36;1mconst main = async () => {[0m
+2026-09-13T10:33:22.9015130Z [36;1m  const res = await fetch(`${api}?limit=200`, { headers });[0m
+2026-09-13T10:33:22.9015640Z [36;1m  if (!res.ok) throw new Error(`list certificates HTTP ${res.status}: ${await res.text()}`);[0m
+2026-09-13T10:33:22.9016080Z [36;1m  const { data = [] } = await res.json();[0m
+2026-09-13T10:33:22.9016430Z [36;1m  if (data.length === 0) {[0m
+2026-09-13T10:33:22.9016810Z [36;1m    console.log('no existing Apple certificates — quota is free');[0m
+2026-09-13T10:33:22.9017160Z [36;1m    return;[0m
+2026-09-13T10:33:22.9017710Z [36;1m  }[0m
+2026-09-13T10:33:22.9017970Z [36;1m  for (const cert of data) {[0m
+2026-09-13T10:33:22.9018350Z [36;1m    const del = await fetch(`${api}/${cert.id}`, { method: 'DELETE', headers });[0m
+2026-09-13T10:33:22.9019010Z [36;1m    const kind = cert.attributes ? `${cert.attributes.certificateType} ${cert.attributes.displayName}` : cert.id;[0m
+2026-09-13T10:33:22.9019640Z [36;1m    console.log(`${del.ok ? 'revoked' : 'FAILED to revoke'}: ${kind}`);[0m
+2026-09-13T10:33:22.9020430Z [36;1m    if (!del.ok) console.log(`  HTTP ${del.status}: ${await del.text()}`);[0m
+2026-09-13T10:33:22.9020810Z [36;1m  }[0m
+2026-09-13T10:33:22.9020990Z [36;1m};[0m
+2026-09-13T10:33:22.9021190Z [36;1mmain().catch((error) => {[0m
+2026-09-13T10:33:22.9021610Z [36;1m  console.error('certificate revoke step failed:', error.message);[0m
+2026-09-13T10:33:22.9022030Z [36;1m  process.exit(1);[0m
+2026-09-13T10:33:22.9022320Z [36;1m});[0m
+2026-09-13T10:33:22.9022520Z [36;1mNODE[0m
+2026-09-13T10:33:22.9061360Z shell: /bin/bash -e {0}
+2026-09-13T10:33:22.9061620Z env:
+2026-09-13T10:33:22.9062180Z   METHOD: app-store-connect
+2026-09-13T10:33:22.9062940Z   ASC_KEY_PATH: /Users/runner/.appstoreconnect/private_keys/AuthKey_***.p8
+2026-09-13T10:33:22.9063360Z   ASC_KEY_ID: ***
+2026-09-13T10:33:22.9063630Z   ASC_ISSUER_ID: ***
+2026-09-13T10:33:22.9064670Z   ASC_KEY_P8: ***
+2026-09-13T10:33:22.9064930Z ##[endgroup]
+2026-09-13T10:33:23.2744910Z revoked: IOS_DISTRIBUTION hong zhu
+2026-09-13T10:33:23.4198580Z FAILED to revoke: IOS_DEVELOPMENT 洪 朱
+2026-09-13T10:33:23.4206830Z   HTTP 403: {
+2026-09-13T10:33:23.4208080Z   "errors" : [ {
+2026-09-13T10:33:23.4208740Z     "id" : "28c753be-779d-4acc-883f-992ff9d8a3a3",
+2026-09-13T10:33:23.4209270Z     "status" : "403",
+2026-09-13T10:33:23.4209650Z     "code" : "FORBIDDEN_ERROR",
+2026-09-13T10:33:23.4210130Z     "title" : "This request is forbidden for security reasons",
+2026-09-13T10:33:23.4211030Z     "detail" : "This certificate can only be revoked by Apple Developer Program Support. https://developer.apple.com/support"
+2026-09-13T10:33:23.4213080Z   } ]
+2026-09-13T10:33:23.4213480Z }

@@ -708,14 +708,14 @@ public final class CameraEngineView: ExpoView {
 
   fileprivate func capture(completion: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
     sessionQueue.async {
-      guard self.session.isRunning else { completion(.failure(.notRunning)); return }
+      guard self.session.isRunning else { completion(.failure(.notRunning), nil); return }
       CameraTempFiles.removeUntrackedFiles()
 
       // Iteration 4: rapid shutter presses must not pile up unbounded ProRAW buffers.
       // A small in-flight cap keeps memory flat; the user gets an honest busy signal
       // instead of a crash or silent queue growth.
       guard self.captureDelegates.count < 3 else {
-        completion(.failure(.captureBusy))
+        completion(.failure(.captureBusy), nil)
         return
       }
 
@@ -739,7 +739,7 @@ public final class CameraEngineView: ExpoView {
       }
 
       guard let photoSettings = settings else {
-        completion(.failure(.captureFailed))
+        completion(.failure(.captureFailed), nil)
         return
       }
 
