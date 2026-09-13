@@ -35,7 +35,8 @@ export interface ApertureBarProps {
 const BAR_HEIGHT = 96;
 const TRACK_WIDTH = 252;
 /** Drag distance that spans the whole range. */
-const FULL_DRAG_PX = 170;
+/** Drag distance that spans the whole range — deliberately long for a damped, heavy ring feel. */
+const FULL_DRAG_PX = 260;
 /** Physical ring feel: 24 detents across the full travel (≈0.15 stop at ƒ/1.4–ƒ/4). */
 const DETENT_COUNT = 24;
 /** Iris sits to the LEFT of the track so the pointer line stays exactly on the shutter axis. */
@@ -91,12 +92,12 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   const ticks = useMemo(() => {
     const list: Array<{ key: string; x: number; major: boolean; label?: string }> = [];
     if (!(hi > lo)) return list;
-    const firstSixth = Math.ceil(logLo * 6);
-    const lastSixth = Math.floor(logHi * 6);
-    for (let k = firstSixth; k <= lastSixth; k++) {
-      const log = k / 6;
+    const firstTwelfth = Math.ceil(logLo * 12);
+    const lastTwelfth = Math.floor(logHi * 12);
+    for (let k = firstTwelfth; k <= lastTwelfth; k++) {
+      const log = k / 12;
       const t = (log - logLo) / span;
-      const major = k % 6 === 0;
+      const major = k % 12 === 0;
       list.push({
         key: `${k}`,
         x: t * BAND_SPAN,
@@ -304,10 +305,10 @@ const styles = StyleSheet.create({
   },
   tick: {
     marginBottom: 16,
-    width: 1.5,
-    height: 9,
-    borderRadius: 0.75,
-    backgroundColor: 'rgba(255, 255, 255, 0.45)',
+    width: 1,
+    height: 7,
+    borderRadius: 0.5,
+    backgroundColor: 'rgba(255, 255, 255, 0.35)',
   },
   tickMajor: {
     marginBottom: 14,

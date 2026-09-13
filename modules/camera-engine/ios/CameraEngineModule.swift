@@ -4,6 +4,7 @@ import Photos
 import CoreImage
 import CoreFoundation
 import ImageIO
+import CoreMotion
 import UIKit
 import MetalKit
 
@@ -430,6 +431,11 @@ public final class CameraEngineView: ExpoView {
   // Fallback display for exotic no-Metal environments only.
   private let renderLayer = CALayer()
   private let videoOutput = AVCaptureVideoDataOutput()
+  // Physical-orientation truth for capture rotation: the UI is portrait-locked, so the
+  // scene's interface orientation can never report landscape. The gravity vector from
+  // CoreMotion is unambiguous and updates regardless of the UI orientation lock.
+  private let motionManager = CMMotionManager()
+  private var motionOrientation: AVCaptureVideoOrientation?
   private let renderQueue = DispatchQueue(label: "camera-engine.preview-render", qos: .userInteractive)
 
   public required init(appContext: AppContext? = nil) {
@@ -535,6 +541,7 @@ public final class CameraEngineView: ExpoView {
   }
 
   fileprivate func start(completion: @escaping (Result<Bool, CameraEngineError>) -> Void) {
+    startMotionOrientationTracking()
     requestCamera { granted in
       guard granted else { completion(.failure(.permissionDenied)); return }
       self.sessionQueue.async {
@@ -554,6 +561,30 @@ public final class CameraEngineView: ExpoView {
       self.sessionShouldRun = false
       if self.session.isRunning { self.session.stopRunning() }
       completion()
+    }
+    motionManager.stopDeviceMotionUpdates()
+  }
+
+  /// Tracks the PHYSICAL device orientation from the gravity vector. The portrait-locked
+  /// UI means scene interface orientation is always .portrait and orientation-did-change
+  /// notifications don't fire for rotations the UI can't adopt — gravity has neither flaw.
+  private func startMotionOrientationTracking() {
+    guard !motionManager.isDeviceMotionActive, motionManager.isDeviceMotionAvailable else { return }
+    motionManager.deviceMotionUpdateInterval = 0.2
+    motionManager.startDeviceMotionUpdates(to: .main) { [weak self] data, _ in
+      guard let self, let gravity = data?.gravity else { return }
+      let orientation: AVCaptureVideoOrientation
+      if abs(gravity.y) >= abs(gravity.x) {
+        orientation = gravity.y < 0 ? .portrait : .portraitUpsideDown
+      } else {
+        orientation = gravity.x < 0 ? .landscapeLeft : .landscapeRight
+      }
+      // Commit only confident poses: a flat-held phone (gravity ≈ straight down on z)
+      // must not flicker the connections between portrait and landscape.
+      guard abs(gravity.y) > 0.65 || abs(gravity.x) > 0.65 else { return }
+      let changed = motionOrientation != orientation
+      motionOrientation = orientation
+      if changed { syncOutputOrientation() }
     }
   }
 
@@ -580,29 +611,25 @@ public final class CameraEngineView: ExpoView {
       // Only commit the timestamp when an actual re-orientation happened (setOrientation
       // no-ops when the connection already matches), so unchanged states never throttle.
       let before = videoOutput.connection(with: .video)?.videoOrientation
-      CameraEngineView.setOrientation(on: videoOutput, photoOutput: output)
+      setOrientation(on: videoOutput, photoOutput: output)
       if videoOutput.connection(with: .video)?.videoOrientation != before {
         lastOrientationSyncAt = now
       }
     }
   }
 
-  private static func currentDeviceOrientation() -> AVCaptureVideoOrientation? {
+  private func currentDeviceOrientation() -> AVCaptureVideoOrientation? {
     // The app UI is PORTRAIT-LOCKED, so the window scene's interface orientation is
-    // always .portrait here and useless for capture rotation. The PHYSICAL device
-    // orientation (rotation notifications are enabled at session start) is the
-    // authoritative source for the capture connection.
+    // always .portrait here and useless for capture rotation. The gravity vector
+    // (CoreMotion, started with the session) is the physical truth; UIDevice's own
+    // report is only the fallback before the first gravity sample arrives.
+    if let motionOrientation { return motionOrientation }
     let deviceOrientation = UIDevice.current.orientation
-    // During a physical rotation the OS briefly reports faceUp / unknown. Returning a
-    // fallback here made the connection orientation oscillate portrait ↔ landscape and
-    // the viewfinder twitch — invalid orientations must be IGNORED, keeping the last
-    // stable one until the rotation settles.
     guard deviceOrientation.isValidInterfaceOrientation else { return nil }
-    // AVCaptureVideoOrientation shares its raw values with UIDeviceOrientation.
     return AVCaptureVideoOrientation(rawValue: deviceOrientation.rawValue)
   }
 
-  private static func setOrientation(on videoOutput: AVCaptureVideoDataOutput, photoOutput: AVCapturePhotoOutput) {
+  private func setOrientation(on videoOutput: AVCaptureVideoDataOutput, photoOutput: AVCapturePhotoOutput) {
     guard let orientation = currentDeviceOrientation() else { return }
     // Only touch the connection when the orientation actually changed — every
     // re-assignment causes a visible glitch in the preview feed.
@@ -688,10 +715,9 @@ public final class CameraEngineView: ExpoView {
         session.addOutput(videoOutput)
       }
     }
-    CameraEngineView.setOrientation(on: videoOutput, photoOutput: output)
+    setOrientation(on: videoOutput, photoOutput: output)
 
-    session.commitConfiguration()
-    camera = device
+    session.commitConfiguration()    camera = device
     configured = true
   }
 
@@ -737,7 +763,7 @@ public final class CameraEngineView: ExpoView {
       // connection to the physical device orientation so buffers arrive already upright and
       // the saved JPEG needs no EXIF rotation fix-up.
       if let videoConnection = self.output.connection(with: .video) {
-        if let orientation = CameraEngineView.currentDeviceOrientation() {
+        if let orientation = currentDeviceOrientation() {
           videoConnection.videoOrientation = orientation
         }
       }
