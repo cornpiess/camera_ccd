@@ -20,7 +20,7 @@ import {
   type GestureResponderEvent,
   type PanResponderGestureState,
 } from 'react-native';import * as Haptics from 'expo-haptics';
-import { File } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 
 // Native camera module wrapper & native APIs
 import {
@@ -213,6 +213,9 @@ function CameraAppScreen(): React.JSX.Element {
   // photo viewer prefers it and falls back to the persisted 512px thumbnail after restart.
   const [lastCaptureFileUri, setLastCaptureFileUri] = useState<string | null>(null);
   const [photoViewerUri, setPhotoViewerUri] = useState<string | null>(null);
+  // Per-capture display copy of the thumbnail (RN Image caches by URI; the native
+  // persisted path is stable, so without this the chip keeps showing the first shot).
+  const chipFileRef = useRef<string | null>(null);
   // Persistent, tappable remediation when the photo-library ADD permission is denied —
   // a 4-second transient banner was too easy to miss, which read as "photos don't save".
   const [photoPermDenied, setPhotoPermDenied] = useState<boolean>(false);
@@ -273,6 +276,11 @@ function CameraAppScreen(): React.JSX.Element {
   const [apertureDemoMode, setApertureDemoMode] = useState<boolean>(true);
   // Developer-mode extra: side-view lens cross-section above the tick scale (default off).
   const [apertureSideView, setApertureSideView] = useState<boolean>(false);
+  // Demo honesty: the ultra-wide module has NO aperture mechanism at all — when it is
+  // engaged, the aperture strip is replaced by a fixed-aperture note (only the main
+  // module carries the aperture demo).
+  const isUltraWideEngaged =
+    currentFocalMm != null && focalStops.length > 1 && currentFocalMm === focalStops[0]?.mm;
   /** Continuous demo range for fixed-lens devices (like a fast compact: ƒ/1.48–ƒ/4). */
   const DEMO_APERTURE_RANGE = useMemo(() => ({ min: 1.48, max: 4 }), []);
 
@@ -644,10 +652,32 @@ function CameraAppScreen(): React.JSX.Element {
       const thumbUri = result?.thumbnailUri ?? result?.fileUri ?? null;
       setLastCaptureFileUri(result?.fileUri ?? null);
       if (thumbUri) {
-        setLatestThumbnail(thumbUri);
-        // Native serves a STABLE Documents copy — persist it so the chip survives restarts.
-        cameraStateRef.current.lastThumbUri = thumbUri;
-        saveCameraState({ lastThumbUri: thumbUri });
+        // RN Image caches by URI: the native persisted thumbnail path is STABLE, so the
+        // chip would keep showing the first shot's bitmap. Copy to a per-capture display
+        // file (dropping the previous one) so every capture gets a fresh URI.
+        void (async () => {
+          let display = thumbUri;
+          try {
+            const dest = new File(Paths.document, `camera18-chip-${Date.now()}.jpg`);
+            if (dest.exists) dest.delete();
+            new File(thumbUri).copy(dest);
+            if (chipFileRef.current) {
+              try {
+                const prev = new File(chipFileRef.current);
+                if (prev.exists) prev.delete();
+              } catch {
+                // stale chip cleanup is best-effort
+              }
+            }
+            chipFileRef.current = dest.uri;
+            display = dest.uri;
+          } catch {
+            // fall back to the native stable copy
+          }
+          setLatestThumbnail(display);
+          cameraStateRef.current.lastThumbUri = display;
+          saveCameraState({ lastThumbUri: display });
+        })();
       }
       if (result?.processingFallback) {
         showTransientError('Camera DNA processing failed — the original photo was saved.');
@@ -999,9 +1029,16 @@ function CameraAppScreen(): React.JSX.Element {
           {/* Bottom control stack: the hero aperture ring + shutter row. */}
           {isCameraRunning && !permissionOverlayVisible && (
             <View style={[styles.bottomControlsContainer, { backgroundColor: skin.chrome }]} pointerEvents="box-none">
-              {/* Aperture ring: continuous (无极) — iris glyph + 1/3-stop scale + thin
-                  centered accent pointer. Demo mode on fixed lenses is visual-only. */}
-              <ApertureBar
+              {isUltraWideEngaged ? (
+                // Ultra-wide module: no aperture mechanism exists — a fixed-aperture note
+                // replaces the whole control (honesty over fake controls, red line 4).
+                <View style={styles.ultraWideNote} pointerEvents="none">
+                  <Text style={styles.ultraWideNoteText}>超广角 · 固定光圈</Text>
+                </View>
+              ) : (
+                // Aperture ring: continuous (无极) — iris glyph + tick scale + thin
+                // centered accent pointer. Demo mode on fixed lenses is visual-only.
+                <ApertureBar
                 minAperture={
                   supportsVariableAperture
                     ? (apertureRange?.min ?? capabilitiesRef.current?.minAperture ?? 1.8)
@@ -1020,6 +1057,7 @@ function CameraAppScreen(): React.JSX.Element {
                 onToggleSideView={() => setApertureSideView((enabled) => !enabled)}
                 accent={skin.accent}
               />
+              )}
 
               {/* Bottom Actions Row: Recent Thumbnail & Shutter Button */}
               <View style={styles.bottomActionRow}>
@@ -1293,6 +1331,17 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
+  },
+  ultraWideNote: {
+    height: 96,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ultraWideNoteText: {
+    color: 'rgba(255, 255, 255, 0.55)',
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 1,
   },
   bottomControlsContainer: {
     position: 'absolute',

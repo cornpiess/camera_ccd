@@ -129,10 +129,11 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   const interactive = isVariableAperture && hi > lo;
   const trackLeft = screenWidth / 2 - TRACK_WIDTH / 2;
   const irisLeft = trackLeft - 44 - IRIS_GAP;
-  // Side mode (sideViewEnabled): the cross-section replaces the scale, sized so its height
-  // (44pt) matches the iris glyph — the two sit on the same center line, horizontally level.
+  // Side mode (sideViewEnabled): the cross-section replaces the scale, centered on the
+  // strip's middle line (level with the iris glyph). Width caps so it never reaches the
+  // iris (left) or the mode button (right).
   const sideMode = interactive && sideViewEnabled;
-  const sideWidth = Math.min(124, screenWidth - 190);
+  const sideWidth = Math.min(204, screenWidth - 170);
   const sideViewHeight = (sideWidth * 92) / 260;
   const sideLeft = (screenWidth - sideWidth) / 2;
 
@@ -281,6 +282,10 @@ const styles = StyleSheet.create({
   },
   trackClip: {
     position: 'absolute',
+    // WIDTH IS LOAD-BEARING: an absolute container with only absolute children and no
+    // explicit width sizes to ZERO, and overflow:hidden then clips the entire scale
+    // (ticks/value/pointer) out of existence.
+    width: TRACK_WIDTH,
     overflow: 'hidden',
   },
   band: {

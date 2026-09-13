@@ -588,21 +588,10 @@ public final class CameraEngineView: ExpoView {
   }
 
   private static func currentDeviceOrientation() -> AVCaptureVideoOrientation? {
-    // The UI itself rotates (canonical camera interaction), so the WINDOW SCENE's
-    // interface orientation is the authoritative source — it reflects what the user
-    // actually sees. Device orientation is only the fallback (e.g. scene not yet ready).
-    if let scene = UIApplication.shared.connectedScenes
-      .compactMap({ $0 as? UIWindowScene })
-      .first(where: { $0.activationState == .foregroundActive }) {
-      switch scene.interfaceOrientation {
-      case .portrait: return .portrait
-      case .portraitUpsideDown: return .portraitUpsideDown
-      case .landscapeLeft: return .landscapeLeft
-      case .landscapeRight: return .landscapeRight
-      case .unknown: break
-      @unknown default: break
-      }
-    }
+    // The app UI is PORTRAIT-LOCKED, so the window scene's interface orientation is
+    // always .portrait here and useless for capture rotation. The PHYSICAL device
+    // orientation (rotation notifications are enabled at session start) is the
+    // authoritative source for the capture connection.
     let deviceOrientation = UIDevice.current.orientation
     // During a physical rotation the OS briefly reports faceUp / unknown. Returning a
     // fallback here made the connection orientation oscillate portrait ↔ landscape and
