@@ -133,6 +133,57 @@ jobs:
       # --- 用 API Key 做 automatic signing，Xcode 自行创建/复用分发证书与 Ad Hoc 描述文件。
       #     Windows 上没有 keychain/证书可用，这是唯一不需要手动搬 .p12 的路径。---
 
+      # 根治证书额度墙：runner 是一次性机器，每次构建新签证书的私钥随机器销毁，下次构建
+      # 必然再签新张，Apple 个人账号 3 张的额度连出几个包就打满（"Choose a certificate to
+      # revoke"）。本仓库无 Mac 本地签名，旧证书不再被任何机器引用，Archive 前全部吊销，
+      # 保证额度恒为空。背景：AGENTS.md 1.1「证书数量上限」。（与 ios-testflight.yml 同步）
+      - name: Revoke stale Apple certificates
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          KEY_FILE="$RUNNER_TEMP/revoke-authkey.p8"
+          printf '%s\n' "$ASC_KEY_P8" > "$KEY_FILE"
+          node <<'NODE'
+          const crypto = require('crypto');
+          const fs = require('fs');
+          const path = require('path');
+          const b64u = (input) => Buffer.from(input).toString('base64')
+            .replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+          const now = Math.floor(Date.now() / 1000);
+          const header = b64u(JSON.stringify({ alg: 'ES256', kid: process.env.ASC_KEY_ID, typ: 'JWT' }));
+          const payload = b64u(JSON.stringify({ iss: process.env.ASC_ISSUER_ID, iat: now, exp: now + 1200, aud: 'appstoreconnect-v1' }));
+          const signer = crypto.createSign('sha256');
+          signer.update(`${header}.${payload}`);
+          const signature = signer
+            .sign({ key: fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'revoke-authkey.p8')), dsaEncoding: 'ieee-p1363' }, 'base64')
+            .replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+          const token = `${header}.${payload}.${signature}`;
+          const api = 'https://api.appstoreconnect.apple.com/v1/certificates';
+          const headers = { Authorization: `Bearer ${token}` };
+          const main = async () => {
+            const res = await fetch(`${api}?limit=200`, { headers });
+            if (!res.ok) throw new Error(`list certificates HTTP ${res.status}: ${await res.text()}`);
+            const { data = [] } = await res.json();
+            if (data.length === 0) {
+              console.log('no existing Apple certificates — quota is free');
+              return;
+            }
+            for (const cert of data) {
+              const del = await fetch(`${api}/${cert.id}`, { method: 'DELETE', headers });
+              const kind = cert.attributes ? `${cert.attributes.certificateType} ${cert.attributes.displayName}` : cert.id;
+              console.log(`${del.ok ? 'revoked' : 'FAILED to revoke'}: ${kind}`);
+              if (!del.ok) console.log(`  HTTP ${del.status}: ${await del.text()}`);
+            }
+          };
+          main().catch((error) => {
+            console.error('certificate revoke step failed:', error.message);
+            process.exit(1);
+          });
+          NODE
+
       - name: Archive
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
