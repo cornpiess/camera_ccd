@@ -969,12 +969,21 @@ private final class PreviewRenderer: NSObject, MTKViewDelegate {
 private enum LUTLoader {
   private static let lock = NSLock()
   private static var cache: [String: (dimension: Int, data: Data)] = [:]
+  private static var loggedMissing: Set<String> = []
 
   static func load(_ rawName: String?) -> (dimension: Int, data: Data)? {
     guard let name = rawName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
     lock.lock(); defer { lock.unlock() }
     if let hit = cache[name] { return hit }
-    guard let parsed = parseBundleLUT(named: name) else { return nil }
+    guard let parsed = parseBundleLUT(named: name) else {
+      // 静默跳过 LUT 会让"新相机没有效果"无从排查（典型原因：JS 列表热更新了、原生 LUT bundle 还是旧构建的）。
+      // 每个名字只报一次，避免逐帧刷日志。
+      if !loggedMissing.contains(name) {
+        loggedMissing.insert(name)
+        print("[CameraEngine] LUTLoader: missing/unparseable cube '\(name)' — LUT stage skipped (stale native bundle?)")
+      }
+      return nil
+    }
     cache[name] = parsed
     return parsed
   }
