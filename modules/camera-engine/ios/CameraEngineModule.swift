@@ -628,17 +628,26 @@ public final class CameraEngineView: ExpoView {
     motionManager.deviceMotionUpdateInterval = 0.2
     motionManager.startDeviceMotionUpdates(to: .main) { [weak self] data, _ in
       guard let self, let gravity = data?.gravity else { return }
-      let orientation: AVCaptureVideoOrientation
+      let candidate: AVCaptureVideoOrientation
       if abs(gravity.y) >= abs(gravity.x) {
-        orientation = gravity.y < 0 ? .portrait : .portraitUpsideDown
+        candidate = gravity.y < 0 ? .portrait : .portraitUpsideDown
       } else {
-        orientation = gravity.x < 0 ? .landscapeLeft : .landscapeRight
+        candidate = gravity.x < 0 ? .landscapeLeft : .landscapeRight
       }
       // Commit only confident poses: a flat-held phone (gravity ≈ straight down on z)
       // must not flicker the connections between portrait and landscape.
-      guard abs(gravity.y) > 0.65 || abs(gravity.x) > 0.65 else { return }
-      let changed = motionOrientation != orientation
-      motionOrientation = orientation
+      let dominance = max(abs(gravity.x), abs(gravity.y))
+      if candidate != motionOrientation {
+        // HYSTERESIS: a switch re-orients the connections (one visible glitch frame),
+        // so demand a clearly dominant axis before flipping. Without this, pivoting the
+        // phone near the 45° boundary flip-flopped the feed — the "twitching" in the
+        // viewfinder (device report, build 44).
+        guard dominance > 0.82 else { return }
+      } else {
+        guard dominance > 0.65 else { return }
+      }
+      let changed = motionOrientation != candidate
+      motionOrientation = candidate
       if changed { syncOutputOrientation() }
     }
   }
@@ -838,8 +847,21 @@ public final class CameraEngineView: ExpoView {
       // Shutter fidelity relies on .balanced prioritization + the ProRAW dual-format path.
       // NOTE: AVCapturePhotoSettings exposes no fast-capture toggle in this SDK; do not
       // re-add speculative API names without verifying against the actual headers.
+      // EXIF focal stamp: the metadata carries the NATIVE lens focal (e.g. 26mm), so
+      // crop-zoomed shots read wrong in the Photos app (device report: 35/52mm shots
+      // labeled 26mm). Read the zoom ACTUALLY applied to the device right before the
+      // shutter — the same zoom the photo pipeline renders with — and derive the
+      // 35mm-equivalent: zoom 1.0 renders 13mm on virtual devices (UW base), 26mm on
+      // single-wide bodies (matches focalLadder.ts).
+      let appliedZoom = self.camera?.videoZoomFactor ?? 1.0
+      let baseEquivalentMM: Double = self.camera?.deviceType == .builtInWideAngleCamera ? 26.0 : 13.0
+      let equivalentFocalMM = Int((baseEquivalentMM * appliedZoom).rounded())
       let id = photoSettings.uniqueID
-      let delegate = PhotoCaptureDelegate(profile: self.profileSnapshot()) { [weak self] result, detail in
+      let delegate = PhotoCaptureDelegate(
+        profile: self.profileSnapshot(),
+        appliedZoom: appliedZoom,
+        equivalentFocalMM: equivalentFocalMM,
+      ) { [weak self] result, detail in
         self?.sessionQueue.async { self?.captureDelegates.removeValue(forKey: id) }
         completion(result, detail)
       }
@@ -1091,9 +1113,18 @@ private final class PreviewRenderer: NSObject, MTKViewDelegate {
       .transformed(by: CGAffineTransform(
         translationX: (drawableSize.width - extent.width * scale) / 2,
         y: (drawableSize.height - extent.height * scale) / 2))
+    // Repaint EVERY drawable pixel each frame: Core Image writes only where the image
+    // lands, so the aspect-fit bars kept the PREVIOUS frame's pixels. After an
+    // orientation switch the frame's aspect changes and the viewfinder literally showed
+    // the old portrait frame and the new landscape frame superimposed (device report,
+    // build 44). Compositing over an opaque black backdrop covers the full drawable —
+    // the bars render as honest black, like the system camera.
+    let backdrop = CIImage(color: CIColor.black)
+      .cropped(to: CGRect(origin: .zero, size: drawableSize))
+    let frame = fitted.composited(over: backdrop)
 
     CameraEngineGPU.ciContext.render(
-      fitted,
+      frame,
       to: drawable.texture,
       commandBuffer: commandBuffer,
       bounds: CGRect(origin: .zero, size: drawableSize),
@@ -1239,13 +1270,19 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
   private var didAcceptPhoto = false
   private var generatedURLs: [URL] = []
   private var expectedPhotoCount = 1
+  /// Zoom ACTUALLY applied to the device at shutter time, and its 35mm-equivalent focal
+  /// (base × zoom) — stamped into EXIF so crop-zoomed shots read correctly in Photos.
+  private let appliedZoom: Double
+  private let equivalentFocalMM: Int
   // Safety net (Iteration 4): in dual-format captures the companion Apple-processed photo is
   // retained so a Camera DNA / RAW pipeline failure can still save the capture. Photos must
   // never silently disappear. Guarded by completionLock.
   private var companionData: Data?
 
-  init(profile: [String: Any], completion: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
+  init(profile: [String: Any], appliedZoom: Double, equivalentFocalMM: Int, completion: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
     self.profile = profile
+    self.appliedZoom = appliedZoom
+    self.equivalentFocalMM = equivalentFocalMM
     self.completion = completion
   }
 
@@ -1338,7 +1375,13 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
       completionLock.lock(); generatedURLs = [fileURL, thumbURL]; completionLock.unlock()
 
       do {
-        guard let jpeg = Self.jpegRepresentation(image, metadata: metadata, colorSpace: colorSpace, quality: 0.95) else {
+        guard let jpeg = Self.jpegRepresentation(
+          image,
+          metadata: metadata,
+          colorSpace: colorSpace,
+          quality: 0.95,
+          equivalentFocalMM: equivalentFocalMM,
+        ) else {
           throw CameraEngineError.processingFailed
         }
         try jpeg.write(to: fileURL, options: .atomic)
@@ -1389,7 +1432,9 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
             "fileUri": fileURL.absoluteString,
             "thumbnailUri": thumbnailURI,
             "assetLocalIdentifier": localIdentifier ?? NSNull(),
-            "processingFallback": usedFallback
+            "processingFallback": usedFallback,
+            "appliedZoom": appliedZoom,
+            "equivalentFocal": equivalentFocalMM,
           ]))
         }
       }
@@ -1426,8 +1471,10 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
 
   // Rendered pixels are already upright, so the original orientation tag is replaced with "1"
   // while every other real capture property (EXIF exposure data, timestamps, lens info) is
-  // carried over untouched. CIContext.jpegRepresentation would drop all of it.
-  private static func jpegRepresentation(_ image: CIImage, metadata: [AnyHashable: Any]?, colorSpace: CGColorSpace, quality: Double) -> Data? {
+  // carried over untouched. CIContext.jpegRepresentation would drop all of it. The native
+  // lens focal in that metadata ignores crop zoom, so FocalLengthIn35mmFilm is overwritten
+  // with base×zoom — what the Photos app displays as the shot's focal length.
+  private static func jpegRepresentation(_ image: CIImage, metadata: [AnyHashable: Any]?, colorSpace: CGColorSpace, quality: Double, equivalentFocalMM: Int) -> Data? {
     guard let cgImage = sharedContext.createCGImage(image, from: image.extent, format: CIFormat.RGBA8, colorSpace: colorSpace) else { return nil }
     let output = NSMutableData()
     guard let destination = CGImageDestinationCreateWithData(output, "public.jpeg" as CFString, 1, nil) else { return nil }
@@ -1438,6 +1485,9 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     var exif = cfProperties(properties[kCGImagePropertyExifDictionary])
     exif.removeValue(forKey: kCGImagePropertyExifPixelXDimension)
     exif.removeValue(forKey: kCGImagePropertyExifPixelYDimension)
+    if equivalentFocalMM > 0 {
+      exif[kCGImagePropertyExifFocalLengthIn35mmFilm] = equivalentFocalMM
+    }
     // The rendered pixels are ALREADY upright (orientation applied during CIImage decode),
     // but the carried-over EXIF block still says "rotated" — Photos honors that tag and
     // displays landscape shots as portrait. Pin the EXIF orientation to 1. (ImageIO has no

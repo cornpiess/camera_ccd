@@ -43,6 +43,10 @@ export type CapturedPhoto = {
   assetLocalIdentifier: string | null;
   /** True when Camera DNA processing failed and the untouched Apple-processed photo was saved instead. */
   processingFallback?: boolean | null;
+  /** Zoom ACTUALLY applied to the device at shutter time (diagnostics). */
+  appliedZoom?: number | null;
+  /** 35mm-equivalent focal stamped into the saved EXIF (base × zoom). */
+  equivalentFocal?: number | null;
 };
 
 export type CameraAuthorizationStatus = 'authorized' | 'notDetermined' | 'denied' | 'restricted';

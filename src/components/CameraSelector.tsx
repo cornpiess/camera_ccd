@@ -3,6 +3,7 @@ import { Animated, Dimensions, Pressable, ScrollView, StyleSheet, Text, View, us
 import * as Haptics from 'expo-haptics';
 import type { CameraProfile } from '../profiles/types';
 import { markerGlyph, profileDisplayName } from './types';
+import { CameraIcon } from './CameraIcon';
 import { SafeGlassView, isGlassAvailable } from './GlassCard';
 import { ProfileConfigModal } from '../calibration/ProfileConfigModal';
 
@@ -195,14 +196,15 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                     onPress={() => handleSelect(profile)}
                     style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                   >
-                    <Text
-                      style={[
-                        styles.rowGlyph,
-                        { color: isActive ? accent : 'rgba(255, 255, 255, 0.55)' },
-                      ]}
-                    >
-                      {markerGlyph(profile.ui?.markerStyle)}
-                    </Text>
+                    <View style={styles.rowGlyphSlot}>
+                      {profile.ui?.icon ? (
+                        <CameraIcon icon={profile.ui.icon} accent={accent} width={20} />
+                      ) : (
+                        <Text style={[styles.rowGlyph, { color: isActive ? accent : 'rgba(255, 255, 255, 0.55)' }]}>
+                          {markerGlyph(profile.ui?.markerStyle)}
+                        </Text>
+                      )}
+                    </View>
                     <Text style={[styles.rowName, isActive && styles.rowNameActive]} numberOfLines={1}>
                       {displayName}
                     </Text>
@@ -304,6 +306,11 @@ const styles = StyleSheet.create({
   },
   rowPressed: {
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  rowGlyphSlot: {
+    width: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   rowGlyph: {
     fontSize: 11,

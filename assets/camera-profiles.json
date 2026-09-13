@@ -109,7 +109,8 @@
         "personality": "crisp",
         "markerStyle": "line",
         "labelStyle": "minimal",
-        "glassTintStrength": 0.06
+        "glassTintStrength": 0.06,
+        "icon": "ricoh-gr"
       },
       "developmentReference": {
         "note": "Expert-calibrated six-camera core (2026-09-13): Camera Character over Heavy Filter. Full-parameter JSON available; tone guardrails enforced by scripts/tone-audit.js.",
@@ -224,7 +225,8 @@
         "personality": "soft",
         "markerStyle": "dot",
         "labelStyle": "minimal",
-        "glassTintStrength": 0.06
+        "glassTintStrength": 0.06,
+        "icon": "ricoh-gr"
       },
       "developmentReference": {
         "note": "Expert-calibrated six-camera core (2026-09-13): Camera Character over Heavy Filter. Full-parameter JSON available; tone guardrails enforced by scripts/tone-audit.js.",
@@ -334,12 +336,13 @@
       "displayName": "Canon Portrait",
       "ui": {
         "shortName": "POR",
-        "accent": "#D9B98A",
+        "accent": "#B78BA3",
         "dialStyle": "compact",
         "personality": "soft",
         "markerStyle": "dot",
         "labelStyle": "minimal",
-        "glassTintStrength": 0.06
+        "glassTintStrength": 0.06,
+        "icon": "canon-compact"
       },
       "developmentReference": {
         "note": "Expert-calibrated six-camera core (2026-09-13): Camera Character over Heavy Filter. Full-parameter JSON available; tone guardrails enforced by scripts/tone-audit.js.",
@@ -454,7 +457,8 @@
         "personality": "nostalgic",
         "markerStyle": "line",
         "labelStyle": "minimal",
-        "glassTintStrength": 0.06
+        "glassTintStrength": 0.06,
+        "icon": "fuji-rangefinder"
       },
       "developmentReference": {
         "note": "Expert-calibrated six-camera core (2026-09-13): Camera Character over Heavy Filter. Full-parameter JSON available; tone guardrails enforced by scripts/tone-audit.js.",
@@ -569,7 +573,8 @@
         "personality": "nostalgic",
         "markerStyle": "line",
         "labelStyle": "minimal",
-        "glassTintStrength": 0.06
+        "glassTintStrength": 0.06,
+        "icon": "fuji-rangefinder"
       },
       "developmentReference": {
         "note": "Expert-calibrated six-camera core (2026-09-13): Camera Character over Heavy Filter. Full-parameter JSON available; tone guardrails enforced by scripts/tone-audit.js.",
@@ -684,7 +689,8 @@
         "personality": "crisp",
         "markerStyle": "line",
         "labelStyle": "minimal",
-        "glassTintStrength": 0.06
+        "glassTintStrength": 0.06,
+        "icon": "leica-rangefinder"
       },
       "developmentReference": {
         "note": "Expert-calibrated six-camera core (2026-09-13): Camera Character over Heavy Filter. Full-parameter JSON available; tone guardrails enforced by scripts/tone-audit.js.",

@@ -660,7 +660,7 @@ function CameraAppScreen(): React.JSX.Element {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       setCapturePhase('idle');
       setPhotoPermDenied(false);
-      recordDiag('info', `capture: saved (fallback=${Boolean(result?.processingFallback)}, thumb=${Boolean(result?.thumbnailUri)})`);
+      recordDiag('info', `capture: saved (fallback=${Boolean(result?.processingFallback)}, thumb=${Boolean(result?.thumbnailUri)}, zoom=${result?.appliedZoom?.toFixed(2) ?? '?'} → ${result?.equivalentFocal ?? '?'}mm eq)`);
       const thumbUri = result?.thumbnailUri ?? result?.fileUri ?? null;
       setLastCaptureFileUri(result?.fileUri ?? null);
       if (thumbUri) {
@@ -942,6 +942,7 @@ function CameraAppScreen(): React.JSX.Element {
               <TopBar
                 profileName={activeProfile?.displayName ?? activeProfile?.name}
                 marker={activeProfile?.ui?.markerStyle}
+                icon={activeProfile?.ui?.icon}
                 accent={activeProfile?.ui?.accent}
                 skin={skin}
                 onPress={() => setIsSelectorOpen(true)}

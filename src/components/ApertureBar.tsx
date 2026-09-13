@@ -41,11 +41,13 @@ export interface ApertureBarProps {
 const BAR_HEIGHT = 96;
 const TRACK_WIDTH = 252;
 /** Drag distance that spans the whole range — deliberately long for a damped, heavy ring feel. */
-const FULL_DRAG_PX = 260;
+const FULL_DRAG_PX = 420;
 /** Scale band: 3× the visible width so the scroll has travel on both sides. */
 const BAND_SPAN = TRACK_WIDTH * 3;
 /** Physical ring feel: 24 detents across the full travel (≈0.15 stop at ƒ/1.4–ƒ/4). */
 const DETENT_COUNT = 24;
+/** Tick hierarchy: minors every 1/24 stop, half-stop mediums, labeled full stops. */
+const TWELFTHS_OF_STOP = 24;
 /** Iris sits to the LEFT of the track so the pointer line stays exactly on the shutter axis. */
 const IRIS_GAP = 14;
 
@@ -94,20 +96,23 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   /** 0 = stopped down (ƒ/max), 1 = wide open (ƒ/min). Feeds iris hole + scroll direction. */
   const openness = clamp(1 - (toLog(currentAperture) - logLo) / span, 0, 1);
 
-  // Scale band ticks from 1/12-stop minors to labeled full stops, laid out over the band.
+  // Scale band ticks: minors every 1/24 stop, half-stop mediums, labeled full stops —
+  // laid out over the band.
   const ticks = useMemo(() => {
-    const list: { key: string; x: number; major: boolean; label?: string }[] = [];
+    const list: { key: string; x: number; major: boolean; half: boolean; label?: string }[] = [];
     if (!(hi > lo)) return list;
-    const firstTwelfth = Math.ceil(logLo * 12);
-    const lastTwelfth = Math.floor(logHi * 12);
-    for (let k = firstTwelfth; k <= lastTwelfth; k++) {
-      const log = k / 12;
+    const firstTick = Math.ceil(logLo * TWELFTHS_OF_STOP);
+    const lastTick = Math.floor(logHi * TWELFTHS_OF_STOP);
+    for (let k = firstTick; k <= lastTick; k++) {
+      const log = k / TWELFTHS_OF_STOP;
       const t = (log - logLo) / span;
-      const major = k % 12 === 0;
+      const major = k % 24 === 0;
+      const half = k % 12 === 0;
       list.push({
         key: `${k}`,
         x: t * BAND_SPAN,
         major,
+        half,
         label: major ? String(Number(toF(log).toFixed(1))) : undefined,
       });
     }
@@ -239,6 +244,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
                       style={[
                         styles.tick,
                         tick.major && styles.tickMajor,
+                        !tick.major && tick.half && styles.tickHalf,
                         dragging && styles.tickBright,
                       ]}
                     />
@@ -331,6 +337,13 @@ const styles = StyleSheet.create({
     width: 2,
     height: 13,
     backgroundColor: 'rgba(255, 255, 255, 0.8)',
+  },
+  tickHalf: {
+    marginBottom: 15,
+    width: 1,
+    height: 10,
+    borderRadius: 0.5,
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
   },
   tickBright: {
     backgroundColor: 'rgba(255, 255, 255, 1)',

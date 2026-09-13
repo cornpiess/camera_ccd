@@ -19,6 +19,8 @@ export interface ProfileUi {
   readonly labelStyle?: string;
   /** Abstract selection marker glyph: dot | line | diamond | ring. */
   readonly markerStyle?: string;
+  /** Silhouette icon id rendered by components/CameraIcon (ricoh-gr | leica-rangefinder | fuji-rangefinder | canon-compact). Falls back to markerStyle when absent. */
+  readonly icon?: string;
   /** 0..1 — how strongly the accent may tint the glass around this camera. Default 0.06. */
   readonly glassTintStrength?: number;
 }
