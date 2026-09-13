@@ -115,21 +115,33 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   const lastDetentRef = useRef<number | null>(null);
   const [dragging, setDragging] = useState(false);
 
+  const interactive = isVariableAperture && hi > lo;
+  const trackLeft = screenWidth / 2 - TRACK_WIDTH / 2;
+  const irisLeft = trackLeft - 44 - IRIS_GAP;
+
+  // Live values via refs: the PanResponder must be created ONCE per aperture range. It
+  // used to rebuild on EVERY currentAperture/openness change (i.e. every drag update),
+  // and a fresh PanResponder resets its internal gestureState.dx accumulation — the
+  // computed f-stop snapped back to the grab point each frame ("the ring won't drag").
+  const dragValuesRef = useRef({ openness, currentAperture, onApertureChange, interactive, lo, hi, logLo, span });
+  dragValuesRef.current = { openness, currentAperture, onApertureChange, interactive, lo, hi, logLo, span };
+
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => isVariableAperture,
-        onMoveShouldSetPanResponder: () => isVariableAperture,
+        onStartShouldSetPanResponder: () => dragValuesRef.current.interactive,
+        onMoveShouldSetPanResponder: () => dragValuesRef.current.interactive,
         onPanResponderGrant: () => {
-          dragState.current = { startOpenness: openness, active: true };
+          dragState.current = { startOpenness: dragValuesRef.current.openness, active: true };
           setDragging(true);
-          lastDetentRef.current = detentIndexFor(currentAperture);
+          lastDetentRef.current = detentIndexFor(dragValuesRef.current.currentAperture);
         },
         onPanResponderMove: (_evt, gestureState) => {
-          if (!isVariableAperture || hi <= lo) return;
+          const v = dragValuesRef.current;
+          if (!v.interactive || v.hi <= v.lo) return;
           // dx > 0 (drag right) = ring turns toward open = higher openness = smaller f-number.
           const newOpenness = clamp(dragState.current.startOpenness + gestureState.dx / FULL_DRAG_PX, 0, 1);
-          const f = toF(logLo + (1 - newOpenness) * span);
+          const f = toF(v.logLo + (1 - newOpenness) * v.span);
           // Ring feel: a tick per detent crossing, a firmer knock on full stops.
           const detent = detentIndexFor(f);
           if (detent !== lastDetentRef.current) {
@@ -142,10 +154,10 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
             }
           }
           // The band tracks the finger 1:1 while dragging (native-driver transform).
-          const t = clamp((toLog(f) - logLo) / span, 0, 1);
+          const t = clamp((toLog(f) - v.logLo) / v.span, 0, 1);
           tRef.current = t;
           translateX.setValue(TRACK_WIDTH / 2 - t * BAND_SPAN);
-          onApertureChange(Number(f.toFixed(2)));
+          v.onApertureChange(Number(f.toFixed(2)));
         },
         onPanResponderRelease: () => {
           dragState.current.active = false;
@@ -156,12 +168,8 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
           setDragging(false);
         },
       }),
-    [isVariableAperture, openness, currentAperture, lo, hi, logLo, span, onApertureChange, detentIndexFor, translateX],
+    [detentIndexFor, translateX],
   );
-
-  const interactive = isVariableAperture && hi > lo;
-  const trackLeft = screenWidth / 2 - TRACK_WIDTH / 2;
-  const irisLeft = trackLeft - 44 - IRIS_GAP;
 
   // Side-view aperture simulation: pops in while the ring is dragged (the "cut the lens
   // in half" cross-section reacting live), fades out shortly after release so the static
@@ -189,14 +197,17 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   }, [dragging, sideViewOpacity]);
 
   return (
-    <View style={styles.bar} pointerEvents="box-none">
+    // Whole-bar drag surface (pointerEvents auto): the 252pt band alone left dead zones at
+    // both edges that read as "the ring is broken". Children that must not grab touches
+    // are pointerEvents="none".
+    <View style={styles.bar} pointerEvents="auto" {...(interactive ? panResponder.panHandlers : {})}>
       {/* Iris: the physical diaphragm (f/1.4 → big hole; f/4 → tiny hole) */}
       <View style={[styles.iris, { left: irisLeft }]} pointerEvents="none">
         <IrisGlyph size={44} openness={interactive ? openness : 0.55} accent={accent} />
       </View>
 
       {/* The scale band scrolls under the fixed pointer (pointer == shutter axis) */}
-      <View style={[styles.trackClip, { left: trackLeft }]} {...(interactive ? panResponder.panHandlers : {})}>
+      <View style={[styles.trackClip, { left: trackLeft }]}>
         <Animated.View style={[styles.band, { transform: [{ translateX }] }]} pointerEvents="none">
           {interactive
             ? ticks.map((tick) => (
@@ -232,9 +243,14 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
       ) : null}
 
       {(!isVariableAperture || demoMode) ? (
-        <Text style={[styles.caption, demoMode && accent ? { color: accent } : null]}>
-          {demoMode ? 'DEMO' : 'FIXED'}
-        </Text>
+        <View
+          style={[styles.demoBadge, demoMode && accent ? { borderColor: hexToRgba(accent, 0.55) } : null]}
+          pointerEvents="none"
+        >
+          <Text style={[styles.demoBadgeText, demoMode && accent ? { color: accent } : null]}>
+            {demoMode ? 'DEMO' : 'FIXED'}
+          </Text>
+        </View>
       ) : null}
     </View>
   );
@@ -321,14 +337,22 @@ const styles = StyleSheet.create({
     borderRadius: 0.75,
     backgroundColor: '#FFFFFF',
   },
-  caption: {
+  demoBadge: {
     position: 'absolute',
+    top: 4,
     right: 10,
-    bottom: 2,
-    color: 'rgba(255, 255, 255, 0.4)',
-    fontSize: 8,
-    fontWeight: '700',
-    letterSpacing: 1,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.22)',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  demoBadgeText: {
+    color: 'rgba(255, 255, 255, 0.65)',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.5,
   },
 });
 

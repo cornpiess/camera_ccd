@@ -278,7 +278,7 @@ public final class CameraEngineModule: Module {
 
     AsyncFunction("capturePhoto") { (promise: Promise) in
       guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
-      view.capture { result in self.settle(result, promise) }
+      view.capture { result, detail in self.settle(result, promise, detail: detail) }
     }
 
     AsyncFunction("setAperture") { (fStop: Double, promise: Promise) in
@@ -389,11 +389,11 @@ public final class CameraEngineModule: Module {
     }
   }
 
-  private func settle<T>(_ result: Result<T, CameraEngineError>, _ promise: Promise) {
+  private func settle<T>(_ result: Result<T, CameraEngineError>, _ promise: Promise, detail: String? = nil) {
     DispatchQueue.main.async {
       switch result {
       case .success(let value): promise.resolve(value)
-      case .failure(let error): promise.reject(error.rawValue, error.message)
+      case .failure(let error): promise.reject(error.rawValue, detail ?? error.message)
       }
     }
   }
@@ -706,7 +706,7 @@ public final class CameraEngineView: ExpoView {
     configured = true
   }
 
-  fileprivate func capture(completion: @escaping (Result<[String: Any], CameraEngineError>) -> Void) {
+  fileprivate func capture(completion: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
     sessionQueue.async {
       guard self.session.isRunning else { completion(.failure(.notRunning)); return }
       CameraTempFiles.removeUntrackedFiles()
@@ -756,9 +756,9 @@ public final class CameraEngineView: ExpoView {
       // NOTE: AVCapturePhotoSettings exposes no fast-capture toggle in this SDK; do not
       // re-add speculative API names without verifying against the actual headers.
       let id = photoSettings.uniqueID
-      let delegate = PhotoCaptureDelegate(profile: self.profileSnapshot()) { [weak self] result in
+      let delegate = PhotoCaptureDelegate(profile: self.profileSnapshot()) { [weak self] result, detail in
         self?.sessionQueue.async { self?.captureDelegates.removeValue(forKey: id) }
-        completion(result)
+        completion(result, detail)
       }
       self.captureDelegates[id] = delegate
       self.output.capturePhoto(with: photoSettings, delegate: delegate)
@@ -1117,7 +1117,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
   // ponytail: static shared CIContext avoids allocating GPU command queue/shader cache per shutter press
   private static let sharedContext = CameraEngineGPU.ciContext
   private let profile: [String: Any]
-  private let completion: (Result<[String: Any], CameraEngineError>) -> Void
+  private let completion: (Result<[String: Any], CameraEngineError>, String?) -> Void
   private let completionLock = NSLock()
   private var didComplete = false
   private var didAcceptPhoto = false
@@ -1128,7 +1128,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
   // never silently disappear. Guarded by completionLock.
   private var companionData: Data?
 
-  init(profile: [String: Any], completion: @escaping (Result<[String: Any], CameraEngineError>) -> Void) {
+  init(profile: [String: Any], completion: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
     self.profile = profile
     self.completion = completion
   }
@@ -1243,16 +1243,27 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
       }
 
       // 2. Add to Photos via add-only permission
-      requestPhotoLibraryAddAuthorization { granted in
-        guard granted else { self.finish(.failure(.photoPermissionDenied)); return }
+      requestPhotoLibraryAddAuthorization { granted, permissionDetail in
+        guard granted else {
+          self.finish(.failure(.photoPermissionDenied), detail: "photo saving blocked: \(permissionDetail)")
+          return
+        }
         guard !self.hasCompleted else { return }
         var localIdentifier: String?
         PHPhotoLibrary.shared().performChanges({
           let request = PHAssetCreationRequest.forAsset()
           request.addResource(with: .photo, fileURL: fileURL, options: nil)
           localIdentifier = request.placeholderForCreatedAsset?.localIdentifier
-        }) { success, _ in
-          guard success else { self.finish(.failure(.saveFailed)); return }
+        }) { success, error in
+          guard success else {
+            // Never swallow the PhotoKit reason — it is the only way to tell quota,
+            // permission, and storage failures apart from the diag log.
+            self.finish(
+              .failure(.saveFailed),
+              detail: "PhotoKit save failed: \(error?.localizedDescription ?? "unknown error (no NSError)")"
+            )
+            return
+          }
           CameraTempFiles.keep([fileURL, thumbURL])
           // The thumbnail the UI displays must survive restarts — serve the Documents
           // copy when persistence succeeds, fall back to the temp file otherwise.
@@ -1332,23 +1343,28 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     return result
   }
 
-  private func requestPhotoLibraryAddAuthorization(completion: @escaping (Bool) -> Void) {
+  private func requestPhotoLibraryAddAuthorization(completion: @escaping (Bool, String) -> Void) {
     let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
     if status == .notDetermined {
-      PHPhotoLibrary.requestAuthorization(for: .addOnly) { completion($0 == .authorized || $0 == .limited) }
+      PHPhotoLibrary.requestAuthorization(for: .addOnly) {
+        let granted = $0 == .authorized || $0 == .limited
+        completion(granted, "permission requested → \(granted ? "granted" : "denied")")
+      }
     } else {
-      completion(status == .authorized || status == .limited)
+      let granted = status == .authorized || status == .limited
+      let why = granted ? "granted" : (status == .restricted ? "restricted" : "denied")
+      completion(granted, "add-only photo permission already \(why)")
     }
   }
 
-  private func finish(_ result: Result<[String: Any], CameraEngineError>) {
+  private func finish(_ result: Result<[String: Any], CameraEngineError>, detail: String? = nil) {
     completionLock.lock()
     guard !didComplete else { completionLock.unlock(); return }
     didComplete = true
     let urls = generatedURLs
     completionLock.unlock()
     if case .failure = result { CameraTempFiles.remove(urls) }
-    DispatchQueue.main.async { self.completion(result) }
+    DispatchQueue.main.async { self.completion(result, detail) }
   }
 }
 

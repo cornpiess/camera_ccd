@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Dimensions, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import type { CameraProfile } from '../profiles/types';
 import { markerGlyph, profileDisplayName } from './types';
@@ -49,6 +49,13 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
   // Per-camera configuration entry (⚙) restored in the liquid-glass list.
   const [configProfileId, setConfigProfileId] = useState<string | null>(null);
+  const { height: screenHeight } = useWindowDimensions();
+  // Keep the active camera visible when the list overflows (24+ profiles).
+  const scrollRef = useRef<ScrollView>(null);
+  // 24+ profiles overflow the screen: cap the panel and scroll the rows. The morph math
+  // uses the CAPPED height so the glass still lands exactly on the capsule at progress 0.
+  const maxPanelHeight = Math.round(screenHeight * 0.62);
+  const panelHeight = Math.min(profiles.length * ROW_HEIGHT, maxPanelHeight);
 
   useEffect(() => {
     animRef.current?.stop();
@@ -76,9 +83,17 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
-  if (!mounted || profiles.length === 0) return null;
+  // Open with the active camera scrolled into view (list can exceed the panel height).
+  useEffect(() => {
+    if (!visible) return;
+    const activeIndex = profiles.findIndex((p) => p.id === activeProfileId);
+    if (activeIndex > 0) {
+      const y = Math.max(0, activeIndex * ROW_HEIGHT - panelHeight / 2 + ROW_HEIGHT / 2);
+      scrollRef.current?.scrollTo({ y, animated: false });
+    }
+  }, [visible, activeProfileId, profiles, panelHeight]);
 
-  const panelHeight = profiles.length * ROW_HEIGHT;
+  if (!mounted || profiles.length === 0) return null;
   // Transform-origin math (RN scales around the center): pin the scaled panel's top edge
   // onto the capsule's top edge at progress 0, landing exactly on the final bounds at 1.
   const originTranslateY = CAPSULE_TOP + CAPSULE_HEIGHT / 2 - (PANEL_TOP + panelHeight / 2);
@@ -158,6 +173,12 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
             <Animated.View
               style={[styles.content, { opacity: contentOpacity, transform: [{ scale: contentScale }] }]}
             >
+              <ScrollView
+                ref={scrollRef}
+                style={styles.list}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={false}
+              >
               {profiles.map((profile) => {
                 const isActive = profile.id === activeProfileId;
                 const accent = profile.ui?.accent || '#FFFFFF';
@@ -215,6 +236,7 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                   </Pressable>
                 );
               })}
+              </ScrollView>
             </Animated.View>
           </View>
         </Animated.View>
@@ -270,10 +292,13 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 6,
   },
+  list: {
+    flex: 1,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
+    height: ROW_HEIGHT,
     paddingHorizontal: 18,
     gap: 12,
   },

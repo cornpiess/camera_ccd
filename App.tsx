@@ -9,7 +9,9 @@ import {
   Animated,
   Dimensions,
   AppState,
+  Image,
   Linking,
+  Modal,
   Platform,
   PanResponder,
   Text,
@@ -18,6 +20,7 @@ import {
   type GestureResponderEvent,
   type PanResponderGestureState,
 } from 'react-native';import * as Haptics from 'expo-haptics';
+import { File } from 'expo-file-system';
 
 // Native camera module wrapper & native APIs
 import {
@@ -206,6 +209,10 @@ function CameraAppScreen(): React.JSX.Element {
   // Photo Capture & Preview states
   const [capturePhase, setCapturePhase] = useState<CapturePhase>('idle');
   const [latestThumbnail, setLatestThumbnail] = useState<string | null>(null);
+  // Full-resolution file of THIS session's last shot (temp file; not persisted). The
+  // photo viewer prefers it and falls back to the persisted 512px thumbnail after restart.
+  const [lastCaptureFileUri, setLastCaptureFileUri] = useState<string | null>(null);
+  const [photoViewerUri, setPhotoViewerUri] = useState<string | null>(null);
   // Persistent, tappable remediation when the photo-library ADD permission is denied —
   // a 4-second transient banner was too easy to miss, which read as "photos don't save".
   const [photoPermDenied, setPhotoPermDenied] = useState<boolean>(false);
@@ -565,6 +572,14 @@ function CameraAppScreen(): React.JSX.Element {
     } catch (err: unknown) {
       setCurrentAperture(previous);
       setActiveAperture(previous);
+      // Self-healing: a fixed-aperture lens misreported as variable (iOS 27 quirk) rejects
+      // EVERY setAperture — demote to fixed + DEMO for the rest of the session so the ring
+      // stays usable instead of snapping back on every drag.
+      if (err instanceof CameraEngineError && err.code === 'ERR_APERTURE_UNSUPPORTED') {
+        setSupportsVariableAperture(false);
+        setApertureDemoMode(true);
+        recordDiag('warn', 'aperture: hardware rejected setAperture — demoted to fixed + DEMO for this session');
+      }
       showTransientError(resolveErrorMessage(err));
     }
   };
@@ -625,6 +640,7 @@ function CameraAppScreen(): React.JSX.Element {
       setPhotoPermDenied(false);
       recordDiag('info', `capture: saved (fallback=${Boolean(result?.processingFallback)}, thumb=${Boolean(result?.thumbnailUri)})`);
       const thumbUri = result?.thumbnailUri ?? result?.fileUri ?? null;
+      setLastCaptureFileUri(result?.fileUri ?? null);
       if (thumbUri) {
         setLatestThumbnail(thumbUri);
         // Native serves a STABLE Documents copy — persist it so the chip survives restarts.
@@ -1010,26 +1026,20 @@ function CameraAppScreen(): React.JSX.Element {
                     <ThumbnailPreview
                       uri={latestThumbnail}
                       onPress={() => {
-                        // photos-redirect:// opens the Photos app. canOpenURL is useless here:
-                        // iOS requires the scheme in LSApplicationQueriesSchemes and returns
-                        // false otherwise, which read as "the thumbnail tap is dead". openURL
-                        // directly, fall back to the legacy scheme, then say so honestly.
-                        const tryOpen = async (): Promise<boolean> => {
-                          for (const url of ['photos-redirect://', 'photos://']) {
-                            try {
-                              await Linking.openURL(url);
-                              return true;
-                            } catch {
-                              // scheme refused — try the next one
-                            }
+                        // In-app full-screen viewer (the system camera's own pattern).
+                        // iOS exposes no public way to open the Photos app from a
+                        // third-party app — photos-redirect:// is semi-private and fails
+                        // outright on current iOS. Prefer this session's full-res temp
+                        // file; fall back to the persisted 512px thumbnail.
+                        let uri = lastCaptureFileUri;
+                        if (uri) {
+                          try {
+                            if (!new File(uri).exists) uri = null;
+                          } catch {
+                            uri = null;
                           }
-                          return false;
-                        };
-                        void tryOpen().then((opened) => {
-                          if (!opened) {
-                            showTransientError("Couldn't open Photos from here — open it from the Home Screen.");
-                          }
-                        });
+                        }
+                        setPhotoViewerUri(uri ?? latestThumbnail);
                       }}
                     />
                   ) : null}
@@ -1085,6 +1095,31 @@ function CameraAppScreen(): React.JSX.Element {
             apertureDemoMode={apertureDemoMode}
             onToggleApertureDemo={() => setApertureDemoMode((mode) => !mode)}
           />
+
+          {/* Full-screen photo viewer: tap the thumbnail to inspect the last shot
+              (system-camera behavior; iOS has no public API to open the Photos app). */}
+          <Modal
+            animationType="fade"
+            onRequestClose={() => setPhotoViewerUri(null)}
+            transparent
+            visible={photoViewerUri !== null}
+          >
+            <TouchableOpacity
+              accessibilityLabel="Close photo viewer"
+              accessibilityRole="button"
+              activeOpacity={1}
+              onPress={() => setPhotoViewerUri(null)}
+              style={styles.photoViewer}
+            >
+              {photoViewerUri ? (
+                <Image
+                  resizeMode="contain"
+                  source={{ uri: photoViewerUri }}
+                  style={styles.photoViewerImage}
+                />
+              ) : null}
+            </TouchableOpacity>
+          </Modal>
         </View>
       </ThreeFingerGestureDetector>
     </View>
@@ -1205,6 +1240,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flexShrink: 1,
     textAlign: 'center',
+  },
+  photoViewer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.96)',
+  },
+  photoViewerImage: {
+    flex: 1,
+    marginTop: 48,
+    marginBottom: 48,
   },
   bottomControlsContainer: {
     position: 'absolute',
