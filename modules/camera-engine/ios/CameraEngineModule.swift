@@ -1603,7 +1603,7 @@ private enum CameraDNARenderer {
   private static func buildEffectiveCube(profile: [String: Any], base: (dimension: Int, data: Data)) -> (dimension: Int, data: Data) {
     let color = dictionary(profile["color"])
     let dim = base.dimension
-    var values = [Float](base.data)
+    var values = floatArray(base.data)
     let count = dim * dim * dim
 
     // 1. lutIntensity: linear pull-back toward the untouched color (per entry).
@@ -1681,7 +1681,19 @@ private enum CameraDNARenderer {
         values[o + 2] = Float(min(1.0, max(0.0, b)))
       }
     }
-    return (dim, values.withUnsafeBufferPointer { Data(buffer: $0) })
+    return (dim, dataFromFloats(values))
+  }
+
+  /// Data ↔ [Float] conversions that compile on every Swift 5/6 toolchain (the naive
+  /// `[Float](data)` and `Data(buffer: [Float]` forms do not).
+  private static func floatArray(_ data: Data) -> [Float] {
+    var result = [Float](repeating: 0, count: data.count / MemoryLayout<Float>.size)
+    result.withUnsafeMutableBytes { data.copyBytes(to: $0) }
+    return result
+  }
+  private static func dataFromFloats(_ floats: [Float]) -> Data {
+    var copy = floats
+    return copy.withUnsafeBytes { Data($0) }
   }
 
   private static func number(_ values: [String: Any], _ key: String, _ fallback: Double, _ range: ClosedRange<Double>) -> Double {
