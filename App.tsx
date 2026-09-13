@@ -1096,8 +1096,10 @@ function CameraAppScreen(): React.JSX.Element {
             onToggleApertureDemo={() => setApertureDemoMode((mode) => !mode)}
           />
 
-          {/* Full-screen photo viewer: tap the thumbnail to inspect the last shot
-              (system-camera behavior; iOS has no public API to open the Photos app). */}
+          {/* Full-screen photo viewer: tap the thumbnail to inspect the last shot.
+              The "open in Photos" action is best-effort — photos-redirect:// is
+              semi-private and refuses on some iOS versions; the photo itself is
+              already saved to the library either way. */}
           <Modal
             animationType="fade"
             onRequestClose={() => setPhotoViewerUri(null)}
@@ -1119,6 +1121,22 @@ function CameraAppScreen(): React.JSX.Element {
                 />
               ) : null}
             </TouchableOpacity>
+            {photoViewerUri ? (
+              <View pointerEvents="box-none" style={styles.photoViewerActions}>
+                <TouchableOpacity
+                  accessibilityLabel="Open in the Photos app"
+                  accessibilityRole="button"
+                  style={styles.photoViewerButton}
+                  onPress={() => {
+                    Linking.openURL('photos-redirect://').catch(() => {
+                      showTransientError('此 iOS 无法从这里跳转「照片」——照片已保存在相册，可从主屏幕打开。');
+                    });
+                  }}
+                >
+                  <Text style={styles.photoViewerButtonText}>在“照片”中打开</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
           </Modal>
         </View>
       </ThreeFingerGestureDetector>
@@ -1249,6 +1267,26 @@ const styles = StyleSheet.create({
     flex: 1,
     marginTop: 48,
     marginBottom: 48,
+  },
+  photoViewerActions: {
+    position: 'absolute',
+    bottom: 56,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  photoViewerButton: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    backgroundColor: 'rgba(30, 30, 34, 0.85)',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  photoViewerButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
   bottomControlsContainer: {
     position: 'absolute',
