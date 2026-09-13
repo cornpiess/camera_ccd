@@ -115,6 +115,8 @@ export function ProfileConfigModal({ visible, profileId, onClose }: ProfileConfi
                 label="Apply"
                 onPress={() => { void run(() => applyProfileText(text, profileId ?? undefined)); }}
               />
+              {/* Clear the editor only — the applied camera config is untouched. */}
+              <ActionButton disabled={busy || text === ''} label="Clear" onPress={() => { setText(''); clearErrors(); }} />
               <ActionButton destructive disabled={busy || profileId === null} label="Reset Camera" onPress={() => { void run(() => resetProfile(profileId!)); }} />
             </View>
 
