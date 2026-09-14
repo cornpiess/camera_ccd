@@ -808,10 +808,14 @@ public final class CameraEngineView: ExpoView {
       print("[CameraEngine][Diag] activeFormat supports ~24MP dims: \(has24MP)")
     }
     if #available(iOS 27.0, *) {
+      // CRASH SAFETY: responds-guarded KVC (see capture() note) — #available proves the
+      // OS, not the property; a missing key would otherwise be an ObjC-level crash.
       let format = device.activeFormat as NSObject
-      let minA = format.value(forKey: "minLensAperture") as? NSNumber
-      let maxA = format.value(forKey: "maxLensAperture") as? NSNumber
-      print("[CameraEngine][Diag] activeFormat lens aperture range: \(minA?.doubleValue ?? 0)–\(maxA?.doubleValue ?? 0) (variable = \(minA.map { $0.doubleValue > 0 } ?? false))")
+      let hasMin = format.responds(to: NSSelectorFromString("minLensAperture"))
+      let hasMax = format.responds(to: NSSelectorFromString("maxLensAperture"))
+      let minA = hasMin ? (format.value(forKey: "minLensAperture") as? NSNumber)?.doubleValue : nil
+      let maxA = hasMax ? (format.value(forKey: "maxLensAperture") as? NSNumber)?.doubleValue : nil
+      print("[CameraEngine][Diag] activeFormat lens aperture range: \(minA ?? 0)–\(maxA ?? 0) (variable = \(minA.map { $0.doubleValue > 0 } ?? false))")
     }
 
     // ProRAW capability stays available in code, but is NOT enabled by default (expert
@@ -879,25 +883,31 @@ public final class CameraEngineView: ExpoView {
         if maxDims.width > 0 { photoSettings.maxPhotoDimensions = maxDims }
       }
       // RESPONSIVE CAPTURE (shutter-latency optimization, iOS 26-era public surface):
-      // probed DYNAMICALLY through KVC so this file compiles against any SDK — if the
-      // property is absent the KVC lookup throws and we log an honest "not available".
-      // Never guessed statically; what the runtime actually exposes wins.
-      let responsiveSupported = (try? self.output.value(forKey: "responsiveCaptureSupported") as? Bool) ?? nil
-      if responsiveSupported == true,
-         photoSettings.responds(to: NSSelectorFromString("setResponsiveCaptureEnabled:")) {
-        do {
-          photoSettings.setValue(true, forKey: "responsiveCaptureEnabled")
-          print("[CameraEngine][Diag] responsive capture ENABLED for this shot")
-        } catch {
-          print("[CameraEngine][Diag] responsive capture enable failed: \(error.localizedDescription)")
-        }
+      // probed DYNAMICALLY so this file compiles against any SDK — what the runtime
+      // actually exposes wins, nothing is guessed statically.
+      //
+      // CRASH SAFETY: NSObject.value(forKey:) is NOT a throwing API — a missing key
+      // raises NSUnknownKeyException at the ObjC level, which Swift's try?/catch cannot
+      // intercept (hard crash). Every KVC access below is therefore GUARDED by
+      // responds(to:) on the exact getter/setter selector first (the same proven pattern
+      // as ApertureController) — the key is guaranteed present before KVC ever runs.
+      let outputResponds = self.output.responds(to: NSSelectorFromString("responsiveCaptureSupported"))
+        || self.output.responds(to: NSSelectorFromString("isResponsiveCaptureSupported"))
+      let settingsResponds = photoSettings.responds(to: NSSelectorFromString("setResponsiveCaptureEnabled:"))
+      if outputResponds, (self.output.value(forKey: "responsiveCaptureSupported") as? Bool) == true, settingsResponds {
+        // Setter existence verified above → KVC set cannot raise an unknown-key exception.
+        photoSettings.setValue(true, forKey: "responsiveCaptureEnabled")
+        print("[CameraEngine][Diag] responsive capture ENABLED for this shot")
       } else {
-        print("[CameraEngine][Diag] responsive capture not available on this device/OS — standard quality path")
+        print("[CameraEngine][Diag] responsive capture not available on this device/OS — standard quality path (supported=\(outputResponds), settable=\(settingsResponds))")
       }
       // DEFERRED PHOTO PROCESSING stays OFF (final-photo spec): Camera 18 must receive
       // the fully processed photo in didFinishProcessingPhoto immediately. Read back the
-      // switch so an OS default flipping it on is caught loudly.
-      if let deferred = try? photoSettings.value(forKey: "deferredProcessingEnabled") as? Bool {
+      // switch (getter-existence guarded, see crash note above) so an OS default flipping
+      // it on is caught loudly.
+      let deferredResponds = photoSettings.responds(to: NSSelectorFromString("deferredProcessingEnabled"))
+        || photoSettings.responds(to: NSSelectorFromString("isDeferredProcessingEnabled"))
+      if deferredResponds, let deferred = photoSettings.value(forKey: "deferredProcessingEnabled") as? Bool {
         print("[CameraEngine][Diag] deferred photo processing = \(deferred) (must stay false)")
         assert(!deferred, "deferred photo processing must stay disabled")
       }
