@@ -153,7 +153,7 @@ npm run prepackage  # 打包门槛：verify + export 基线 + Swift 配平 + aut
 | `npm run lint` | 0 error 0 warning |
 | `npm run doctor` | **20/20 checks passed** |
 | `npx expo install --check` | 依赖版本一致 |
-| `npx expo export --platform ios --output-dir dist-check` | **747 modules**（2026-09-14 实测基线，数字异常先查清原因）；用完 `rm -rf dist-check` |
+| `npx expo export --platform ios --output-dir dist-check` | **748 modules**（2026-09-14 实测基线，数字异常先查清原因）；用完 `rm -rf dist-check` |
 
 **Swift 代码**：本机（Windows）**没有 `swift` / `swiftc`**。只能做括号/字符串配平级别的结构自查，**语法与类型只能等 CI 构建（或 EAS Build）验证**。
 
@@ -192,6 +192,7 @@ npm run prepackage  # 打包门槛：verify + export 基线 + Swift 配平 + aut
 8. **TestFlight 上传要求 App Store Connect 里已有 App 记录**：`ios-testflight.yml` 只负责构建与上传，**不会创建 App**。首次跑之前必须先在 ASC 建好与 `app.json` 的 `bundleIdentifier` 一致的 App 记录（当前为 `com.cornpiess.camera18`），否则要到上传阶段（约 30 分钟后）才报 `No suitable application records were found`，无法在 preflight 提前发现。
 9. **`ExportOptions.plist` 的 `method` 值随 Xcode 版本变名**：Xcode 16 起 `app-store` → **`app-store-connect`**、`ad-hoc` → `release-testing`、`development` → `debugging`（旧名仍作为 deprecated 别名可用）。两个 workflow 都按 `xcodebuild -version` 的主版本决定用哪个，改这段别写死。
 10. **Swift 数组逐元素循环必须用固定索引**（build 42 真机 crash 根因）：`values[i] = f(values[i]); i += 4` 连写多行时 `i` 会跨行累加，步进错位还会越过数组末尾（Swift 数组越界在 release 也直接 trap）。对 4 浮点/entry 的 cube 数据一律写 `const o = index * 4` + `values[o] / values[o+1] / values[o+2]`。同场教训：`AVCaptureVideoDataOutput.videoSettings` 只接受像素格式键，`kCVPixelBufferWidth/HeightKey` 会被静默忽略（限分辨率要在 CIImage 管线头部 scale）。**CI 只验编译不验运行——任何新的逐帧/逐像素数学必须人工逐行核对索引再出包。**
+11. **Xcode 26.3 SDK 的改名/废弃清单**（run 43/45 实测，写新 Swift 前先对照）：`AVCaptureExposureDurationCurrent`→`AVCaptureDevice.currentExposureDuration`、`AVCaptureISOCurrent`→`AVCaptureDevice.currentISO`（同名「保持当前」哨兵的类属性形态）；连接级 `videoMinFrameDuration`/`isVideoMinFrameDurationSupported` **unavailable**，用设备级 `activeVideoMinFrameDuration`；ImageIO 的 EXIF 键没有 Swift 可导入常量，直接写字面量（`"Orientation"`、`"FocalLengthIn35mmFilm"`）。提交前用 `git grep` 确认没有引用旧名。
 
 ---
 
