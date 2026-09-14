@@ -942,7 +942,6 @@ function CameraAppScreen(): React.JSX.Element {
               <TopBar
                 profileName={activeProfile?.displayName ?? activeProfile?.name}
                 marker={activeProfile?.ui?.markerStyle}
-                icon={activeProfile?.ui?.icon}
                 accent={activeProfile?.ui?.accent}
                 skin={skin}
                 onPress={() => setIsSelectorOpen(true)}

@@ -662,10 +662,13 @@ public final class CameraEngineView: ExpoView {
     }
   }
 
-  /// Keep preview + capture connections in step with the physical device orientation.
-  // Rotation debouncing: orientationDidChange fires in bursts while the device pivots.
-  // Re-orienting mid-burst reconfigures the connections several times per rotation and
-  // shows up as an occasional viewfinder stutter; settling 300ms keeps one clean switch.
+  /// ORIENTATION MODEL (user-confirmed, final): the viewfinder is a WINDOW GLUED TO THE
+  /// PHONE — its content must always look identical to portrait, no matter how the phone
+  /// is physically held. Only the SAVED PHOTO follows gravity (landscape hold → landscape
+  /// photo in the library). So the PREVIEW feed is pinned to portrait forever, and the
+  /// gyro drives ONLY the capture connection.
+  /// Rotation debouncing still applies: re-orienting the capture connection mid-burst
+  /// costs a frame; settling 300ms keeps one clean switch.
   private var lastOrientationSyncAt = TimeInterval(0)
 
   private func syncOutputOrientation() {
@@ -673,7 +676,7 @@ public final class CameraEngineView: ExpoView {
       guard configured, session.isRunning, let orientation = currentDeviceOrientation() else { return }
       let now = CACurrentMediaTime()
       guard now - lastOrientationSyncAt > 0.3 else { return }
-      if setOrientation(orientation) {
+      if applyRotation(orientation, to: output.connection(with: .video)) {
         lastOrientationSyncAt = now
       }
     }
@@ -690,18 +693,15 @@ public final class CameraEngineView: ExpoView {
     return AVCaptureVideoOrientation(rawValue: deviceOrientation.rawValue)
   }
 
-  /// Applies the physical orientation to BOTH feeds (preview + capture). ORIENTATION FIX:
-  /// `connection.videoOrientation` is deprecated since iOS 17 and on recent iOS releases it
-  /// is silently IGNORED for video data output — the viewfinder content then stays glued to
-  /// the sensor's portrait orientation and appears rotated 90° when the phone is held in
-  /// landscape. The live API is `videoRotationAngle` (degrees clockwise from landscape-sensor
-  /// home); use it whenever the SDK has it, fall back to `videoOrientation` otherwise.
-  /// Returns true when any connection actually changed.
+  /// Pins the PREVIEW feed to portrait forever (window metaphor — see syncOutputOrientation)
+  /// and applies the physical orientation to the CAPTURE feed only. Uses the live
+  /// `videoRotationAngle` API (iOS 17+): `connection.videoOrientation` is deprecated and on
+  /// recent iOS releases silently ignored for video data output. Returns true when the
+  /// capture connection actually changed.
   @discardableResult
   private func setOrientation(_ orientation: AVCaptureVideoOrientation) -> Bool {
-    let videoChanged = applyRotation(orientation, to: videoOutput.connection(with: .video))
-    let photoChanged = applyRotation(orientation, to: output.connection(with: .video))
-    return videoChanged || photoChanged
+    _ = applyRotation(.portrait, to: videoOutput.connection(with: .video))
+    return applyRotation(orientation, to: output.connection(with: .video))
   }
 
   private func applyRotation(_ orientation: AVCaptureVideoOrientation, to connection: AVCaptureConnection?) -> Bool {
@@ -742,13 +742,24 @@ public final class CameraEngineView: ExpoView {
     if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { device.whiteBalanceMode = .continuousAutoWhiteBalance }
   }
 
-  /// BASE-QUALITY FIX: the session is pinned to the rear PHYSICAL wide (main) camera at
-  /// 1×. The previous virtual-device preference (triple/dual camera) started every capture
-  /// on the ultra-wide constituent at zoom 1.0 and relied on Apple's seamless crossfade —
-  /// a known softness/noise regression versus the native main lens. No automatic lens
-  /// switching: one lens, one focal, WYSIWYG.
+  /// FOCAL LADDER (user-confirmed): the dial must offer REAL 13mm ultra-wide + the 26mm
+  /// main, so the session needs a VIRTUAL device (Apple's seamless crossfade handles the
+  /// lens swap). The previous quality fix pinned the physical wide — that killed the real
+  /// 13mm stop and made the dial lie. The JS layer defaults the dial to 26mm (zoom 2.0 on
+  /// a virtual body), so captures land on the MAIN lens, not the ultra-wide.
   fileprivate static func preferredCaptureDevice() -> AVCaptureDevice? {
-    AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+    let types: [AVCaptureDevice.DeviceType] = [
+      .builtInTripleCamera,
+      .builtInDualCamera,
+      .builtInDualWideCamera,
+      .builtInWideAngleCamera,
+    ]
+    for type in types {
+      if let device = AVCaptureDevice.default(type, for: .video, position: .back) {
+        return device
+      }
+    }
+    return nil
   }
 
   private func configureSession() throws {

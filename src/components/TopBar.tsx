@@ -12,7 +12,6 @@ import {
 import * as Haptics from 'expo-haptics';
 import type { CameraInfo } from './types';
 import { markerGlyph } from './types';
-import { CameraIcon } from './CameraIcon';
 import { GlassCard } from './GlassCard';
 import type { CameraSkin } from '../theme/skin';
 
@@ -22,8 +21,6 @@ export interface TopBarProps {
   readonly cameraName?: string;
   /** Abstract selection marker + light accent of the current profile (small dot only, GOAL 3). */
   readonly marker?: string;
-  /** Silhouette icon id (ui.icon) rendered instead of the marker glyph when present. */
-  readonly icon?: string | null;
   readonly accent?: string;
   /** Derived per-camera skin; tints the badge hairline with the camera's identity color. */
   readonly skin?: CameraSkin;
@@ -44,7 +41,6 @@ export const TopBar: React.FC<TopBarProps> = ({
   cameraInfo,
   cameraName,
   marker,
-  icon,
   accent,
   skin,
   onPress,
@@ -89,9 +85,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               style={[styles.badgeGlass, skin ? { borderWidth: 1, borderColor: skin.border } : null]}
             >
               <View style={styles.badgeInner}>
-                {icon ? (
-                  <CameraIcon icon={icon} accent={accent} width={20} />
-                ) : accent ? (
+                {accent ? (
                   <Text style={[styles.markerGlyph, { color: accent }]}>{markerGlyph(marker)}</Text>
                 ) : null}
                 <Text style={styles.cameraNameTitle} numberOfLines={1}>

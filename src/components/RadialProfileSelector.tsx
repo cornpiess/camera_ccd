@@ -10,7 +10,6 @@ import * as Haptics from 'expo-haptics';
 import type { CameraProfile } from '../profiles/types';
 import type { Point } from './types';
 import { markerGlyph, profileDisplayName } from './types';
-import { CameraIcon } from './CameraIcon';
 import { GlassCard } from './GlassCard';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -258,19 +257,15 @@ export const RadialProfileSelector: React.FC<RadialProfileSelectorProps> = ({
                       isHighlighted && styles.nodeInnerHighlighted,
                     ]}
                   >
-                    {profile.ui?.icon ? (
-                      <CameraIcon icon={profile.ui.icon} accent={accent} width={26} />
-                    ) : (
-                      <Text
-                        style={[
-                          styles.nodeShortText,
-                          isHighlighted && styles.nodeShortTextHighlighted,
-                          { color: isHighlighted ? accent : '#E0E0E0' },
-                        ]}
-                      >
-                        {shortName || markerGlyph(profile.ui?.markerStyle)}
-                      </Text>
-                    )}
+                    <Text
+                      style={[
+                        styles.nodeShortText,
+                        isHighlighted && styles.nodeShortTextHighlighted,
+                        { color: isHighlighted ? accent : '#E0E0E0' },
+                      ]}
+                    >
+                      {shortName || markerGlyph(profile.ui?.markerStyle)}
+                    </Text>
                   </View>
                 </GlassCard>
 

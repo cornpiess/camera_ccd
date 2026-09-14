@@ -40,12 +40,12 @@ export interface ApertureBarProps {
 
 const BAR_HEIGHT = 96;
 const TRACK_WIDTH = 252;
-/** Drag distance that spans the whole range — deliberately long for a damped, heavy ring feel. */
-const FULL_DRAG_PX = 640;
+/** Drag distance spanning the whole range — short enough that ƒ/1.5→ƒ/4 is one quick flick. */
+const FULL_DRAG_PX = 400;
 /** Scale band: 3× the visible width so the scroll has travel on both sides. */
 const BAND_SPAN = TRACK_WIDTH * 3;
-/** Physical ring feel: 24 detents across the full travel (≈0.15 stop at ƒ/1.4–ƒ/4). */
-const DETENT_COUNT = 24;
+/** Detent grid: one click per 0.1 f-number (ƒ/1.5 → ƒ/1.6 → … ƒ/4.0), like a tight lens ring. */
+const FSTEPS_PER_TENTH = 10;
 /** Ruler-style scale: 48 ticks per stop — every 1/48 stop, ruler-dense. */
 const TICKS_PER_STOP = 48;
 /** The tick BASELINE: horizontally level with the iris glyph's center (the aperture hole). */
@@ -137,12 +137,12 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
       const target = TRACK_WIDTH / 2 - t * BAND_SPAN;
       Animated.spring(translateX, {
         toValue: target,
-        // Nearly critical damping: follows the finger with a short, heavy lag, no bounce.
+        // Snappy chase: high tension = tight response, high friction = no bounce.
         // CONFIG GROUPS ARE MUTEX (RN invariant): tension/friction OR stiffness/damping/
         // mass — never mixed, and `mass` belongs ONLY to the stiffness group. Mixing them
         // throws Invariant Violation at mount = white-screen crash on device (build 57).
-        friction: 18,
-        tension: 90,
+        friction: 20,
+        tension: 130,
         useNativeDriver: false,
       }).start();
     },
@@ -155,10 +155,8 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
     animateBandTo(t);
   }, [openness, translateX, animateBandTo]);
 
-  const detentIndexFor = useCallback((f: number): number => {
-    const t = clamp((toLog(f) - logLo) / span, 0, 1);
-    return Math.round(t * DETENT_COUNT);
-  }, [logLo, span]);
+  // One detent per 0.1 f-number — the user-felt "咔嗒" grid (ƒ/1.5, ƒ/1.6, … ƒ/4.0).
+  const detentIndexFor = useCallback((f: number): number => Math.round(f * FSTEPS_PER_TENTH), []);
 
   const dragState = useRef({ startOpenness: 0, active: false });
   const lastDetentRef = useRef<number | null>(null);
@@ -207,7 +205,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
           // dx > 0 (drag right) = ring turns toward open = higher openness = smaller f-number.
           const newOpenness = clamp(dragState.current.startOpenness + gestureState.dx / FULL_DRAG_PX, 0, 1);
           const f = toF(v.logLo + (1 - newOpenness) * v.span);
-          // Ring feel: a tick per detent crossing, a firmer knock on full stops.
+          // Ring feel: a click per 0.1 f-number crossing, a firmer knock on full stops.
           const detent = detentIndexFor(f);
           if (detent !== lastDetentRef.current) {
             const fullStop = Math.abs(f - toF(Math.round(toLog(f)))) < 1e-6;

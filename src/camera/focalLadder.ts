@@ -8,8 +8,11 @@
  *
  * Zoom baseline (Apple docs for virtual devices): zoomFactor 1.0 renders the widest
  * constituent camera, the ultra-wide (13mm-equivalent). So on virtual bodies:
- *   zoom(mm) = mm / 13   → 13mm=1.0, 26mm=2.0, 35mm≈2.69, 52mm=4.0, 78mm=6.0, 156mm=12.
- * Single-wide bodies (no ultra-wide constituent) keep the 26mm main at zoom 1.0.
+ *   zoom(mm) = mm / 13   → 13mm=1.0, 26mm=2.0, 35mm≈2.69, 52mm=4.0.
+ * The ladder is EXACTLY the four stops the user confirmed (2026-09-14):
+ *   13 (0.5× real ultra-wide) / 26 (1× main) / 35 (main crop) / 52 (2× main crop).
+ * Single-wide bodies (no ultra-wide constituent) start at the 26mm main (zoom 1.0),
+ * and their zoom baseline is the 26mm main itself.
  */
 
 export type DeviceKind = 'virtual-triple' | 'virtual-dual' | 'virtual-dual-wide' | 'single';
@@ -29,23 +32,20 @@ const SINGLE_BASE_MM = 26;
 const isVirtual = (kind: DeviceKind): boolean => kind.startsWith('virtual');
 
 export function buildFocalStops(kind: DeviceKind): FocalStop[] {
+  const base = isVirtual(kind) ? VIRTUAL_BASE_MM : SINGLE_BASE_MM;
+  const zoomFor = (mm: number): number => mm / base;
   const stops: FocalStop[] = [];
   if (isVirtual(kind)) {
-    stops.push({ mm: 13, lensId: 'wide', zoom: 1 });
+    stops.push({ mm: 13, lensId: 'wide', zoom: zoomFor(13) });
   }
-  const base = isVirtual(kind) ? VIRTUAL_BASE_MM : SINGLE_BASE_MM;
-  stops.push({ mm: base * 2, lensId: 'wide', zoom: (base * 2) / VIRTUAL_BASE_MM });
-  stops.push({ mm: 35, lensId: 'wide', zoom: 35 / VIRTUAL_BASE_MM });
-  stops.push({ mm: base * 4, lensId: 'wide', zoom: (base * 4) / VIRTUAL_BASE_MM });
-  if (kind === 'virtual-triple') {
-    stops.push({ mm: 78, lensId: 'wide', zoom: 6 });
-    stops.push({ mm: 156, lensId: 'wide', zoom: 12 });
-  }
+  stops.push({ mm: 26, lensId: 'wide', zoom: zoomFor(26) });
+  stops.push({ mm: 35, lensId: 'wide', zoom: zoomFor(35) });
+  stops.push({ mm: 52, lensId: 'wide', zoom: zoomFor(52) });
   return stops;
 }
 
 /** Default stop: the main camera (26mm) — zoom 2.0 on virtual bodies, 1.0 on single-wide. */
 export function defaultFocalStop(kind: DeviceKind): FocalStop {
-  const mm = SINGLE_BASE_MM;
-  return { mm, lensId: 'wide', zoom: mm / (isVirtual(kind) ? VIRTUAL_BASE_MM : SINGLE_BASE_MM) };
+  const base = isVirtual(kind) ? VIRTUAL_BASE_MM : SINGLE_BASE_MM;
+  return { mm: 26, lensId: 'wide', zoom: 26 / base };
 }

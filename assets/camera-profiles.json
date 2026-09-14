@@ -696,6 +696,115 @@
         "note": "Expert-calibrated six-camera core (2026-09-13): Camera Character over Heavy Filter. Full-parameter JSON available; tone guardrails enforced by scripts/tone-audit.js.",
         "calibration": "expert-provided initial parameters"
       }
+    },
+    {
+      "id": "negative_film",
+      "name": "Film Negative",
+      "displayName": "底片 Negative",
+      "aperture": {
+        "preferred": 1.8
+      },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
+        "exposureBias": 0,
+        "curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.75
+          ],
+          [
+            1,
+            1
+          ]
+        ]
+      },
+      "color": {
+        "saturation": 1,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "orange": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "yellow": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "green": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "cyan": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "blue": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          },
+          "magenta": {
+            "hue": 0,
+            "saturation": 1,
+            "luminance": 1
+          }
+        },
+        "lut": null,
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": {
+          "amount": 0,
+          "size": 0.3
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.85
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
+      },
+      "ui": {
+        "shortName": "NEG",
+        "accent": "#E8E8E8",
+        "dialStyle": "snap",
+        "personality": "neutral",
+        "labelStyle": "minimal",
+        "markerStyle": "ring"
+      }
     }
   ]
 }
