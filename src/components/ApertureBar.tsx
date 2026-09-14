@@ -138,9 +138,11 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
       Animated.spring(translateX, {
         toValue: target,
         // Nearly critical damping: follows the finger with a short, heavy lag, no bounce.
-        friction: 12,
+        // CONFIG GROUPS ARE MUTEX (RN invariant): tension/friction OR stiffness/damping/
+        // mass — never mixed, and `mass` belongs ONLY to the stiffness group. Mixing them
+        // throws Invariant Violation at mount = white-screen crash on device (build 57).
+        friction: 18,
         tension: 90,
-        mass: 1.4,
         useNativeDriver: false,
       }).start();
     },

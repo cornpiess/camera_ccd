@@ -131,6 +131,22 @@ node -e "const Y=require('yaml'),fs=require('fs');for(const f of ['.github/workf
 
 要点：`run: |` 块里的 heredoc，**结束标记（如 `PLIST`）在 YAML 块标量处理后必须落在行首**，否则 shell 语法静默错误。新增/修改 heredoc 时逐个用 `bash -n` 过一遍。
 
+### 1.5 CI 连续失败复盘（2026-09-14，一次改动烧了 9 个构建的教训）
+
+背景：一批 Swift/CI 改动连挂 #50→#57，暴露出**四类不同根因**。以下每条都是硬规则：
+
+**A. Windows 没有 iOS SDK —— 禁止凭记忆写 iOS API 名。**
+常量名/属性名/选择器名想不起来时，只能走三条路：① 用运行时探测（`responds(to:)` + `NSSelectorFromString`，编译期零符号依赖）；② 用文档里的**字面值**（如 rotation angle 0/90/180/270）；③ 改设计绕开。`AVCaptureVideoRotationAnglePortrait` 这类"记得很清楚"的名字在真实 SDK 里可能不存在。**修编译错误时一次把同文件所有可疑点全修完**——CI 是唯一的编译器，一轮 30 分钟，别一个一个喂。
+
+**B. workflow 的 `run:` 块必须 ASCII-only（尤其 `$VAR` 周边）。**
+`echo "成功（attempt $archive_attempt）"` 里的全角 `）` 会让 runner 的 bash 把多字节字节并进变量名 → `set -u` 下 unbound variable → **xcodebuild 明明成功了，步骤照样退出 1**。含中文注释的步骤如果从未走过某条分支（如错误分支），那个分支就是潜伏地雷。echo 模板：变量后必须紧跟 ASCII 字符或行尾。
+
+**C. React Native `Animated.spring` 配置组互斥 —— 混用即真机白屏崩溃。**
+`bounciness/speed`、`tension/friction`、`stiffness/damping/mass` 三组只能选一组。`{tension, friction, mass}` 是 invariant 崩溃（build 57 实锤：授权相机后直接红屏）。**tsc/lint/编译全拦不住这类运行时崩溃**——所有触控/动画代码改动，必须真机冒烟到「授权 → 进取景 → 主交互」才能报完成。
+
+**D. 诊断结论必须有日志证据，禁止从"日志截断"反推根因。**
+#50/#52 被我误判为"OOM 杀进程"，实际 #54/#55 是真编译错误（被 xcodebuild 噪音淹没）。`xcodebuild -quiet` 是把错误从噪音里剥出来的正确手段，而不是猜。改错方向比不改更贵。
+
 ---
 
 ## 2. 禁止过度设计
