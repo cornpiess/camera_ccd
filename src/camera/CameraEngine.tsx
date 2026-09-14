@@ -32,6 +32,8 @@ export type EngineDiagnostics = {
   activeAperture?: number;
   supportedApertures?: number[] | null;
   deviceModel?: string;
+  /** Camera Control side button: method names the installed OS actually exposes (runtime enumeration). */
+  cameraControlSurface?: string[];
 };
 
 export type CapturedPhoto = {

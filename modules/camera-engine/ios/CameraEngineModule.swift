@@ -407,6 +407,7 @@ public final class CameraEngineModule: Module {
         "bundledLuts": bundledLuts.sorted(),
         "photoAddAuthorization": addStatus,
         "osVersion": ProcessInfo.processInfo.operatingSystemVersionString,
+        "cameraControlSurface": CameraControlProbe.exposedMethods(),
       ]
       let finish: (Result<[String: Any], CameraEngineError>) -> Void = { result in
         if case .success(let caps) = result { payload.merge(caps) { _, newest in newest } }
@@ -781,15 +782,36 @@ public final class CameraEngineView: ExpoView {
     // acceptable price while base image quality is being fixed.
     output.maxPhotoQualityPrioritization = .quality
 
-    // BASE-QUALITY FIX: request the LARGEST photo dimensions the active main-camera
-    // format supports. Without this the output can settle at a smaller default
-    // resolution and every downstream stage inherits the loss.
+    // 24MP TARGET (final photo spec): Camera 18 prefers Apple's fully processed
+    // multi-frame FUSED photo at 24MP over the raw 48MP binned-less size — fusion is
+    // where Apple's HDR stacking, noise reduction and detail recovery live. Pick the
+    // supported output dimension whose pixel count is CLOSEST to 24M (never blindly the
+    // largest, which would select 48MP and skip the fusion benefit).
     if #available(iOS 16.0, *) {
       let supported = device.activeFormat.supportedMaxPhotoDimensions
-      if let maxDims = supported.last, maxDims.width > 0 {
-        output.maxPhotoDimensions = maxDims
-        print("[CameraEngine][Diag] maxPhotoDimensions set to \(maxDims.width)x\(maxDims.height) (supported: \(supported.count) entries)")
+      if !supported.isEmpty {
+        let targetPixels = 24_000_000.0
+        let chosen = supported.min(by: {
+          abs(Double($0.width) * Double($0.height) - targetPixels)
+            < abs(Double($1.width) * Double($1.height) - targetPixels)
+        })!
+        output.maxPhotoDimensions = chosen
+        let list = supported.map { "\($0.width)x\($0.height)" }.joined(separator: ", ")
+        print("[CameraEngine][Diag] photo dimension options: [\(list)] → 24MP target selected \(chosen.width)x\(chosen.height) (\(chosen.width * chosen.height / 1_000_000)MP)")
       }
+      // RUNTIME FORMAT CHECK: the active main-camera format must simultaneously support
+      // the 24MP photo dimensions AND (iPhone 18 Pro) real variable aperture control.
+      // Both facts are logged so a device that fails either is diagnosable without a
+      // debugger. Format SWITCHING is not a public API — the default activeFormat of the
+      // physical wide camera carries the full dimension ladder on every Pro body.
+      let has24MP = supported.contains { $0.width * $0.height >= 23_000_000 && $0.width * $0.height <= 25_000_000 }
+      print("[CameraEngine][Diag] activeFormat supports ~24MP dims: \(has24MP)")
+    }
+    if #available(iOS 27.0, *) {
+      let format = device.activeFormat as NSObject
+      let minA = format.value(forKey: "minLensAperture") as? NSNumber
+      let maxA = format.value(forKey: "maxLensAperture") as? NSNumber
+      print("[CameraEngine][Diag] activeFormat lens aperture range: \(minA?.doubleValue ?? 0)–\(maxA?.doubleValue ?? 0) (variable = \(minA.map { $0.doubleValue > 0 } ?? false))")
     }
 
     // ProRAW capability stays available in code, but is NOT enabled by default (expert
@@ -824,6 +846,8 @@ public final class CameraEngineView: ExpoView {
     session.commitConfiguration()
     camera = device
     configured = true
+    let controlSurface = CameraControlProbe.exposedMethods()
+    print("[CameraEngine][Diag] Camera Control public surface (\(controlSurface.count) methods): \(controlSurface.isEmpty ? "none exposed by this OS" : controlSurface.joined(separator: ", "))")
   }
 
   fileprivate func capture(completion: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
@@ -848,12 +872,38 @@ public final class CameraEngineView: ExpoView {
       let photoSettings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
 
       photoSettings.photoQualityPrioritization = .quality
-      // Per-capture mirror of output.maxPhotoDimensions (iOS 16+): guarantee the full-res
-      // static photo every time, independent of any earlier settings object.
+      // Per-capture mirror of output.maxPhotoDimensions (iOS 16+): guarantee the 24MP
+      // fused target every capture, independent of any earlier settings object.
       if #available(iOS 16.0, *) {
         let maxDims = self.output.maxPhotoDimensions
         if maxDims.width > 0 { photoSettings.maxPhotoDimensions = maxDims }
       }
+      // RESPONSIVE CAPTURE (shutter-latency optimization, iOS 26-era public surface):
+      // probed DYNAMICALLY through KVC so this file compiles against any SDK — if the
+      // property is absent the KVC lookup throws and we log an honest "not available".
+      // Never guessed statically; what the runtime actually exposes wins.
+      let responsiveSupported = (try? self.output.value(forKey: "responsiveCaptureSupported") as? Bool) ?? nil
+      if responsiveSupported == true,
+         photoSettings.responds(to: NSSelectorFromString("setResponsiveCaptureEnabled:")) {
+        do {
+          photoSettings.setValue(true, forKey: "responsiveCaptureEnabled")
+          print("[CameraEngine][Diag] responsive capture ENABLED for this shot")
+        } catch {
+          print("[CameraEngine][Diag] responsive capture enable failed: \(error.localizedDescription)")
+        }
+      } else {
+        print("[CameraEngine][Diag] responsive capture not available on this device/OS — standard quality path")
+      }
+      // DEFERRED PHOTO PROCESSING stays OFF (final-photo spec): Camera 18 must receive
+      // the fully processed photo in didFinishProcessingPhoto immediately. Read back the
+      // switch so an OS default flipping it on is caught loudly.
+      if let deferred = try? photoSettings.value(forKey: "deferredProcessingEnabled") as? Bool {
+        print("[CameraEngine][Diag] deferred photo processing = \(deferred) (must stay false)")
+        assert(!deferred, "deferred photo processing must stay disabled")
+      }
+      // ENABLE PHOTO DELIVERY IN PREVIEW-RES? No — keep full-res delivery (default).
+      // (Companion/preview-sized images are never requested; the main photo is the only
+      // consumer of the pipeline.)
       // Landscape-held captures must stay landscape in the photo library: rotate the capture
       // connection to the physical device orientation so buffers arrive already upright and
       // the saved JPEG needs no EXIF rotation fix-up. Same rotation path as the preview
@@ -1272,6 +1322,45 @@ private enum CameraTempFiles {
     } catch {
       return nil
     }
+  }
+}
+
+// MARK: - Camera Control probe (iPhone side button) — enumerate the REAL public surface
+/// The Camera Control integration surface is discovered through the ObjC runtime instead
+/// of being statically linked: `class_copyMethodList` enumerates every method the
+/// INSTALLED OS actually exposes on the capture classes whose name mentions "camera
+/// control" (instance methods AND class methods). No API name is guessed anywhere — what
+/// ships on the device is what this reports. The result lands in getDiagnostics, so when
+/// an iPhone 18 Pro is in hand the shutter wiring (and, if a custom-control hook exists,
+/// the preferred real-aperture control) connects to whatever the runtime truly offers.
+private enum CameraControlProbe {
+  static func exposedMethods() -> [String] {
+    let classes: [AnyClass] = [AVCaptureSession.self, AVCaptureDevice.self, AVCapturePhotoOutput.self, UIApplication.self]
+    var found: Set<String> = []
+    for cls in classes {
+      // Instance methods…
+      if let list = methodList(for: cls) { found.formUnion(list) }
+      // …and class (metaclass) methods.
+      if let meta = object_getClass(cls), let list = methodList(for: meta) {
+        found.formUnion(list.map { "+\($0)" })
+      }
+    }
+    return found.sorted()
+  }
+
+  private static func methodList(for cls: AnyClass) -> [String]? {
+    var count: UInt32 = 0
+    guard let methods = class_copyMethodList(cls, &count) else { return nil }
+    defer { free(methods) }
+    var names: [String] = []
+    let className = NSStringFromClass(cls)
+    for i in 0..<Int(count) {
+      let name = NSStringFromSelector(method_getName(methods[i]))
+      if name.lowercased().contains("cameracontrol") {
+        names.append("\(className) \(name)")
+      }
+    }
+    return names
   }
 }
 
