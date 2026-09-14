@@ -436,12 +436,6 @@ public final class CameraEngineModule: Module {
       view.setZoomFactor(factor) { result in self.settle(result, promise) }
     }
 
-    AsyncFunction("setCaptureDebugVariants") { (enabled: Bool, promise: Promise) in
-      guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
-      view.captureDebugVariants = enabled
-      DispatchQueue.main.async { promise.resolve(nil) }
-    }
-
     AsyncFunction("applyProfile") { (profile: [String: Any], promise: Promise) in
       guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
       view.setProfile(profile)
@@ -481,16 +475,9 @@ public final class CameraEngineView: ExpoView {
   private var captureDelegates: [Int64: PhotoCaptureDelegate] = [:]
   // Active rear lens; confined to sessionQueue (read by configureSession / setLens).
   private var lensType: AVCaptureDevice.DeviceType = .builtInWideAngleCamera
-  // Base-quality triage: while base image quality is NOT yet validated on a real device,
-  // this stays ON by default — every capture additionally writes four labeled JPEG
-  // variants (A Apple photo / B neutral renderer / C LUT only / D full profile) into the
-  // photo library so a non-technical tester can locate the first degrading stage.
-  // Flip back to false once base quality is solved.
-  fileprivate var captureDebugVariants = true
 
-  // WYSIWYG viewfinder: session frames are pushed through the SAME Camera DNA renderer as
-  // captures (mode .preview), so the preview shows exactly what the photo will look like.
-  // Architecture: AVCaptureVideoDataOutput → CIImage → CameraDNARenderer(.preview) → MTKView.
+  // Production architecture (converged): preview is DISPLAY ONLY. Every photo comes from
+  // AVCapturePhotoOutput's full-resolution Apple-processed photo. No A/B/C/D triage.
   private let previewRenderer = PreviewRenderer()
   private var previewView: MTKView?
   // Fallback display for exotic no-Metal environments only.
@@ -824,29 +811,13 @@ public final class CameraEngineView: ExpoView {
         return
       }
 
-      // ProRAW is the preferred internal negative: request DNG only when the output truly
-      // supports and has Apple ProRAW enabled. Devices without ProRAW must NOT be forced onto
-      // plain Bayer RAW — they fall through to Apple's processed JPEG so the automatic
-      // photography pipeline stays intact.
-      var settings: AVCapturePhotoSettings?
-
-      if #available(iOS 14.3, *), self.output.isAppleProRAWSupported && self.output.isAppleProRAWEnabled {
-        let rawTypes = self.output.availableRawPhotoPixelFormatTypes
-        if let firstRawType = rawTypes.first {
-          // Request Apple ProRAW (DNG) alongside a companion processed representation
-          settings = AVCapturePhotoSettings(rawPixelFormatType: firstRawType, processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg])
-        }
-      }
-
-      // Fallback: standard processed JPEG
-      if settings == nil {
-        settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
-      }
-
-      guard let photoSettings = settings else {
-        completion(.failure(.captureFailed), nil)
-        return
-      }
+      // PRODUCTION PIPELINE: one source, one truth — the full-resolution Apple-processed
+      // photo. ProRAW/DNG and dual-format (RAW + processed companion) capture are removed:
+      // the final architecture is Apple Processed Photo → LUT → Fine Color → Tone →
+      // HEIF/JPEG, one decode → one render → one encode. No in-house multi-frame fusion:
+      // the session is pinned to the physical wide camera, which has no virtual-device
+      // Fusion path (and preserves real variable-aperture semantics on iPhone 18 Pro).
+      let photoSettings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
 
       photoSettings.photoQualityPrioritization = .quality
       // Per-capture mirror of output.maxPhotoDimensions (iOS 16+): guarantee the full-res
@@ -880,7 +851,6 @@ public final class CameraEngineView: ExpoView {
         profile: self.profileSnapshot(),
         appliedZoom: appliedZoom,
         equivalentFocalMM: equivalentFocalMM,
-        debugVariants: self.captureDebugVariants,
       ) { [weak self] result, detail in
         self?.sessionQueue.async { self?.captureDelegates.removeValue(forKey: id) }
         completion(result, detail)
@@ -1278,7 +1248,7 @@ private enum CameraTempFiles {
   }
 }
 
-// MARK: - Photo Capture Delegate (RAW / ProRAW + Processed Fallback)
+// MARK: - Photo Capture Delegate (Apple Processed Photo → LUT → Tone → JPEG)
 private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
   private static let processingQueue = DispatchQueue(label: "camera-engine.photo-processing", qos: .userInitiated)
   // ponytail: static shared CIContext avoids allocating GPU command queue/shader cache per shutter press
@@ -1287,124 +1257,53 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
   private let completion: (Result<[String: Any], CameraEngineError>, String?) -> Void
   private let completionLock = NSLock()
   private var didComplete = false
-  private var didAcceptPhoto = false
   private var generatedURLs: [URL] = []
-  private var debugVariantURLs: [String: String] = [:]
-  private var expectedPhotoCount = 1
   /// Zoom ACTUALLY applied to the device at shutter time, and its 35mm-equivalent focal
   /// (base × zoom) — stamped into EXIF so crop-zoomed shots read correctly in Photos.
   private let appliedZoom: Double
   private let equivalentFocalMM: Int
-  // Safety net (Iteration 4): in dual-format captures the companion Apple-processed photo is
-  // retained so a Camera DNA / RAW pipeline failure can still save the capture. Photos must
-  // never silently disappear. Guarded by completionLock.
-  private var companionData: Data?
-  /// Base-quality triage (see CameraEngineView.captureDebugVariants).
-  private let debugVariants: Bool
-
-  init(profile: [String: Any], appliedZoom: Double, equivalentFocalMM: Int, debugVariants: Bool = false, completion: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
+  init(profile: [String: Any], appliedZoom: Double, equivalentFocalMM: Int, completion: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
     self.profile = profile
     self.appliedZoom = appliedZoom
     self.equivalentFocalMM = equivalentFocalMM
-    self.debugVariants = debugVariants
     self.completion = completion
   }
 
-  func photoOutput(_ output: AVCapturePhotoOutput, willBeginCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
-    expectedPhotoCount = resolvedSettings.expectedPhotoCount
-  }
-
   func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-    // BASE-QUALITY DIAG: capture-resolution + exposure truth for every delivered photo.
+    // BASE-QUALITY DIAG: capture-resolution + exposure truth for the delivered photo.
     // ISO/exposure come from the EXIF block — AVCaptureResolvedPhotoSettings carries no
-    // ISO member, and exposureDuration there is the *settings* value, not the metered one.
+    // ISO member.
     let exif = photo.metadata["{Exif}"] as? [String: Any]
     let iso = (exif?["ISOSpeedRatings"] as? [NSNumber])?.first?.doubleValue ?? 0
     let exposureSeconds = exif?["ExposureTime"] as? Double ?? 0
     if #available(iOS 16.0, *) {
       let rs = photo.resolvedSettings
-      print("[CameraEngine][Diag] photo=\(rs.photoDimensions.width)x\(rs.photoDimensions.height) preview=\(rs.previewDimensions.width)x\(rs.previewDimensions.height) ISO=\(Int(iso)) exposure=1/\(Int(1.0 / max(exposureSeconds, 0.0001)))s raw=\(photo.isRawPhoto)")
-    }
-    // Dual-format (RAW + processed) captures deliver two callbacks. Decide which one
-    // we care about BEFORE inspecting its error, otherwise a failed companion
-    // processed photo would abort an otherwise healthy RAW capture.
-    let isRaw = photo.isRawPhoto
-    if expectedPhotoCount > 1 && !isRaw {
-      // Previously this callback was dropped entirely, so a failed RAW render lost the
-      // whole capture even though a healthy processed photo existed. Keep it as fallback.
-      if error == nil, let data = photo.fileDataRepresentation() {
-        completionLock.lock(); companionData = data; completionLock.unlock()
-      }
-      return
+      print("[CameraEngine][Diag] photoDimensions=\(rs.photoDimensions.width)x\(rs.photoDimensions.height) previewDimensions=\(rs.previewDimensions.width)x\(rs.previewDimensions.height) ISO=\(Int(iso)) exposure=1/\(Int(1.0 / max(exposureSeconds, 0.0001)))s")
     }
 
-    // Never-lose-the-photo rule: if the RAW part failed at the source but this is a
-    // dual-format capture, defer the decision — the companion processed photo may still
-    // arrive and didFinishCaptureFor is guaranteed to run and deliver it.
     guard error == nil, let photoData = photo.fileDataRepresentation() else {
-      if expectedPhotoCount > 1 {
-        return
-      }
       finish(.failure(.captureFailed))
       return
     }
-
-    // A usable photo reached the pipeline. Record it so the didFinishCapture fallback
-    // cannot race the asynchronous render started below.
-    completionLock.lock(); didAcceptPhoto = true; completionLock.unlock()
-
-    processCapturedData(photoData, metadata: photo.metadata, isRaw: isRaw, initialFallback: false)
+    processCapturedData(photoData, metadata: photo.metadata)
   }
 
-  /// Full-quality Camera DNA pipeline: render → EXIF-preserving JPEG → Photos.
+  /// PRODUCTION PIPELINE — one decode, one render, one encode, full resolution end to end:
+  ///   Apple processed photo (Data) → CIImage → LUT cube (LUT + fine color) → Tone → JPEG.
   /// Runs exactly once per capture (guarded by hasCompleted inside finish).
-  private func processCapturedData(_ photoData: Data, metadata: [AnyHashable: Any], isRaw: Bool, initialFallback: Bool) {
+  private func processCapturedData(_ photoData: Data, metadata: [AnyHashable: Any]) {
     Self.processingQueue.async { [self] in
       guard !hasCompleted else { return }
 
-      // BASE-QUALITY TRIAGE: one capture → four variants, so the first stage that
-      // degrades quality can be located by eye:
-      //   A — Apple processed photo, byte-identical, never touches the renderer
-      //   B — neutral renderer (empty profile = true passthrough decode+re-encode)
-      //   C — LUT only (color stage, tone/texture stripped)
-      //   D — full profile (the actual shipped render)
-      // B vs A isolates our decode/re-encode; C vs B isolates the LUT; D vs C isolates tone.
-      if debugVariants, !isRaw {
-        writeDebugVariants(photoData: photoData, metadata: metadata)
-      }
-
-      // 1. RAW / ProRAW First vs Processed Fallback
-      var renderedCIImage: CIImage?
-      var usedFallback = initialFallback
-
-      if isRaw {
-        // Core Image official RAW rendering pipeline via CIRAWFilter
-        renderedCIImage = CameraDNARenderer.renderRaw(data: photoData, profile: profile)
-      }
-
-      // Trust rule: if the Camera DNA / RAW pipeline failed but a companion processed
-      // photo exists, save it untouched and report the fallback to the caller.
-      if renderedCIImage == nil {
-        completionLock.lock(); let companion = companionData; completionLock.unlock()
-        if let companion = companion {
-          renderedCIImage = CIImage(data: companion, options: [.applyOrientationProperty: true])
-          usedFallback = renderedCIImage != nil
-        }
-      }
-
-      // Fallback: if not RAW or CIRAWFilter fails to initialize from data, load standard processed CIImage
-      if renderedCIImage == nil {
-        guard let source = CIImage(data: photoData, options: [.applyOrientationProperty: true]) else {
-          finish(.failure(.captureFailed))
-          return
-        }
-        renderedCIImage = CameraDNARenderer.apply(profile, to: source, mode: .final)
-      }
-
-      guard var image = renderedCIImage else {
-        finish(.failure(.processingFailed))
+      guard let source = CIImage(data: photoData, options: [.applyOrientationProperty: true]) else {
+        finish(.failure(.captureFailed))
         return
       }
+      let inputExtent = source.extent.integral
+      print("[CameraEngine][Diag] pipeline input extent=\(Int(inputExtent.width))x\(Int(inputExtent.height))")
+
+      var image = CameraDNARenderer.apply(profile, to: source, mode: .final)
+      print("[CameraEngine][Diag] after LUT+color extent=\(Int(image.extent.width))x\(Int(image.extent.height))")
 
       let extent = image.extent.integral
       guard !extent.isNull, !extent.isInfinite, extent.width > 0, extent.height > 0,
@@ -1414,8 +1313,16 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
       }
 
       image = image.cropped(to: extent)
+      print("[CameraEngine][Diag] after tone/export extent=\(Int(extent.width))x\(Int(extent.height))")
+
+      // RESOLUTION ASSERTION: the final pipeline must never shrink the photo. A mismatch
+      // means someone introduced a resize — trap in debug builds, log in release.
+      if abs(extent.width - inputExtent.width) >= 2 || abs(extent.height - inputExtent.height) >= 2 {
+        print("[CameraEngine][Diag] RESOLUTION REGRESSION: export=\(Int(extent.width))x\(Int(extent.height)) input=\(Int(inputExtent.width))x\(Int(inputExtent.height))")
+        assert(false, "Camera18 final pipeline changed resolution")
+      }
+
       let context = Self.sharedContext
-      print("[CameraEngine][Diag] final CIImage extent=\(extent.width)x\(extent.height)")
 
       let (fileURL, thumbURL) = CameraTempFiles.makeURLs()
       completionLock.lock(); generatedURLs = [fileURL, thumbURL]; completionLock.unlock()
@@ -1479,10 +1386,8 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
             "fileUri": fileURL.absoluteString,
             "thumbnailUri": thumbnailURI,
             "assetLocalIdentifier": localIdentifier ?? NSNull(),
-            "processingFallback": usedFallback,
             "appliedZoom": appliedZoom,
             "equivalentFocal": equivalentFocalMM,
-            "debugVariants": debugVariantURLs,
           ]))
         }
       }
@@ -1490,133 +1395,16 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
   }
 
   func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
-    completionLock.lock()
-    let accepted = didAcceptPhoto
-    let companion = companionData
-    completionLock.unlock()
-
-    // A photo already reached the render pipeline — its own path owns the outcome,
-    // including the companion fallback inside the render stage. Never kill it here:
-    // finishing with a failure while processing is in flight would silently drop a
-    // photo that is about to be saved.
-    if accepted { return }
-
-    // RAW never delivered a usable photo, but the companion Apple-processed photo
-    // did: save it untouched (marked as fallback) instead of losing the capture.
-    if error == nil, let companion = companion {
-      processCapturedData(companion, metadata: [:], isRaw: false, initialFallback: true)
-      return
+    // didFinishProcessingPhoto owns the outcome for the single processed photo (finish()
+    // is idempotent). This callback only acts as the never-arrived safety net so the JS
+    // promise cannot hang forever (shutter stuck disabled).
+    if error != nil {
+      finish(.failure(.captureFailed))
     }
-
-    // Safety net: nothing usable ever arrived. Finish so the JS promise cannot hang
-    // forever (shutter stuck disabled).
-    finish(.failure(.captureFailed))
   }
 
   private var hasCompleted: Bool {
     completionLock.lock(); defer { completionLock.unlock() }; return didComplete
-  }
-
-  /// Writes the A/B/C/D base-quality triage variants (see processCapturedData) and
-  /// saves a LABELED copy of each into the photo library (green corner tag "A"–"D"),
-  /// so a tester without any tooling can compare stages directly in Photos.
-  /// Runs on processingQueue before the main render; never fails the capture.
-  private func writeDebugVariants(photoData: Data, metadata: [AnyHashable: Any]) {
-    let directory = FileManager.default.temporaryDirectory
-    func variantURL(_ tag: String) -> URL {
-      directory.appendingPathComponent("cam18debug-\(tag)-\(UUID().uuidString).jpg")
-    }
-    var out: [String: String] = [:]
-    var libraryURLs: [URL] = []
-
-    // A — the Apple processed photo untouched by the renderer (byte-identical tmp copy).
-    let aURL = variantURL("A-apple")
-    do {
-      try photoData.write(to: aURL, options: .atomic)
-      out["A_appleProcessed"] = aURL.absoluteString
-    } catch {
-      print("[CameraEngine][Diag] variant A write failed: \(error.localizedDescription)")
-    }
-
-    guard let source = CIImage(data: photoData, options: [.applyOrientationProperty: true]),
-          let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
-      print("[CameraEngine][Diag] variants B/C/D skipped: Apple photo failed to decode")
-      return
-    }
-    print("[CameraEngine][Diag] variant decode extent=\(source.extent.width)x\(source.extent.height)")
-
-    // C gets a DISTINCT cache id: the effective-cube cache is keyed by profile id, and
-    // C and D share the same color payload shape — without this one could inherit the
-    // other's cube. Same color dict + fresh id → same LUT result, no cache pollution.
-    var lutOnlyProfile: [String: Any] = ["id": "\((profile["id"] as? String) ?? "debug")-debugC"]
-    if let color = profile["color"] as? [String: Any] { lutOnlyProfile["color"] = color }
-
-    // (Photos tag, renderer profile). A is rendered by NOTHING — decode + label only.
-    let variants: [(tag: String, prof: [String: Any]?)] = [
-      ("A", nil),
-      ("B", [:]),
-      ("C", lutOnlyProfile),
-      ("D", profile),
-    ]
-    for (tag, variantProfile) in variants {
-      let rendered: CIImage
-      if let variantProfile = variantProfile {
-        rendered = CameraDNARenderer.apply(variantProfile, to: source, mode: .final)
-          .cropped(to: source.extent.integral)
-      } else {
-        rendered = source
-      }
-      guard let data = Self.jpegRepresentation(
-        Self.labeledImage(rendered, tag),
-        metadata: metadata,
-        colorSpace: colorSpace,
-        quality: 0.95,
-        equivalentFocalMM: equivalentFocalMM,
-      ) else {
-        print("[CameraEngine][Diag] variant \(tag) encode failed")
-        continue
-      }
-      let url = variantURL("photo-\(tag)")
-      do {
-        try data.write(to: url, options: .atomic)
-        out[tag] = url.absoluteString
-        libraryURLs.append(url)
-        print("[CameraEngine][Diag] variant \(tag) dims=\(rendered.extent.width)x\(rendered.extent.height) bytes=\(data.count)")
-      } catch {
-        print("[CameraEngine][Diag] variant \(tag) write failed: \(error.localizedDescription)")
-      }
-    }
-    completionLock.lock(); debugVariantURLs = out; completionLock.unlock()
-
-    // Labeled comparison copies go to the photo library (same add-only permission as
-    // the main photo). Failure here never affects the capture.
-    guard !libraryURLs.isEmpty else { return }
-    requestPhotoLibraryAddAuthorization { granted, _ in
-      guard granted else { return }
-      PHPhotoLibrary.shared().performChanges({
-        for url in libraryURLs {
-          PHAssetCreationRequest.forAsset().addResource(with: .photo, fileURL: url, options: nil)
-        }
-      }) { success, error in
-        print("[CameraEngine][Diag] debug variants A/B/C/D \(success ? "saved" : "save FAILED: \(error?.localizedDescription ?? "?")") to photo library")
-      }
-    }
-  }
-
-  /// Burns a green corner tag ("A"… "D") into a debug copy so the four comparison
-  /// photos are distinguishable in the Photos grid. Diagnostic copies only — the main
-  /// photo never passes through here.
-  private static func labeledImage(_ image: CIImage, _ tag: String) -> CIImage {
-    guard let textFilter = CIFilter(name: "CITextImageGenerator") else { return image }
-    textFilter.setValue("CAM18 \(tag)", forKey: "inputText")
-    textFilter.setValue(max(60, image.extent.width * 0.05), forKey: "inputFontSize")
-    textFilter.setValue(CIColor(red: 0.2, green: 1.0, blue: 0.2), forKey: "inputColor")
-    guard let textImage = textFilter.outputImage else { return image }
-    let positioned = textImage.transformed(by: CGAffineTransform(
-      translationX: image.extent.minX + image.extent.width * 0.04,
-      y: image.extent.maxY - textImage.extent.height - image.extent.height * 0.04,
-    ))
-    return positioned.composited(over: image).cropped(to: image.extent)
   }
 
   // Rendered pixels are already upright, so the original orientation tag is replaced with "1"
@@ -1692,91 +1480,27 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
 }
 
 // MARK: - Unified Camera DNA Renderer
-/// ONE renderer for preview and final output (WYSIWYG contract):
-///   shared stages:  LUT, exposure, tone curve/black point, color, hue bands, vignette
-///   final-only:     detail/deharsh, full grain, halation
+/// Production renderer for preview and final output:
+///   Camera LUT (+ fine HSL color, fused into ONE cube) → Exposure → Tone Curve/Black Point.
+/// Camera 18 does NOT redo Apple's ISP: no noise reduction, no sharpening, no unsharp
+/// mask, no local tone mapping, no grain, no halation, no vignette, no starburst.
 private enum CameraDNARenderer {
   enum RenderMode {
-    /// Live viewfinder frames: shared color stages only.
+    /// Live viewfinder frames.
     case preview
-    /// Captured photos: everything, including the heavier texture stages.
+    /// Captured photos (same stages as preview — the pipeline is identical).
     case final
   }
 
   private static let bandNames = ["red", "orange", "yellow", "green", "cyan", "blue", "magenta"]
   private static let bandCenters: [Double] = [0, 30, 60, 120, 180, 240, 300]
 
-  /// CIRAWFilter based RAW / ProRAW development.
-  /// Maps Camera DNA raw parameters (sharpness, detail, localToneMap, NR) directly to CIRAWFilter properties.
-  static func renderRaw(data: Data, profile: [String: Any]) -> CIImage? {
-    let rawDict = dictionary(profile["raw"])
-
-    var rawFilter: CIFilter?
-    if #available(iOS 15.0, *) {
-      rawFilter = CIRAWFilter(imageData: data, identifierHint: nil)
-    }
-    if rawFilter == nil {
-      // Fallback to CIRAWFilter factory using data
-      rawFilter = CIFilter(name: "CIRAWFilter", parameters: ["inputImageData": data])
-    }
-
-    guard let filter = rawFilter else { return nil }
-
-    let sharpness = number(rawDict, "sharpness", 0.3, 0...1)
-    let detail = number(rawDict, "detail", 0.4, 0...1)
-    let localTone = number(rawDict, "localToneMap", 0.2, 0...1)
-    let lumNR = number(rawDict, "luminanceNoiseReduction", 0.2, 0...1)
-    let colNR = number(rawDict, "colorNoiseReduction", 0.3, 0...1)
-
-    // Apply official CIRAWFilter keys where supported by the underlying camera RAW decoder
-    let supportedKeys = Set(filter.inputKeys)
-
-    // 1. Sharpness & Detail: low artificial edge sharpening + preserving fine texture
-    if supportedKeys.contains("inputSharpness") {
-      filter.setValue(sharpness, forKey: "inputSharpness")
-    }
-    if supportedKeys.contains("inputDetailAmount") {
-      filter.setValue(detail, forKey: "inputDetailAmount")
-    }
-
-    // 2. Local Tone Mapping
-    if supportedKeys.contains("inputLocalToneMapAmount") {
-      filter.setValue(localTone, forKey: "inputLocalToneMapAmount")
-    }
-
-    // 3. Noise Reduction (Luminance & Color)
-    if supportedKeys.contains("inputLuminanceNoiseReductionAmount") {
-      filter.setValue(lumNR, forKey: "inputLuminanceNoiseReductionAmount")
-    }
-    if supportedKeys.contains("inputColorNoiseReductionAmount") {
-      filter.setValue(colNR, forKey: "inputColorNoiseReductionAmount")
-    }
-
-    // 4. Boost amount: keep natural linear baseline
-    if supportedKeys.contains("inputBoostAmount") {
-      filter.setValue(0.0, forKey: "inputBoostAmount")
-    }
-
-    guard let rawOutput = filter.outputImage else { return nil }
-
-    // Run remaining unified Camera DNA stages: Tone, Color, Hue Bands, Texture
-    return CameraDNARenderer.apply(profile, to: rawOutput, mode: .final, isRawSource: true)
-  }
-
   /// Unified rendering pipeline for all cameras.
-  /// Source → [final: detail] → Exposure → Tone → Color → Hue Bands → LUT → Vignette → [final: texture]
-  static func apply(_ profile: [String: Any], to source: CIImage, mode: RenderMode = .final, isRawSource: Bool = false) -> CIImage {
+  /// Source → LUT cube (LUT + fine color) → Exposure → Contrast → Black point → Tone curve.
+  /// NEUTRAL PASSTHROUGH: every stage is skipped when its parameters are neutral.
+  static func apply(_ profile: [String: Any], to source: CIImage, mode: RenderMode = .final) -> CIImage {
     let tone = dictionary(profile["tone"])
-    let color = dictionary(profile["color"])
-    let vignette = dictionary(dictionary(profile["texture"])["vignette"])
     var image = source
-
-    // BASE-QUALITY FIX: the FINAL-only detail block (CINoiseReduction + CISharpenLuminance
-    // + CIUnsharpMask + CIHighlightShadowAdjust) is DISABLED for Apple-processed sources.
-    // Running NR + sharpen + USM + local tone on top of Apple's already fully processed
-    // photo double-processed the image (noise artifacts amplified by sharpening — the
-    // "noisy AND soft" report). The CIRAWFilter path owns its own NR/sharpness keys.
-    // Grain is forced OFF until base image quality is solved (user directive).
 
     // ── Effective color stage (PRECOMPILED, cached per profile) ──────────────────
     // One 33³ cube fuses LUT (character) + temperature/tint + saturation + 7-band HSL
@@ -1814,21 +1538,6 @@ private enum CameraDNARenderer {
     }
     if let points = toneCurve(tone["curve"]), !isIdentityToneCurve(points) {
       image = filter("CIToneCurve", image, Dictionary(uniqueKeysWithValues: points.enumerated().map { ("inputPoint\($0.offset)", $0.element) }))
-    }
-
-    // FINAL-ONLY texture. BASE-QUALITY FIX: grain is REMOVED for all profiles until base
-    // image quality is solved (user directive: 所有 Grain = 0). Halation is retired from
-    // the six core cameras; the software starburst stage is REMOVED entirely — star
-    // spikes must come only from the real iPhone 18 Pro aperture (expert review §2).
-    // Vignette stays (profile-owned, gated on a non-neutral amount).
-    if mode == .final {
-      let vignetteAmount = number(vignette, "amount", 0, 0...1)
-      if vignetteAmount > 0 {
-        // CIVignette's inputRadius is a normalized scale (~0.5–2 useful); the JSON value is
-        // a 0–1 fraction where larger = falloff starts farther from the center = weaker.
-        let radius = 0.5 + number(vignette, "radius", 0.75, 0...1)
-        image = filter("CIVignette", image, [kCIInputIntensityKey: vignetteAmount * 2.0, kCIInputRadiusKey: radius])
-      }
     }
 
     return image.cropped(to: source.extent)
