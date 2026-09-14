@@ -707,13 +707,18 @@ public final class CameraEngineView: ExpoView {
   private func applyRotation(_ orientation: AVCaptureVideoOrientation, to connection: AVCaptureConnection?) -> Bool {
     guard let connection else { return false }
     if #available(iOS 17.0, *) {
+      // Apple's official videoOrientation → videoRotationAngle compatibility mapping
+      // (AVFoundation "Choosing a rotation angle" table). The named
+      // AVCaptureVideoRotationAngle* constants do NOT exist in the Swift interface of
+      // this toolchain (CI build error), so the documented degree values are used
+      // directly — they are the API contract, not an implementation detail.
       let angle: CGFloat
       switch orientation {
-      case .portrait: angle = AVCaptureVideoRotationAnglePortrait
-      case .portraitUpsideDown: angle = AVCaptureVideoRotationAnglePortraitUpsideDown
-      case .landscapeLeft: angle = AVCaptureVideoRotationAngleLandscapeLeft
-      case .landscapeRight: angle = AVCaptureVideoRotationAngleLandscapeRight
-      @unknown default: angle = AVCaptureVideoRotationAnglePortrait
+      case .portrait: angle = 90
+      case .portraitUpsideDown: angle = 270
+      case .landscapeLeft: angle = 0
+      case .landscapeRight: angle = 180
+      @unknown default: angle = 90
       }
       if connection.isVideoRotationAngleSupported(angle) {
         if abs(connection.videoRotationAngle - angle) > 0.5 {
@@ -815,7 +820,7 @@ public final class CameraEngineView: ExpoView {
       let hasMax = format.responds(to: NSSelectorFromString("maxLensAperture"))
       let minA = hasMin ? (format.value(forKey: "minLensAperture") as? NSNumber)?.doubleValue : nil
       let maxA = hasMax ? (format.value(forKey: "maxLensAperture") as? NSNumber)?.doubleValue : nil
-      print("[CameraEngine][Diag] activeFormat lens aperture range: \(minA ?? 0)–\(maxA ?? 0) (variable = \(minA.map { $0.doubleValue > 0 } ?? false))")
+      print("[CameraEngine][Diag] activeFormat lens aperture range: \(minA ?? 0)–\(maxA ?? 0) (variable = \(minA.map { $0 > 0 } ?? false))")
     }
 
     // ProRAW capability stays available in code, but is NOT enabled by default (expert
