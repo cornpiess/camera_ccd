@@ -89,7 +89,7 @@ jobs:
           echo "bundleIdentifier = $BID"
           case "$BID" in
             com.example.*|"")
-              echo "::error::bundleIdentifier 是占位值「$BID」，Apple 不允许 com.example 前缀。"
+              echo "::error::bundleIdentifier is a placeholder (\"$BID\") - Apple rejects com.example prefix."
               fail=1
               ;;
           esac
@@ -100,7 +100,7 @@ jobs:
           XM=${XV%%.*}
           echo "Xcode = $XV (major $XM)"
           if [ "${XM:-0}" -lt 26 ]; then
-            echo "::error::当前 Xcode 是 $XV；Expo SDK 55 需要 Xcode 26+。"
+            echo "::error::Xcode is $XV - Expo SDK 55 requires Xcode 26+."
             fail=1
           fi
 
@@ -209,6 +209,12 @@ jobs:
           });
           NODE
 
+      # NOTE: keep this step ASCII-ONLY. #56 proved that a full-width CJK paren next to
+      # $VAR in an echo line makes the runner's bash extend the variable name into the
+      # multibyte bytes -> "unbound variable" under set -u -> the step fails AFTER
+      # xcodebuild already succeeded (7 minutes of compilation thrown away).
+      # History: #50/#52 log truncation looked like compiler OOM; #54/#55 were REAL
+      # compile errors (bad rotation-constant names, Double.doubleValue), all fixed.
       - name: Archive
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -220,11 +226,6 @@ jobs:
           SCHEME=$(basename "$WORKSPACE" .xcworkspace)
           echo "workspace=$WORKSPACE scheme=$SCHEME"
 
-          # RUNNER OOM FIX（#50/#52/#54 三连死因）: Release 下 Pods 的 ReactCodegen C++
-          # 单元内存峰值很高，xcodebuild 默认满核并发会把 7GB 的 runner 内存打穿——
-          # clang 被内核 SIGKILL，xcodebuild 退出码 65，且日志里没有任何错误文字。
-          # 缓解：限制并发编译任务数、关闭索引器（纯吃内存、构建不需要）、-quiet 降噪。
-          # 重试一次：第二次命中已编译缓存，剩余任务少、内存压力大幅下降。
           archive_attempt=1
           archive_max=2
           while true; do
@@ -245,16 +246,16 @@ jobs:
               -authenticationKeyID "$ASC_KEY_ID" \
               -authenticationKeyIssuerID "$ASC_ISSUER_ID"; then
               echo "::endgroup::"
-              echo "Archive 成功（attempt $archive_attempt）"
+              echo "Archive OK on attempt $archive_attempt"
               break
             fi
             echo "::endgroup::"
             if [ "$archive_attempt" -ge "$archive_max" ]; then
-              echo "::error::Archive 连续 $archive_max 次失败（编译器疑似被 OOM 杀死，见上方日志）。"
+              echo "::error::Archive failed $archive_max attempts (see log above)."
               exit 1
             fi
             archive_attempt=$((archive_attempt + 1))
-            echo "::warning::Archive attempt 失败，30 秒后重试（利用已编译缓存降低内存压力）…"
+            echo "::warning::Archive attempt failed; retry in 30s (cached build, lower memory pressure)..."
             sleep 30
           done
 
