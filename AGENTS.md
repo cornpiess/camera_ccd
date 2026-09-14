@@ -75,6 +75,16 @@ git -c http.proxy=http://127.0.0.1:7890 -c credential.helper= -c credential.help
 
 > ⚠️ 若本机 shell 里存在别处注入的 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量且指向不可用的端口，它会覆盖你的显式设置。排查时先 `env | grep -i proxy` 看一眼，必要时用 `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy git ...` 清掉。
 
+### 0.2 网络重试上限（硬规则：试 1–2 次就停，交给用户）
+
+用户网络环境不稳定，github.com 直连/代理时通时断。**任何网络操作（`git push` / `git pull` / GitHub API 触发构建 / 下载等）连续失败 1–2 次后，立即停止重试**，禁止写长循环、后台轮询、指数退避之类的"坚持到底"逻辑。此时直接回复用户：
+
+1. 已完成的工作（代码已提交在本地，列出 commit）；
+2. 卡住的具体一步和最后一次报错原文；
+3. 请用户手动执行（push / 在 GitHub 网页上触发 workflow），一条命令给出即可。
+
+构建状态监督同理：查 1 次状态、汇报结果即可；构建失败要修，也只修代码 + 重新触发 1 次，不反复"监督至成功"。
+
 ---
 
 ## 1. 四条硬红线（违反即回退）
