@@ -219,18 +219,44 @@ jobs:
           WORKSPACE=$(ls -d ios/*.xcworkspace | head -1)
           SCHEME=$(basename "$WORKSPACE" .xcworkspace)
           echo "workspace=$WORKSPACE scheme=$SCHEME"
-          xcodebuild archive \
-            -workspace "$WORKSPACE" \
-            -scheme "$SCHEME" \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/App.xcarchive" \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGN_STYLE=Automatic \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$ASC_KEY_PATH" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+          # RUNNER OOM FIX（#50/#52/#54 三连死因）: Release 下 Pods 的 ReactCodegen C++
+          # 单元内存峰值很高，xcodebuild 默认满核并发会把 7GB 的 runner 内存打穿——
+          # clang 被内核 SIGKILL，xcodebuild 退出码 65，且日志里没有任何错误文字。
+          # 缓解：限制并发编译任务数、关闭索引器（纯吃内存、构建不需要）、-quiet 降噪。
+          # 重试一次：第二次命中已编译缓存，剩余任务少、内存压力大幅下降。
+          archive_attempt=1
+          archive_max=2
+          while true; do
+            echo "::group::Archive attempt $archive_attempt"
+            if xcodebuild archive \
+              -workspace "$WORKSPACE" \
+              -scheme "$SCHEME" \
+              -configuration Release \
+              -destination 'generic/platform=iOS' \
+              -archivePath "$RUNNER_TEMP/App.xcarchive" \
+              -jobs 2 \
+              -quiet \
+              COMPILER_INDEX_STORE_ENABLE=NO \
+              DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+              CODE_SIGN_STYLE=Automatic \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath "$ASC_KEY_PATH" \
+              -authenticationKeyID "$ASC_KEY_ID" \
+              -authenticationKeyIssuerID "$ASC_ISSUER_ID"; then
+              echo "::endgroup::"
+              echo "Archive 成功（attempt $archive_attempt）"
+              break
+            fi
+            echo "::endgroup::"
+            if [ "$archive_attempt" -ge "$archive_max" ]; then
+              echo "::error::Archive 连续 $archive_max 次失败（编译器疑似被 OOM 杀死，见上方日志）。"
+              exit 1
+            fi
+            archive_attempt=$((archive_attempt + 1))
+            echo "::warning::Archive attempt 失败，30 秒后重试（利用已编译缓存降低内存压力）…"
+            sleep 30
+          done
 
       # destination=export：先落一个 .ipa 到磁盘，既能当 artifact 存档，也能在真正上传前
       # 校验签名与「JS bundle 是否已内嵌」——这一步失败比上传被拒好排查得多。
