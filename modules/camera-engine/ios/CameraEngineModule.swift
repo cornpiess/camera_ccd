@@ -5,6 +5,7 @@ import CoreImage
 import CoreFoundation
 import ImageIO
 import CoreMotion
+import AudioToolbox
 import UIKit
 import MetalKit
 
@@ -668,14 +669,10 @@ public final class CameraEngineView: ExpoView {
 
   private func syncOutputOrientation() {
     sessionQueue.async { [self] in
-      guard configured, session.isRunning else { return }
+      guard configured, session.isRunning, let orientation = currentDeviceOrientation() else { return }
       let now = CACurrentMediaTime()
       guard now - lastOrientationSyncAt > 0.3 else { return }
-      // Only commit the timestamp when an actual re-orientation happened (setOrientation
-      // no-ops when the connection already matches), so unchanged states never throttle.
-      let before = videoOutput.connection(with: .video)?.videoOrientation
-      setOrientation(on: videoOutput, photoOutput: output)
-      if videoOutput.connection(with: .video)?.videoOrientation != before {
+      if setOrientation(orientation) {
         lastOrientationSyncAt = now
       }
     }
@@ -692,16 +689,45 @@ public final class CameraEngineView: ExpoView {
     return AVCaptureVideoOrientation(rawValue: deviceOrientation.rawValue)
   }
 
-  private func setOrientation(on videoOutput: AVCaptureVideoDataOutput, photoOutput: AVCapturePhotoOutput) {
-    guard let orientation = currentDeviceOrientation() else { return }
-    // Only touch the connection when the orientation actually changed — every
-    // re-assignment causes a visible glitch in the preview feed.
-    if let current = videoOutput.connection(with: .video)?.videoOrientation, current != orientation {
-      videoOutput.connection(with: .video)?.videoOrientation = orientation
+  /// Applies the physical orientation to BOTH feeds (preview + capture). ORIENTATION FIX:
+  /// `connection.videoOrientation` is deprecated since iOS 17 and on recent iOS releases it
+  /// is silently IGNORED for video data output — the viewfinder content then stays glued to
+  /// the sensor's portrait orientation and appears rotated 90° when the phone is held in
+  /// landscape. The live API is `videoRotationAngle` (degrees clockwise from landscape-sensor
+  /// home); use it whenever the SDK has it, fall back to `videoOrientation` otherwise.
+  /// Returns true when any connection actually changed.
+  @discardableResult
+  private func setOrientation(_ orientation: AVCaptureVideoOrientation) -> Bool {
+    let videoChanged = applyRotation(orientation, to: videoOutput.connection(with: .video))
+    let photoChanged = applyRotation(orientation, to: output.connection(with: .video))
+    return videoChanged || photoChanged
+  }
+
+  private func applyRotation(_ orientation: AVCaptureVideoOrientation, to connection: AVCaptureConnection?) -> Bool {
+    guard let connection else { return false }
+    if #available(iOS 17.0, *) {
+      let angle: CGFloat
+      switch orientation {
+      case .portrait: angle = AVCaptureVideoRotationAnglePortrait
+      case .portraitUpsideDown: angle = AVCaptureVideoRotationAnglePortraitUpsideDown
+      case .landscapeLeft: angle = AVCaptureVideoRotationAngleLandscapeLeft
+      case .landscapeRight: angle = AVCaptureVideoRotationAngleLandscapeRight
+      @unknown default: angle = AVCaptureVideoRotationAnglePortrait
+      }
+      if connection.isVideoRotationAngleSupported(angle) {
+        if abs(connection.videoRotationAngle - angle) > 0.5 {
+          connection.videoRotationAngle = angle
+          return true
+        }
+        return false
+      }
     }
-    if let current = photoOutput.connection(with: .video)?.videoOrientation, current != orientation {
-      photoOutput.connection(with: .video)?.videoOrientation = orientation
+    // Pre-iOS 17 fallback.
+    if connection.videoOrientation != orientation {
+      connection.videoOrientation = orientation
+      return true
     }
+    return false
   }
 
   private static func applyAutoModes(to device: AVCaptureDevice) {
@@ -791,7 +817,9 @@ public final class CameraEngineView: ExpoView {
     }
     // The 30fps cap for this stream is set device-wide in configureSession's
     // lockForConfiguration block (activeVideoMinFrameDuration).
-    setOrientation(on: videoOutput, photoOutput: output)
+    if let orientation = currentDeviceOrientation() {
+      _ = setOrientation(orientation)
+    }
 
     session.commitConfiguration()
     camera = device
@@ -828,11 +856,10 @@ public final class CameraEngineView: ExpoView {
       }
       // Landscape-held captures must stay landscape in the photo library: rotate the capture
       // connection to the physical device orientation so buffers arrive already upright and
-      // the saved JPEG needs no EXIF rotation fix-up.
-      if let videoConnection = self.output.connection(with: .video) {
-        if let orientation = self.currentDeviceOrientation() {
-          videoConnection.videoOrientation = orientation
-        }
+      // the saved JPEG needs no EXIF rotation fix-up. Same rotation path as the preview
+      // (videoRotationAngle on iOS 17+) — preview and photo always agree.
+      if let orientation = self.currentDeviceOrientation() {
+        _ = self.applyRotation(orientation, to: self.output.connection(with: .video))
       }
       // Shutter fidelity relies on .balanced prioritization + the ProRAW dual-format path.
       // NOTE: AVCapturePhotoSettings exposes no fast-capture toggle in this SDK; do not
@@ -1267,6 +1294,13 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     self.appliedZoom = appliedZoom
     self.equivalentFocalMM = equivalentFocalMM
     self.completion = completion
+  }
+
+  func photoOutput(_ output: AVCapturePhotoOutput, willBeginCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
+    // Shutter click at the moment of exposure — the SYSTEM camera shutter sound (1108).
+    // AudioServices routes it through the system audio path, so it automatically follows
+    // the ringer/silent switch and system volume, exactly like the built-in Camera app.
+    AudioServicesPlaySystemSound(1108)
   }
 
   func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {

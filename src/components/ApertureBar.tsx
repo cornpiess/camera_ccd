@@ -41,13 +41,15 @@ export interface ApertureBarProps {
 const BAR_HEIGHT = 96;
 const TRACK_WIDTH = 252;
 /** Drag distance that spans the whole range — deliberately long for a damped, heavy ring feel. */
-const FULL_DRAG_PX = 420;
+const FULL_DRAG_PX = 640;
 /** Scale band: 3× the visible width so the scroll has travel on both sides. */
 const BAND_SPAN = TRACK_WIDTH * 3;
 /** Physical ring feel: 24 detents across the full travel (≈0.15 stop at ƒ/1.4–ƒ/4). */
 const DETENT_COUNT = 24;
-/** Tick hierarchy: minors every 1/24 stop, half-stop mediums, labeled full stops. */
-const TWELFTHS_OF_STOP = 24;
+/** Ruler-style scale: 48 ticks per stop — every 1/48 stop, ruler-dense. */
+const TICKS_PER_STOP = 48;
+/** The tick BASELINE: horizontally level with the iris glyph's center (the aperture hole). */
+const TICK_BASELINE = BAR_HEIGHT / 2 - 8; // in trackClip coords (clip starts at top: 8)
 /** Iris sits to the LEFT of the track so the pointer line stays exactly on the shutter axis. */
 const IRIS_GAP = 14;
 
@@ -96,18 +98,20 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   /** 0 = stopped down (ƒ/max), 1 = wide open (ƒ/min). Feeds iris hole + scroll direction. */
   const openness = clamp(1 - (toLog(currentAperture) - logLo) / span, 0, 1);
 
-  // Scale band ticks: minors every 1/24 stop, half-stop mediums, labeled full stops —
-  // laid out over the band.
+  // Ruler-style tick scale, dense like a straight ruler: three sizes per stop —
+  //   full stop  (k % 48 === 0): tallest, labeled
+  //   half stop  (k % 24 === 0): medium
+  //   1/48 stop  (everything else): small
   const ticks = useMemo(() => {
     const list: { key: string; x: number; major: boolean; half: boolean; label?: string }[] = [];
     if (!(hi > lo)) return list;
-    const firstTick = Math.ceil(logLo * TWELFTHS_OF_STOP);
-    const lastTick = Math.floor(logHi * TWELFTHS_OF_STOP);
+    const firstTick = Math.ceil(logLo * TICKS_PER_STOP);
+    const lastTick = Math.floor(logHi * TICKS_PER_STOP);
     for (let k = firstTick; k <= lastTick; k++) {
-      const log = k / TWELFTHS_OF_STOP;
+      const log = k / TICKS_PER_STOP;
       const t = (log - logLo) / span;
-      const major = k % 24 === 0;
-      const half = k % 12 === 0;
+      const major = k % TICKS_PER_STOP === 0;
+      const half = k % (TICKS_PER_STOP / 2) === 0;
       list.push({
         key: `${k}`,
         x: t * BAND_SPAN,
@@ -122,12 +126,32 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   // The band scrolls under the fixed pointer: engaged value always sits at band-x = t*BAND_SPAN,
   // rendered at screen-center via translateX = TRACK_WIDTH/2 - t*BAND_SPAN.
   const translateX = useRef(new Animated.Value(0)).current;
+
+  /**
+   * Damped band motion: the band CHASES the target through a critically-damped spring
+   * instead of teleporting 1:1 — heavy, mechanical lens-ring inertia. tRef always holds
+   * the TARGET (not the animated value) so the committed f-stop is exact.
+   */
+  const animateBandTo = useCallback(
+    (t: number) => {
+      const target = TRACK_WIDTH / 2 - t * BAND_SPAN;
+      Animated.spring(translateX, {
+        toValue: target,
+        // Nearly critical damping: follows the finger with a short, heavy lag, no bounce.
+        friction: 12,
+        tension: 90,
+        mass: 1.4,
+        useNativeDriver: false,
+      }).start();
+    },
+    [translateX],
+  );
   const tRef = useRef(0);
   useEffect(() => {
     const t = 1 - openness; // band coordinate: 0 = wide open end (left), 1 = stopped down
     tRef.current = t;
-    translateX.setValue(TRACK_WIDTH / 2 - t * BAND_SPAN);
-  }, [openness, translateX]);
+    animateBandTo(t);
+  }, [openness, translateX, animateBandTo]);
 
   const detentIndexFor = useCallback((f: number): number => {
     const t = clamp((toLog(f) - logLo) / span, 0, 1);
@@ -164,6 +188,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
     v.onApertureSettle?.(Number(toF(v.logLo + (1 - t) * v.span).toFixed(2)));
   };
 
+
   const panResponder = useMemo(
     () =>
       PanResponder.create({
@@ -191,10 +216,10 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
               Haptics.selectionAsync().catch(() => {});
             }
           }
-          // The band tracks the finger 1:1 while dragging (native-driver transform).
+          // The band CHASES the finger through the damped spring (target, not 1:1).
           const t = clamp((toLog(f) - v.logLo) / v.span, 0, 1);
           tRef.current = t;
-          translateX.setValue(TRACK_WIDTH / 2 - t * BAND_SPAN);
+          animateBandTo(t);
           v.onApertureChange(Number(f.toFixed(2)));
         },
         onPanResponderRelease: () => {
@@ -208,7 +233,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
           settleAtLastPosition();
         },
       }),
-    [detentIndexFor, translateX],
+    [detentIndexFor, animateBandTo],
   );
 
   return (
@@ -233,34 +258,33 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
         <IrisGlyph size={44} openness={interactive ? openness : 0.55} accent={accent} />
       </View>
 
-      {/* The tick scale (scale mode) — scrolls under the fixed pointer (shutter axis) */}
+      {/* The tick scale (scale mode) — ruler ticks sit on a baseline LEVEL with the
+          iris glyph's center; the band scrolls under the fixed pointer (shutter axis). */}
       {!sideMode ? (
         <View style={[styles.trackClip, { left: trackLeft, top: topInset, height: scaleH }]}>
           <Animated.View style={[styles.band, { height: scaleH, transform: [{ translateX }] }]} pointerEvents="none">
-            {interactive
-              ? ticks.map((tick) => (
-                  <View key={tick.key} style={[styles.tickSlot, { left: tick.x }]}>
-                    <View
-                      style={[
-                        styles.tick,
-                        tick.major && styles.tickMajor,
-                        !tick.major && tick.half && styles.tickHalf,
-                        dragging && styles.tickBright,
-                      ]}
-                    />
-                    {tick.label ? <Text style={styles.tickLabel}>{tick.label}</Text> : null}
-                  </View>
-                ))
-              : null}
+            {ticks.map((tick) => (
+              <View key={tick.key} style={[styles.tickSlot, { left: tick.x }]}>
+                {tick.label ? <Text style={styles.tickLabel}>{tick.label}</Text> : null}
+                <View
+                  style={[
+                    styles.tick,
+                    tick.major && styles.tickMajor,
+                    !tick.major && tick.half && styles.tickHalf,
+                    dragging && styles.tickBright,
+                  ]}
+                />
+              </View>
+            ))}
           </Animated.View>
           {/* engaged value rides above the pointer */}
-          <Text style={[styles.valueText, { top: topInset + 3 }, accent ? { color: accent } : null]} numberOfLines={1}>
+          <Text style={[styles.valueText, { top: 3 }, accent ? { color: accent } : null]} numberOfLines={1}>
             {formatF(currentAperture)}
           </Text>
-          {/* THE pointer: thin, exactly centered, camera accent */}
+          {/* THE pointer: thin, centered on the tick baseline (= the aperture-hole axis) */}
           <View
             pointerEvents="none"
-            style={[styles.pointer, { top: topInset + scaleH - 30 }, accent ? { backgroundColor: accent } : null]}
+            style={[styles.pointer, accent ? { backgroundColor: accent } : null]}
           />
         </View>
       ) : null}
@@ -325,31 +349,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
   },
+  // RULER LAYOUT: every tick's BASE sits exactly on TICK_BASELINE — the horizontal line
+  // through the iris glyph's center (the aperture hole) — so ticks and hole are level.
+  // Ticks grow UPWARD from the baseline (marginBottom lifts the base); labels stack
+  // directly above their major tick.
   tick: {
-    marginBottom: 16,
+    marginBottom: TICK_BASELINE,
     width: 1,
     height: 7,
     borderRadius: 0.5,
-    backgroundColor: 'rgba(255, 255, 255, 0.35)',
+    backgroundColor: 'rgba(255, 255, 255, 0.30)',
   },
   tickMajor: {
-    marginBottom: 14,
     width: 2,
-    height: 13,
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    height: 18,
+    borderRadius: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
   },
   tickHalf: {
-    marginBottom: 15,
-    width: 1,
-    height: 10,
-    borderRadius: 0.5,
+    width: 1.5,
+    height: 12,
+    borderRadius: 0.75,
     backgroundColor: 'rgba(255, 255, 255, 0.55)',
   },
   tickBright: {
     backgroundColor: 'rgba(255, 255, 255, 1)',
   },
   tickLabel: {
-    marginBottom: 2,
+    marginBottom: 3,
     color: 'rgba(255, 255, 255, 0.85)',
     fontSize: 11,
     fontWeight: '700',
@@ -367,9 +394,11 @@ const styles = StyleSheet.create({
   },
   pointer: {
     position: 'absolute',
-    bottom: 6,
+    // Centered on the tick baseline = the horizontal axis through the aperture hole.
+    top: TICK_BASELINE - 15,
     left: TRACK_WIDTH / 2 - 0.75,
     width: 1.5,
+    height: 30,
     borderRadius: 0.75,
     backgroundColor: '#FFFFFF',
   },
