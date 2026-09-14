@@ -772,7 +772,7 @@ public final class CameraEngineView: ExpoView {
     // format supports. Without this the output can settle at a smaller default
     // resolution and every downstream stage inherits the loss.
     if #available(iOS 16.0, *) {
-      let supported = device.activeFormat.supportedMaxPhotoDimensions()
+      let supported = device.activeFormat.supportedMaxPhotoDimensions
       if let maxDims = supported.last, maxDims.width > 0 {
         output.maxPhotoDimensions = maxDims
         print("[CameraEngine][Diag] maxPhotoDimensions set to \(maxDims.width)x\(maxDims.height) (supported: \(supported.count) entries)")
@@ -1316,9 +1316,14 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
 
   func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
     // BASE-QUALITY DIAG: capture-resolution + exposure truth for every delivered photo.
+    // ISO/exposure come from the EXIF block — AVCaptureResolvedPhotoSettings carries no
+    // ISO member, and exposureDuration there is the *settings* value, not the metered one.
+    let exif = photo.metadata["{Exif}"] as? [String: Any]
+    let iso = (exif?["ISOSpeedRatings"] as? [NSNumber])?.first?.doubleValue ?? 0
+    let exposureSeconds = exif?["ExposureTime"] as? Double ?? 0
     if #available(iOS 16.0, *) {
       let rs = photo.resolvedSettings
-      print("[CameraEngine][Diag] photo=\(rs.photoDimensions.width)x\(rs.photoDimensions.height) preview=\(rs.previewDimensions.width)x\(rs.previewDimensions.height) ISO=\(rs.iso) exposure=\(rs.exposureDuration.seconds)s raw=\(photo.isRawPhoto)")
+      print("[CameraEngine][Diag] photo=\(rs.photoDimensions.width)x\(rs.photoDimensions.height) preview=\(rs.previewDimensions.width)x\(rs.previewDimensions.height) ISO=\(Int(iso)) exposure=1/\(Int(1.0 / max(exposureSeconds, 0.0001)))s raw=\(photo.isRawPhoto)")
     }
     // Dual-format (RAW + processed) captures deliver two callbacks. Decide which one
     // we care about BEFORE inspecting its error, otherwise a failed companion

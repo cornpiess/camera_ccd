@@ -1,3 +1,5 @@
+> **Source Available — All Rights Reserved. Commercial use, deployment, redistribution, and AI/ML training are prohibited. See `LICENSE`.**
+
 # Rainbow Camera
 
 Minimal iOS camera: choose a camera profile, adjust a real aperture when a future/public iOS API reports support, and capture. This project requires an Expo Development Build; Expo Go cannot load its local Swift camera module.

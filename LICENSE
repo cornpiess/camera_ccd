@@ -1,0 +1,88 @@
+# Source Available — No AI Training / No Deployment License v1.0
+
+Copyright © 2026 Zhu Hong
+
+All Rights Reserved.
+
+## 1. Purpose
+
+The source code and other materials contained in this repository are made publicly available solely for viewing, evaluation, learning, and reference purposes.
+
+This software is **source-available** and is **not open-source software**.
+
+Except for rights that must necessarily be granted under the terms of the platform hosting this repository, no license or permission is granted except as expressly stated below.
+
+## 2. Permitted Use
+
+You may:
+
+* View and inspect the source code.
+* Study the implementation for personal learning, evaluation, or reference.
+* Discuss, review, or link to this repository.
+
+## 3. Prohibited Use
+
+Without prior written permission from the copyright holder, you may not:
+
+### Deployment
+
+* Deploy, host, operate, or run this software as a publicly or privately accessible service, application, website, API, or product.
+* Use this software in a production environment.
+
+### Commercial Use
+
+* Use this software or any substantial portion of it for commercial purposes.
+* Sell, license, monetize, or provide products or services substantially based on this software.
+
+### Redistribution
+
+* Redistribute, republish, sublicense, sell, or otherwise provide copies of the source code or substantial portions of it.
+* Repackage this software as another project, product, template, library, application, or service.
+
+### Derivative Products
+
+* Create and distribute substantially derivative products based on this software.
+* Copy substantial portions of the implementation into another publicly distributed or commercial project.
+
+### Artificial Intelligence and Machine Learning
+
+You may not use this repository, its source code, documentation, assets, or other contents:
+
+* to train an artificial intelligence or machine learning model;
+* to fine-tune, retrain, adapt, or improve a model;
+* to create or contribute to an AI/ML training dataset;
+* for model distillation or synthetic training-data generation;
+* for automated model evaluation or benchmarking datasets;
+* to generate embeddings for the purpose of building a reusable AI knowledge base;
+* for retrieval-augmented generation (RAG) datasets or systems;
+* for code-generation training, code-completion training, or similar machine-learning purposes.
+
+Automated collection of this repository for any of the purposes above is expressly prohibited.
+
+## 4. No Implied License
+
+Making this repository publicly accessible does not grant permission to use, copy, modify, deploy, redistribute, sublicense, or commercialize the software except as explicitly permitted by this license.
+
+No patent, trademark, or other intellectual-property rights are granted.
+
+## 5. Third-Party Components
+
+Third-party libraries, dependencies, assets, or other materials included in or referenced by this repository remain subject to their respective licenses.
+
+This license applies only to materials for which the copyright holder has the authority to grant rights.
+
+## 6. Permission Requests
+
+Any use not expressly permitted by this license requires prior written permission from the copyright holder.
+
+Permission may be granted separately for commercial licensing, deployment, redistribution, research, or other uses.
+
+## 7. Disclaimer
+
+THE SOFTWARE AND MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.
+
+## 8. Reservation of Rights
+
+All rights not expressly granted under this license are reserved by the copyright holder.
