@@ -47,6 +47,8 @@ export type CapturedPhoto = {
   appliedZoom?: number | null;
   /** 35mm-equivalent focal stamped into the saved EXIF (base × zoom). */
   equivalentFocal?: number | null;
+  /** Base-quality triage variants (A_appleProcessed / B-neutral / C-lutOnly / D-full), tmp JPEG URIs. */
+  debugVariants?: Record<string, string> | null;
 };
 
 export type CameraAuthorizationStatus = 'authorized' | 'notDetermined' | 'denied' | 'restricted';
@@ -89,6 +91,12 @@ type NativeCameraEngine = {
   setLens(lensId: string): Promise<void>;
   /** Crop zoom (videoZoomFactor) on the ACTIVE lens; ≥1, applies to preview AND capture. */
   setZoomFactor(factor: number): Promise<void>;
+  /**
+   * Base-quality triage: when on, the NEXT captures also write A/B/C/D quality variants
+   * (A Apple photo / B neutral / C LUT-only / D full profile) to tmp; their URIs come
+   * back in the capture result under `debugVariants`.
+   */
+  setCaptureDebugVariants(enabled: boolean): Promise<void>;
 };
 
 /**
@@ -165,6 +173,7 @@ const unavailableModule: NativeCameraEngine = {
   getAvailableLenses: () => Promise.reject(unavailableError()),
   setLens: () => Promise.reject(unavailableError()),
   setZoomFactor: () => Promise.reject(unavailableError()),
+  setCaptureDebugVariants: () => Promise.reject(unavailableError()),
 };
 
 /** Black stand-in preview so the app still mounts and shows the error view above it. */
@@ -199,6 +208,8 @@ export const getAvailableLenses = (): Promise<{ kind: string; deviceModel: strin
   typed(NativeModule.getAvailableLenses());
 export const setLens = (lensId: string): Promise<void> => typed(NativeModule.setLens(lensId));
 export const setZoomFactor = (factor: number): Promise<void> => typed(NativeModule.setZoomFactor(factor));
+export const setCaptureDebugVariants = (enabled: boolean): Promise<void> =>
+  typed(NativeModule.setCaptureDebugVariants(enabled));
 
 /** Functional native API; also convenient for call sites that prefer a namespace object. */
 export const CameraEngine = {
@@ -214,6 +225,7 @@ export const CameraEngine = {
   getAvailableLenses,
   setLens,
   setZoomFactor,
+  setCaptureDebugVariants,
 } as const;
 
 export type CameraEngineHandle = {
@@ -229,6 +241,7 @@ export type CameraEngineHandle = {
   getAvailableLenses: typeof getAvailableLenses;
   setLens: typeof setLens;
   setZoomFactor: typeof setZoomFactor;
+  setCaptureDebugVariants: typeof setCaptureDebugVariants;
 };
 
 export type CameraEngineViewProps = {
@@ -262,6 +275,7 @@ export const CameraEngineView = forwardRef<CameraEngineHandle, CameraEngineViewP
     getAvailableLenses,
     setLens,
     setZoomFactor,
+    setCaptureDebugVariants,
   }), []);
   return <NativePreview {...nativeProps} />;
 });
