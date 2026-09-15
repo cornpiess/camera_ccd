@@ -86,13 +86,52 @@ final class ApertureController {
   /// at capture time). Physical mode reads the lens truth via getCapabilities instead.
   private(set) var simulatedFNumber: Float = 1.8
 
-  /// Capability detection: physical iff the CURRENT device + activeFormat publish a
-  /// non-degenerate variable-aperture range AND the exposure setter exists on this OS.
+  /// Capability detection: physical iff the CURRENT device + activeFormat satisfy ALL of
+  /// - non-degenerate variable-aperture range (min < max),
+  /// - recommendedLensApertureStops.count > 1 (the system publishes real detents),
+  /// - the exposure setter exists on this OS,
+  /// - `supportsExposureModeCustom(lensAperture:duration:iso:)` VERIFIES a target
+  ///   aperture + auto-exposure combination is supported.
+  /// No device names anywhere — a future variable-aperture iPhone needs zero code changes.
   func capabilityMode(for device: AVCaptureDevice?) -> ApertureMode {
-    guard let device, variableApertureRange(device) != nil,
-          device.responds(to: NSSelectorFromString("setExposureModeCustomWithLensAperture:duration:ISO:completionHandler:"))
+    guard let device,
+          let range = variableApertureRange(device),
+          (range.stops?.count ?? 0) > 1,
+          device.responds(to: NSSelectorFromString("setExposureModeCustomWithLensAperture:duration:ISO:completionHandler:")),
+          supportsExposureModeCustom(device.activeFormat, aperture: Float(range.min))
     else { return .simulated }
     return .physical
+  }
+
+  /// Dynamic availability check for the iOS 27 aperture/exposure combination. Compiled
+  /// against any SDK (responds + IMP cast); only the CURRENT activeFormat answer counts.
+  private func supportsExposureModeCustom(_ format: NSObject, aperture: Float) -> Bool {
+    if #available(iOS 27.0, *) {
+      let sel = NSSelectorFromString("supportsExposureModeCustomWithLensAperture:duration:ISO:")
+      guard format.responds(to: sel), let method = format.method(for: sel) else { return false }
+      typealias Check = @convention(c) (AnyObject, Selector, Float, CMTime, Float) -> ObjCBool
+      let auto = autoSentinels()
+      let fn = unsafeBitCast(method, to: Check.self)
+      return fn(format, sel, aperture, auto.duration, auto.iso).boolValue
+    }
+    // Pre-iOS 27 systems never publish variable-aperture formats in practice.
+    return false
+  }
+
+  /// Coalesced application for HIGH-FREQUENCY sources (Camera Control slider): at most
+  /// one lockForConfiguration per 0.12s window, trailing value wins. Screen-ring settles
+  /// (single events) call setAperture directly.
+  private var pendingPhysical: DispatchWorkItem?
+
+  func requestCoalescedPhysicalAperture(_ fStop: Float, on device: AVCaptureDevice?, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
+    pendingPhysical?.cancel()
+    let work = DispatchWorkItem { [weak self] in
+      guard let self else { return }
+      mode = .physical
+      setPhysicalAperture(Double(fStop), on: device, completion: completion)
+    }
+    pendingPhysical = work
+    DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.12, execute: work)
   }
 
 
@@ -254,6 +293,16 @@ final class ApertureController {
       DispatchQueue.main.async { completion(.success(())) }
       return
     }
+    // APERTURE PRIORITY GUARD: the format must accept (target aperture + auto shutter +
+    // auto ISO). Shutter and ISO are NEVER locked — Apple auto exposure compensates the
+    // light change, so .quality still gets full multi-frame fusion (user directive).
+    if !supportsExposureModeCustom(device.activeFormat, aperture: Float(min(max(fStop, range.min), range.max))) {
+      // Combination unsupported on this format — honest degrade to simulated.
+      simulatedFNumber = Float(min(4.0, max(1.4, fStop)))
+      mode = .simulated
+      DispatchQueue.main.async { completion(.success(())) }
+      return
+    }
     let target = Float(min(max(fStop, range.min), range.max))
     let setterSel = NSSelectorFromString("setExposureModeCustomWithLensAperture:duration:ISO:completionHandler:")
     guard device.responds(to: setterSel) else {
@@ -341,6 +390,8 @@ public final class CameraEngineModule: Module {
   public func definition() -> ModuleDefinition {
     Name("CameraEngine")
 
+    Events("onApertureChanged", "onZoomChanged")
+
     OnCreate {
       CameraEngineView.registrationHandler = { [weak self] view, isActive in
         guard let self = self else { return }
@@ -350,6 +401,19 @@ public final class CameraEngineModule: Module {
           self.activeView = nil
         }
       }
+      // ApertureState fan-out channel: native aperture changes reach the JS ring here.
+      CameraEngineView.apertureEventSink = { [weak self] fNumber in
+        self?.sendEvent("onApertureChanged", ["fNumber": fNumber])
+      }
+      CameraEngineView.zoomEventSink = { [weak self] zoom in
+        self?.sendEvent("onZoomChanged", ["zoom": zoom])
+      }
+    }
+
+    OnDestroy {
+      CameraEngineView.registrationHandler = nil
+      CameraEngineView.apertureEventSink = nil
+      CameraEngineView.zoomEventSink = nil
     }
 
     OnDestroy {
@@ -372,6 +436,7 @@ public final class CameraEngineModule: Module {
 
     AsyncFunction("startCamera") { (promise: Promise) in
       guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
+      view.setApertureController(self.apertureController)
       view.start { result in self.settle(result, promise) }
     }
 
@@ -590,7 +655,25 @@ public final class CameraEngineView: ExpoView {
     interruptionObservers.append(center.addObserver(
       forName: UIDevice.orientationDidChangeNotification, object: nil, queue: nil
     ) { [weak self] _ in self?.syncOutputOrientation() })
+    attachCameraControlInteraction()
     Self.registrationHandler?(self, true)
+  }
+
+  /// Camera Control HARD SHUTTER: AVCaptureEventInteraction (iOS 17.2+, system-delivered
+  /// side-button events; we never poll the button). Press-to-the-bottom (.ended) routes
+  /// into the ONE capture path — no second shutter flow exists for it.
+  private func attachCameraControlInteraction() {
+    guard #available(iOS 17.2, *) else { return }
+    let interaction = AVCaptureEventInteraction { [weak self] event in
+      guard event.phase == .ended else { return }
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        // Same single capture entry as the on-screen shutter and volume buttons.
+        self.capture { _, _ in }
+      }
+    }
+    self.addInteraction(interaction)
+    cameraControlObjects.append(interaction)
   }
 
   public override func didMoveToWindow() {
@@ -958,6 +1041,8 @@ public final class CameraEngineView: ExpoView {
     session.commitConfiguration()
     camera = device
     configured = true
+    refreshApertureCapabilities()
+    setupCameraControls(device: device)
     let controlSurface = CameraControlProbe.exposedMethods()
     print("[CameraEngine][Diag] Camera Control public surface (\(controlSurface.count) methods): \(controlSurface.isEmpty ? "none exposed by this OS" : controlSurface.joined(separator: ", "))")
   }
@@ -1063,6 +1148,16 @@ public final class CameraEngineView: ExpoView {
   // and the DEFAULT aperture state on fixed-lens devices is resolved by capabilities).
   fileprivate var apertureMode: ApertureMode = .simulated
   fileprivate var simulatedFNumber: Float = 1.8
+  // Camera Control (hardware side button): retained controls + interaction objects.
+  private var cameraControlObjects: [AnyObject] = []
+  // The module owns the controller; the view keeps a weak ref for control callbacks.
+  fileprivate weak var apertureControllerRef: ApertureController?
+  fileprivate func setApertureController(_ controller: ApertureController) {
+    apertureControllerRef = controller
+  }
+  // JS event sinks (wired by the module so the view can stay module-free).
+  fileprivate static var apertureEventSink: ((Double) -> Void)?
+  fileprivate static var zoomEventSink: ((Double) -> Void)?
 
   fileprivate func setAperture(_ fStop: Double, controller: ApertureController, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
     sessionQueue.async {
@@ -1074,6 +1169,9 @@ public final class CameraEngineView: ExpoView {
         if case .success = result {
           self.apertureMode = controller.mode
           self.simulatedFNumber = controller.simulatedFNumber
+          // ApertureState fan-out: the screen ring and the Camera Control slider stay
+          // numerically in sync through this single channel.
+          Self.apertureEventSink?(Double(fStop))
         }
         completion(result)
       }
@@ -1179,12 +1277,85 @@ public final class CameraEngineView: ExpoView {
     }
   }
 
+  /// Re-resolve the aperture capability against the CURRENT device + activeFormat.
+  /// Called on session configuration and whenever the lens could have changed (spec §10).
+  fileprivate func refreshApertureCapabilities(controller: ApertureController) {
+    sessionQueue.async {
+      guard let device = self.camera else { return }
+      let mode = controller.capabilityMode(for: device)
+      controller.mode = mode
+      self.apertureMode = mode
+      if mode == .simulated {
+        self.simulatedFNumber = min(4.0, max(1.4, self.simulatedFNumber))
+      }
+      print("[CameraEngine][Diag] aperture capability refresh: mode=\(mode == .physical ? "physical" : "simulated") device=\(device.localizedName)")
+    }
+  }
+
+  /// Camera Control SLIDERS (iOS 18 AVCaptureControl — the system owns all side-button
+  /// touch/slide/press gesture parsing; we only add controls). Priority: Aperture, Zoom.
+  /// The aperture slider binds to the SAME unified setAperture path as the on-screen
+  /// ring; the zoom slider is the system one bound to the capture device (no custom zoom).
+  private func setupCameraControls(device: AVCaptureDevice) {
+    guard #available(iOS 18.0, *) else { return }
+    guard let controller = apertureControllerRef else {
+      print("[CameraEngine][Diag] Camera Control: controller not attached yet")
+      return
+    }
+    guard session.supportsControls else {
+      print("[CameraEngine][Diag] Camera Control: session does not support controls on this device")
+      return
+    }
+    let caps = controller.getCapabilities(device: device).asDictionary
+    let minimum = (caps["minAperture"] as? Double) ?? 1.4
+    let maximum = (caps["maxAperture"] as? Double) ?? 4.0
+    let stops = (caps["supportedApertures"] as? [Double]) ?? []
+
+    let slider = AVCaptureSlider(minimumValue: Float(minimum), maximumValue: Float(maximum))
+    // Prominent (recommended) stops get the stronger system feedback; the WHOLE hardware
+    // range stays available — no hard-coded four-stop grid.
+    if !stops.isEmpty {
+      slider.prominentValues = stops.map { Float($0) }
+    }
+    slider.addAction(.changed) { [weak self] in
+      guard let self, let controller = self.apertureControllerRef else { return }
+      let value = Float(slider.value)
+      // High-frequency source: coalesce before lockForConfiguration (spec §11).
+      if controller.mode == .physical {
+        controller.requestCoalescedPhysicalAperture(value, on: device) { _ in }
+      } else {
+        controller.setAperture(value, on: device) { _ in }
+      }
+      self.simulatedFNumber = value
+      Self.apertureEventSink?(Double(value))
+    }
+    if session.canAddControl(slider) {
+      session.addControl(slider)
+      cameraControlObjects.append(slider)
+    }
+
+    let zoomSlider = AVCaptureSystemZoomSlider(device: device)
+    zoomSlider.addAction(.changed) { [weak self] in
+      guard let self else { return }
+      let zoom = Double(self.camera?.videoZoomFactor ?? 1.0)
+      Self.zoomEventSink?(zoom)
+    }
+    if session.canAddControl(zoomSlider) {
+      session.addControl(zoomSlider)
+      cameraControlObjects.append(zoomSlider)
+    }
+
+    session.controlsDelegate = self
+    print("[CameraEngine][Diag] Camera Control controls added: aperture slider + system zoom slider")
+  }
+
   fileprivate func capabilities(controller: ApertureController, completion: @escaping (Result<[String: Any], CameraEngineError>) -> Void) {
     guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else {
       completion(.failure(.permissionDenied))
       return
     }
     sessionQueue.async {
+      self.setApertureController(controller)
       guard let device = self.camera ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
         completion(.failure(.cameraUnavailable)); return
       }
@@ -1235,6 +1406,17 @@ public final class CameraEngineView: ExpoView {
     case .landscapeRight: return CGPoint(x: y, y: 1 - x)
     @unknown default: return CGPoint(x: x, y: y)
     }
+  }
+}
+
+// MARK: - AVCaptureSessionControlsDelegate (Camera Control activation)
+extension CameraEngineView: AVCaptureSessionControlsDelegate {
+  public func controlsDelegateDidBecomeActive(_ session: AVCaptureSession) {
+    // The side button light-press opened the control surface; system-driven.
+  }
+
+  public func controlsDelegateDidBecomeInactive(_ session: AVCaptureSession) {
+    // Control surface closed; system-driven.
   }
 }
 

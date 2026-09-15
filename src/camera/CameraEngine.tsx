@@ -95,6 +95,12 @@ type NativeCameraEngine = {
   setLens(lensId: string): Promise<void>;
   /** Crop zoom (videoZoomFactor) on the ACTIVE lens; ≥1, applies to preview AND capture. */
   setZoomFactor(factor: number): Promise<void>;
+  addApertureChangedListener(
+    cb: (event: { readonly fNumber: number }) => void,
+  ): { readonly remove: () => void };
+  addZoomChangedListener(
+    cb: (event: { readonly zoom: number }) => void,
+  ): { readonly remove: () => void };
 };
 
 /**
@@ -171,6 +177,8 @@ const unavailableModule: NativeCameraEngine = {
   getAvailableLenses: () => Promise.reject(unavailableError()),
   setLens: () => Promise.reject(unavailableError()),
   setZoomFactor: () => Promise.reject(unavailableError()),
+  addApertureChangedListener: () => ({ remove: () => {} }),
+  addZoomChangedListener: () => ({ remove: () => {} }),
 };
 
 /** Black stand-in preview so the app still mounts and shows the error view above it. */
@@ -206,6 +214,19 @@ export const getAvailableLenses = (): Promise<{ kind: string; deviceModel: strin
 export const setLens = (lensId: string): Promise<void> => typed(NativeModule.setLens(lensId));
 export const setZoomFactor = (factor: number): Promise<void> => typed(NativeModule.setZoomFactor(factor));
 
+/** Native aperture change (Camera Control slider / any native source) -> ApertureState sync. */
+export type ApertureChangedEvent = { readonly fNumber: number };
+/** Native zoom change (Camera Control system zoom slider) -> focal dial sync. */
+export type ZoomChangedEvent = { readonly zoom: number };
+export type NativeEventSubscription = { readonly remove: () => void };
+
+export const addApertureChangedListener = (
+  cb: (event: ApertureChangedEvent) => void,
+): NativeEventSubscription => requireNativeModule('CameraEngine').addListener('onApertureChanged', cb) as { readonly remove: () => void };
+export const addZoomChangedListener = (
+  cb: (event: ZoomChangedEvent) => void,
+): NativeEventSubscription => requireNativeModule('CameraEngine').addListener('onZoomChanged', cb) as { readonly remove: () => void };
+
 /** Functional native API; also convenient for call sites that prefer a namespace object. */
 export const CameraEngine = {
   startCamera,
@@ -220,6 +241,8 @@ export const CameraEngine = {
   getAvailableLenses,
   setLens,
   setZoomFactor,
+  addApertureChangedListener,
+  addZoomChangedListener,
 } as const;
 
 export type CameraEngineHandle = {
@@ -235,6 +258,8 @@ export type CameraEngineHandle = {
   getAvailableLenses: typeof getAvailableLenses;
   setLens: typeof setLens;
   setZoomFactor: typeof setZoomFactor;
+  addApertureChangedListener: typeof addApertureChangedListener;
+  addZoomChangedListener: typeof addZoomChangedListener;
 };
 
 export type CameraEngineViewProps = {
@@ -268,6 +293,8 @@ export const CameraEngineView = forwardRef<CameraEngineHandle, CameraEngineViewP
     getAvailableLenses,
     setLens,
     setZoomFactor,
+    addApertureChangedListener,
+    addZoomChangedListener,
     }), []);
   return <NativePreview {...nativeProps} />;
 });

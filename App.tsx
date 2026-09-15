@@ -34,6 +34,7 @@ import {
 // LoadCameraState, focal model, aperture visual linkage
 import { loadCameraState, saveCameraState, type CameraState } from './src/camera/cameraStateStore';
 import { buildFocalStops, defaultFocalStop, type FocalStop, type DeviceKind } from './src/camera/focalLadder';
+import { addApertureChangedListener, addZoomChangedListener } from './src/camera/CameraEngine';
 import { apertureVisualFactors, applyApertureVisual } from './src/camera/apertureVisualProfile';
 import { MAX_RING_PROFILES } from './src/components/RadialProfileSelector';
 import { deriveSkin, isLightColor } from './src/theme/skin';
@@ -553,6 +554,33 @@ function CameraAppScreen(): React.JSX.Element {
       setActiveAperture(preferred);
     }
   }, [activeProfile, isCameraRunning, supportsVariableAperture, apertureSimulated, apertureRange]);
+
+  // Native -> ApertureState sync: the Camera Control slider (and any native aperture
+  // source) flows back here so the SCREEN RING always shows the same f-number. There is
+  // exactly ONE ApertureState; every entry point converges on it.
+  useEffect(() => {
+    const apertureSub = addApertureChangedListener((event) => {
+      const f = Number(event?.fNumber);
+      if (!Number.isFinite(f) || f <= 0) return;
+      confirmedApertureRef.current = f;
+      setCurrentAperture(f);
+      setActiveAperture(f);
+    });
+    const zoomSub = addZoomChangedListener((event) => {
+      const zoom = Number(event?.zoom);
+      if (!Number.isFinite(zoom) || zoom <= 0) return;
+      // Physical main camera: 35mm-equiv = 26mm x zoom. Snap the dial to the nearest stop.
+      const mm = 26 * zoom;
+      const nearest = focalStops.reduce((best, stop) =>
+        Math.abs(stop.mm - mm) < Math.abs(best.mm - mm) ? stop : best,
+      );
+      setCurrentFocalMm(nearest.mm);
+    });
+    return () => {
+      apertureSub.remove();
+      zoomSub.remove();
+    };
+  }, [focalStops]);
 
   // Profile validation/import/reload errors shown as transient overlay while running
   useEffect(() => {
