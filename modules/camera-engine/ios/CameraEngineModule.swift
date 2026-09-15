@@ -81,7 +81,7 @@ enum ApertureMode {
 final class ApertureController {
   /// Resolved from CAPABILITY (device + activeFormat + API presence), refreshed on every
   /// getCapabilities/setAperture. Defaults to .simulated — the honest default.
-  private(set) var mode: ApertureMode = .simulated
+  var mode: ApertureMode = .simulated
   /// Last f-number set while in .simulated mode (consumed by ApertureSimulationProcessor
   /// at capture time). Physical mode reads the lens truth via getCapabilities instead.
   private(set) var simulatedFNumber: Float = 1.8
@@ -968,7 +968,8 @@ public final class CameraEngineView: ExpoView {
         uname(&systemInfo)
         return withUnsafeBytes(of: &systemInfo.machine) { raw in
           let cchars = raw.bindMemory(to: CChar.self)
-          return String(cString: cchars.baseAddress ?? "")
+          guard let base = cchars.baseAddress else { return "" }
+          return String(cString: base)
         }
       }()
       print("[CameraEngine][Diag] device=\(device.deviceType.rawValue) model=\(machine) lens=\(device.localizedName)")
@@ -1130,6 +1131,7 @@ public final class CameraEngineView: ExpoView {
       let delegate = PhotoCaptureDelegate(
         compiled: self.compiledSnapshot(.processedPhoto),
         appliedZoom: appliedZoom,
+        equivalentFocalMM: equivalentFocalMM,
         apertureMode: self.apertureMode,
         simulatedFNumber: self.simulatedFNumber,
         equivalentFocalMM: equivalentFocalMM,
@@ -1158,6 +1160,11 @@ public final class CameraEngineView: ExpoView {
   // JS event sinks (wired by the module so the view can stay module-free).
   fileprivate static var apertureEventSink: ((Double) -> Void)?
   fileprivate static var zoomEventSink: ((Double) -> Void)?
+  // KVO contexts (Camera Control value observation — compile-safe alternative to the
+  // unavailable addAction API).
+  private var apertureSliderKvoContext = 0
+  private var zoomKvoContext = 0
+  private weak var zoomKvoObservedDevice: AVCaptureDevice?
 
   fileprivate func setAperture(_ fStop: Double, controller: ApertureController, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
     sessionQueue.async {
@@ -1277,11 +1284,35 @@ public final class CameraEngineView: ExpoView {
     }
   }
 
+  override public func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
+    if context == &apertureSliderKvoContext {
+      guard let slider = object as? NSObject,
+            let value = (slider.value(forKey: "value") as? NSNumber)?.doubleValue else { return }
+      if let controller = apertureControllerRef, let device = camera {
+        if controller.mode == .physical {
+          controller.requestCoalescedPhysicalAperture(Float(value), on: device) { _ in }
+        } else {
+          controller.setAperture(Float(value), on: device) { _ in }
+        }
+      }
+      simulatedFNumber = Float(value)
+      Self.apertureEventSink?(value)
+      return
+    }
+    if context == &zoomKvoContext {
+      if let zoom = (change?[.newKey] as? NSNumber)?.doubleValue {
+        Self.zoomEventSink?(zoom)
+      }
+      return
+    }
+    super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
+  }
+
   /// Re-resolve the aperture capability against the CURRENT device + activeFormat.
   /// Called on session configuration and whenever the lens could have changed (spec §10).
-  fileprivate func refreshApertureCapabilities(controller: ApertureController) {
+  fileprivate func refreshApertureCapabilities() {
     sessionQueue.async {
-      guard let device = self.camera else { return }
+      guard let controller = self.apertureControllerRef, let device = self.camera else { return }
       let mode = controller.capabilityMode(for: device)
       controller.mode = mode
       self.apertureMode = mode
@@ -1311,41 +1342,35 @@ public final class CameraEngineView: ExpoView {
     let maximum = (caps["maxAperture"] as? Double) ?? 4.0
     let stops = (caps["supportedApertures"] as? [Double]) ?? []
 
-    let slider = AVCaptureSlider(minimumValue: Float(minimum), maximumValue: Float(maximum))
-    // Prominent (recommended) stops get the stronger system feedback; the WHOLE hardware
-    // range stays available — no hard-coded four-stop grid.
+    // Compiler-proven surface: AVCaptureSlider() takes NO arguments — range/prominence
+    // via properties, value changes via KVO (compile-safe; the guessed addAction API
+    // does not exist in this SDK).
+    let slider = AVCaptureSlider()
+    slider.minimumValue = Float(minimum)
+    slider.maximumValue = Float(maximum)
     if !stops.isEmpty {
       slider.prominentValues = stops.map { Float($0) }
     }
-    slider.addAction(.changed) { [weak self] in
-      guard let self, let controller = self.apertureControllerRef else { return }
-      let value = Float(slider.value)
-      // High-frequency source: coalesce before lockForConfiguration (spec §11).
-      if controller.mode == .physical {
-        controller.requestCoalescedPhysicalAperture(value, on: device) { _ in }
-      } else {
-        controller.setAperture(value, on: device) { _ in }
-      }
-      self.simulatedFNumber = value
-      Self.apertureEventSink?(Double(value))
-    }
+    slider.addObserver(self, forKeyPath: "value", options: [.new], context: &apertureSliderKvoContext)
+    cameraControlObjects.append(slider)
     if session.canAddControl(slider) {
       session.addControl(slider)
       cameraControlObjects.append(slider)
     }
 
     let zoomSlider = AVCaptureSystemZoomSlider(device: device)
-    zoomSlider.addAction(.changed) { [weak self] in
-      guard let self else { return }
-      let zoom = Double(self.camera?.videoZoomFactor ?? 1.0)
-      Self.zoomEventSink?(zoom)
-    }
     if session.canAddControl(zoomSlider) {
       session.addControl(zoomSlider)
       cameraControlObjects.append(zoomSlider)
     }
-
-    session.controlsDelegate = self
+    // The SYSTEM zoom slider drives videoZoomFactor itself; observe the device to fan
+    // the value out to the JS focal dial (compile-safe KVO).
+    device.addObserver(self, forKeyPath: "videoZoomFactor", options: [.new], context: &zoomKvoContext)
+    zoomKvoObservedDevice = device
+    // controlsDelegate property is GET-ONLY in this SDK; the dynamic setter exists.
+    if session.responds(to: NSSelectorFromString("setControlsDelegate:")) {
+      session.perform(NSSelectorFromString("setControlsDelegate:"), with: self)
+    }
     print("[CameraEngine][Diag] Camera Control controls added: aperture slider + system zoom slider")
   }
 
@@ -1411,13 +1436,10 @@ public final class CameraEngineView: ExpoView {
 
 // MARK: - AVCaptureSessionControlsDelegate (Camera Control activation)
 extension CameraEngineView: AVCaptureSessionControlsDelegate {
-  public func controlsDelegateDidBecomeActive(_ session: AVCaptureSession) {
-    // The side button light-press opened the control surface; system-driven.
-  }
-
-  public func controlsDelegateDidBecomeInactive(_ session: AVCaptureSession) {
-    // Control surface closed; system-driven.
-  }
+  public func sessionControlsDidBecomeActive(_ session: AVCaptureSession) {}
+  public func sessionControlsDidBecomeInactive(_ session: AVCaptureSession) {}
+  public func sessionControlsWillEnterFullscreenAppearance(_ session: AVCaptureSession) {}
+  public func sessionControlsWillExitFullscreenAppearance(_ session: AVCaptureSession) {}
 }
 
 // MARK: - WYSIWYG Preview Frame Pipeline
@@ -1710,12 +1732,12 @@ enum ApertureSimulationProcessor {
   /// RANGE: f/1.4-f/4 everywhere (the iPhone 18 Pro physical iris range) — simulated
   /// and physical share one grid, so the ring never changes behavior across devices.
   /// Gaussian radius (px at full res) per f-number — piecewise-linear over the anchors.
-  private static let blurAnchors: [(f: Float, radius: CGFloat)] = [
+  private static let blurAnchors: [(f: Float, v: CGFloat)] = [
     (1.4, 28), (2.0, 20), (2.8, 13), (4.0, 6),
   ]
   /// Starburst intensity 0..1 per f-number, compressed into the same grid: the old
   /// 5.6-16 knee rescales to 2.2-4 (2.2~0, 2.8~0.35, 3.4~0.7, 4.0~1.0).
-  private static let starAnchors: [(f: Float, strength: CGFloat)] = [
+  private static let starAnchors: [(f: Float, v: CGFloat)] = [
     (1.4, 0), (2.2, 0), (2.8, 0.35), (3.4, 0.7), (4.0, 1.0),
   ]
 
@@ -1785,9 +1807,9 @@ enum ApertureSimulationProcessor {
     ]), let onePx = maxFilter.outputImage,
        let cg = CameraEngineGPU.ciContext.createCGImage(onePx, from: CGRect(x: 0, y: 0, width: 1, height: 1)),
        let data = cg.dataProvider?.data,
-       let first = data.withUnsafeBytes({ $0.first }) {
+       let bytes = CFDataGetBytePtr(data) {
       // Red channel of the RGBA8 render of the max-filtered single-channel mask.
-      if first < 90 { return nil }
+      if bytes[0] < 90 { return nil }
     }
     return mask
   }
