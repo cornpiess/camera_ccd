@@ -408,6 +408,9 @@ public final class CameraEngineModule: Module {
         "photoAddAuthorization": addStatus,
         "osVersion": ProcessInfo.processInfo.operatingSystemVersionString,
         "cameraControlSurface": CameraControlProbe.exposedMethods(),
+        "normalizers": CameraInputNormalizer.resolvedSummary(),
+        "rendererVersion": CameraDNARenderer.rendererVersion,
+        "identityCheck": CameraDNARenderer.identitySelfCheck(),
       ]
       let finish: (Result<[String: Any], CameraEngineError>) -> Void = { result in
         if case .success(let caps) = result { payload.merge(caps) { _, newest in newest } }
@@ -467,7 +470,11 @@ public final class CameraEngineView: ExpoView {
   private let output = AVCapturePhotoOutput()
   private let sessionQueue = DispatchQueue(label: "camera-engine.session")
   private let profileLock = NSLock()
-  private var profile: [String: Any] = [:]
+  // CompiledCameraProfile v2: per-frame rendering consumes ONLY these. The preview and
+  // final variants differ ONLY in the fused Input Normalizer (video-frame vs
+  // processed-photo); LUT, Fine Color and Tone are identical by contract.
+  private var compiledPreview: CameraDNARenderer.CompiledCameraProfile?
+  private var compiledFinal: CameraDNARenderer.CompiledCameraProfile?
   private var camera: AVCaptureDevice?
   private var configured = false
   // Session-lifecycle bookkeeping (accessed only on sessionQueue): interruption and
@@ -557,9 +564,17 @@ public final class CameraEngineView: ExpoView {
   }
 
   fileprivate func setProfile(_ value: [String: Any]) {
-    // New color payload → bump the revision so the cached effectiveColorCube rebuilds.
+    // New color payload → bump the revision so the compiled cube rebuilds.
     CameraDNARenderer.invalidateCompiledProfile(value)
-    profileLock.lock(); profile = value; profileLock.unlock()
+    // Compile BOTH per-input variants (processed-photo / video-frame). Normalizers are
+    // identity today, so the two variants are equivalent — the split exists so future
+    // calibrated normalizers land without touching the render loop again.
+    let finalCompiled = CameraDNARenderer.compile(value, normalizer: CameraInputNormalizer.definition(for: .processedPhoto))
+    let previewCompiled = CameraDNARenderer.compile(value, normalizer: CameraInputNormalizer.definition(for: .videoFrame))
+    profileLock.lock()
+    compiledFinal = finalCompiled
+    compiledPreview = previewCompiled
+    profileLock.unlock()
   }
 
   // Rounded viewfinder card: clip the preview (and every sublayer) to a continuous-corner
@@ -592,8 +607,15 @@ public final class CameraEngineView: ExpoView {
     renderLayer.masksToBounds = radius > 0
   }
 
-  private func profileSnapshot() -> [String: Any] {
-    profileLock.lock(); defer { profileLock.unlock() }; return profile
+  /// Per-frame render state for the CAPTURE path (compiled against the
+  /// processed-photo normalizer). Nil until the first profile arrives → passthrough.
+  private func compiledFinalSnapshot() -> CameraDNARenderer.CompiledCameraProfile? {
+    profileLock.lock(); defer { profileLock.unlock() }; return compiledFinal
+  }
+
+  /// Per-frame render state for the PREVIEW path (video-frame normalizer).
+  private func compiledPreviewSnapshot() -> CameraDNARenderer.CompiledCameraProfile? {
+    profileLock.lock(); defer { profileLock.unlock() }; return compiledPreview
   }
 
   fileprivate func start(completion: @escaping (Result<Bool, CameraEngineError>) -> Void) {
@@ -955,7 +977,7 @@ public final class CameraEngineView: ExpoView {
       let equivalentFocalMM = Int((baseEquivalentMM * appliedZoom).rounded())
       let id = photoSettings.uniqueID
       let delegate = PhotoCaptureDelegate(
-        profile: self.profileSnapshot(),
+        compiled: self.compiledFinalSnapshot(),
         appliedZoom: appliedZoom,
         equivalentFocalMM: equivalentFocalMM,
       ) { [weak self] result, detail in
@@ -1122,7 +1144,7 @@ public final class CameraEngineView: ExpoView {
 }
 
 // MARK: - WYSIWYG Preview Frame Pipeline
-/// AVCaptureVideoDataOutput → CIImage → CameraDNARenderer(.preview) → MTKView.
+/// AVCaptureVideoDataOutput → CIImage → PreviewNormalizer (compiled) → MTKView.
 /// One shared renderer with the capture path; no React Native–side per-frame work.
 extension CameraEngineView: AVCaptureVideoDataOutputSampleBufferDelegate {
   public func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
@@ -1139,9 +1161,8 @@ extension CameraEngineView: AVCaptureVideoDataOutputSampleBufferDelegate {
       let downscale = previewCap / longest
       image = image.transformed(by: CGAffineTransform(scaleX: downscale, y: downscale))
     }
-    let profile = profileSnapshot()
-    if !profile.isEmpty {
-      image = CameraDNARenderer.apply(profile, to: image, mode: .preview)
+    if let compiled = compiledPreviewSnapshot() {
+      image = CameraDNARenderer.apply(compiled, to: image)
     }
     image = image.cropped(to: image.extent.integral)
     guard image.extent.width > 0, image.extent.height > 0 else { return }
@@ -1405,7 +1426,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
   private static let processingQueue = DispatchQueue(label: "camera-engine.photo-processing", qos: .userInitiated)
   // ponytail: static shared CIContext avoids allocating GPU command queue/shader cache per shutter press
   private static let sharedContext = CameraEngineGPU.ciContext
-  private let profile: [String: Any]
+  private let compiled: CameraDNARenderer.CompiledCameraProfile?
   private let completion: (Result<[String: Any], CameraEngineError>, String?) -> Void
   private let completionLock = NSLock()
   private var didComplete = false
@@ -1414,8 +1435,8 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
   /// (base × zoom) — stamped into EXIF so crop-zoomed shots read correctly in Photos.
   private let appliedZoom: Double
   private let equivalentFocalMM: Int
-  init(profile: [String: Any], appliedZoom: Double, equivalentFocalMM: Int, completion: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
-    self.profile = profile
+  init(compiled: CameraDNARenderer.CompiledCameraProfile?, appliedZoom: Double, equivalentFocalMM: Int, completion: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
+    self.compiled = compiled
     self.appliedZoom = appliedZoom
     self.equivalentFocalMM = equivalentFocalMM
     self.completion = completion
@@ -1461,7 +1482,12 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
       let inputExtent = source.extent.integral
       print("[CameraEngine][Diag] pipeline input extent=\(Int(inputExtent.width))x\(Int(inputExtent.height))")
 
-      var image = CameraDNARenderer.apply(profile, to: source, mode: .final)
+      // Compiled final pipeline (processed-photo normalizer + LUT + fine color + tone).
+      // compiled == nil → true passthrough (no profile applied yet).
+      var image = source
+      if let compiled = compiled {
+        image = CameraDNARenderer.apply(compiled, to: source)
+      }
       print("[CameraEngine][Diag] after LUT+color extent=\(Int(image.extent.width))x\(Int(image.extent.height))")
 
       let extent = image.extent.integral
@@ -1664,35 +1690,153 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
   }
 }
 
-// MARK: - Unified Camera DNA Renderer
+// MARK: - Input Normalizer Registry (architecture v2)
+/// Maps each input family's TECHNICAL deviations (gray level, white point, base
+/// saturation/response, light base-tone differences) onto one shared target:
+/// `camera18-neutral-v1`. STRICTLY technology-only — no HDR, no local tone mapping,
+/// no sharpening, no NR, no scene recognition, no skin detection, no dynamic style.
+///
+/// Separation of concerns: normalizers live OUTSIDE camera-profiles.json (a device
+/// compensation must never leak into a Camera's artistic identity). The registry reads
+/// an optional bundled `camera-input-normalizers.json` (schema: id/source/target/
+/// revision/correction) and falls back to the built-in IDENTITY v1 entries. Until real
+/// calibration data exists (iPhone 18 Pro / reference charts), every entry is Identity —
+/// NO invented compensation values.
+enum CameraInputNormalizer {
+  enum Source: String {
+    case processedPhoto = "processed-photo"
+    case videoFrame = "video-frame"
+  }
+
+  struct Definition {
+    let id: String
+    let source: Source
+    let target: String
+    let revision: Int
+    /// Only `identity` is supported today. Future calibration adds e.g. a 33³ correction
+    /// cube here; the effective-cube compiler already reserves a fusion hook for it.
+    let correctionType: String
+  }
+
+  static let neutralTarget = "camera18-neutral-v1"
+
+  private static let lock = NSLock()
+  private static var cache: [Source: Definition]?
+  private static var surface: [String] = []
+
+  /// Registry lookup. Order: bundled camera-input-normalizers.json (if parseable) →
+  /// built-in identity v1. Unknown/unsupported correction types fall back to identity
+  /// loudly (never a half-applied correction).
+  static func definition(for source: Source) -> Definition {
+    lock.lock(); defer { lock.unlock() }
+    if cache == nil { load() }
+    return cache![source] ?? Definition(
+      id: "identity-\(source.rawValue)-v1",
+      source: source,
+      target: neutralTarget,
+      revision: 1,
+      correctionType: "identity",
+    )
+  }
+
+  /// Diagnostic surface: what the registry actually resolved, per input family.
+  static func resolvedSummary() -> [String] {
+    lock.lock(); defer { lock.unlock() }
+    if cache == nil { load() }
+    return surface
+  }
+
+  private static func load() {
+    var definitions: [Source: Definition] = [:]
+    var notes: [String] = []
+    // Optional JSON override — same resource-bundle search as LUTs.
+    for container in [Bundle(for: CameraEngineView.self), Bundle.main] {
+      if let url = container.url(forResource: "camera-input-normalizers", withExtension: "json"),
+         let data = try? Data(contentsOf: url),
+         let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+         let entries = root["normalizers"] as? [[String: Any]] {
+        for entry in entries {
+          guard
+            let id = entry["id"] as? String,
+            let sourceRaw = entry["source"] as? String,
+            let source = Source(rawValue: sourceRaw),
+            let target = entry["target"] as? String,
+            target == neutralTarget,
+            let revision = (entry["revision"] as? NSNumber)?.intValue
+          else { continue }
+          let correction = (entry["correction"] as? [String: Any])?["type"] as? String ?? "identity"
+          // Only identity is wired today; anything else would need cube-fusion support.
+          guard correction == "identity" else {
+            notes.append("\(id): correction '\(correction)' unsupported → identity")
+            continue
+          }
+          definitions[source] = Definition(id: id, source: source, target: target, revision: revision, correctionType: correction)
+          notes.append("\(id): identity (rev \(revision))")
+        }
+        break
+      }
+    }
+    for source in [Source.processedPhoto, .videoFrame] where definitions[source] == nil {
+      definitions[source] = Definition(
+        id: "identity-\(source.rawValue)-v1",
+        source: source,
+        target: neutralTarget,
+        revision: 1,
+        correctionType: "identity",
+      )
+      notes.append("identity-\(source.rawValue)-v1: built-in identity (no JSON entry)")
+    }
+    cache = definitions
+    surface = notes
+  }
+}
+
+// MARK: - Unified Camera DNA Renderer (v2 — CompiledCameraProfile architecture)
 /// Production renderer for preview and final output:
-///   Camera LUT (+ fine HSL color, fused into ONE cube) → Exposure → Tone Curve/Black Point.
+///   Input Normalizer (fused into the cube) → ONE effective 33³ cube → Tone stages.
 /// Camera 18 does NOT redo Apple's ISP: no noise reduction, no sharpening, no unsharp
 /// mask, no local tone mapping, no grain, no halation, no vignette, no starburst.
+///
+/// COLOR PIPELINE CONTRACT (fixed; do not introduce per-path divergence):
+///   Source decode (CIImage float working space) → Normalizer (fused in cube)
+///   → CIColorCubeWithColorSpace with inputColorSpace = sRGB (the LUTs are calibrated
+///   in sRGB — preview and final MUST keep this identical) → Tone (CI working space)
+///   → Export sRGB. No implicit per-path color-space differences, no redundant
+///   conversions. Precision: Core Image processes in its float working space end to
+///   end; quantization to 8-bit happens exactly once, inside the final HEIF/JPEG encode.
 private enum CameraDNARenderer {
-  enum RenderMode {
-    /// Live viewfinder frames.
-    case preview
-    /// Captured photos (same stages as preview — the pipeline is identical).
-    case final
+  /// Bump on ANY change to cube compilation or tone application so stale cached cubes
+  /// can never survive a renderer change (cache key includes this).
+  static let rendererVersion = 2
+
+  /// Per-frame render state: everything expensive (cube, tone interpretation) is
+  /// resolved ONCE at compile time; the frame loop consumes only this struct.
+  struct CompiledCameraProfile {
+    let effectiveCube: (dimension: Int, data: Data)?
+    let exposureEV: Double
+    let contrast: Double
+    let blackPoint: Double
+    let toneCurve: [CIVector]?
+    let profileID: String
+    let profileRevision: Int
+    let normalizerID: String
+    let normalizerRevision: Int
+    let rendererVersion: Int
+    /// True when NOTHING in this profile can alter pixels (identity normalizer +
+    /// neutral color + neutral tone). Guaranteed filter-free by construction.
+    let isIdentity: Bool
   }
 
   private static let bandNames = ["red", "orange", "yellow", "green", "cyan", "blue", "magenta"]
   private static let bandCenters: [Double] = [0, 30, 60, 120, 180, 240, 300]
 
-  /// Unified rendering pipeline for all cameras.
-  /// Source → LUT cube (LUT + fine color) → Exposure → Contrast → Black point → Tone curve.
-  /// NEUTRAL PASSTHROUGH: every stage is skipped when its parameters are neutral.
-  static func apply(_ profile: [String: Any], to source: CIImage, mode: RenderMode = .final) -> CIImage {
-    let tone = dictionary(profile["tone"])
+  /// Unified rendering pipeline — consumes ONLY a compiled profile (no JSON per frame).
+  /// Source → effective cube (normalizer + LUT + fine color) → Exposure → Contrast →
+  /// Black point → Tone curve. Every stage skips itself when neutral.
+  static func apply(_ compiled: CompiledCameraProfile, to source: CIImage) -> CIImage {
     var image = source
 
-    // ── Effective color stage (PRECOMPILED, cached per profile) ──────────────────
-    // One 33³ cube fuses LUT (character) + temperature/tint + saturation + 7-band HSL
-    // (fine trim). Per expert review: the LUT decides the color character, the JSON only
-    // fine-trims it — and the preview runs a SINGLE cube per frame instead of a 17³ HSL
-    // cube + 33³ LUT + several color filters chained.
-    if let effective = effectiveColorCube(for: profile) {
+    if let effective = compiled.effectiveCube {
       image = filter("CIColorCubeWithColorSpace", image, [
         "inputCubeDimension": effective.dimension,
         "inputCubeData": effective.data,
@@ -1700,45 +1844,54 @@ private enum CameraDNARenderer {
       ])
     }
 
-    // ── Tone: exposure, contrast, black point, five-point curve (JSON-owned) ─────
-    // NEUTRAL PASSTHROUGH: every stage is skipped when its parameters are neutral —
-    // a neutral profile must not push the photo through a single CIFilter.
-    let exposureEV = number(tone, "exposure", 0, -5...5)
-    if abs(exposureEV) > 0.001 {
-      image = filter("CIExposureAdjust", image, [kCIInputEVKey: exposureEV])
+    if abs(compiled.exposureEV) > 0.001 {
+      image = filter("CIExposureAdjust", image, [kCIInputEVKey: compiled.exposureEV])
     }
-    let contrast = number(tone, "contrast", 1, 0...4)
-    if abs(contrast - 1.0) > 0.001 {
-      image = filter("CIColorControls", image, [kCIInputSaturationKey: 1.0, kCIInputContrastKey: contrast, kCIInputBrightnessKey: 0.0])
+    if abs(compiled.contrast - 1.0) > 0.001 {
+      image = filter("CIColorControls", image, [kCIInputSaturationKey: 1.0, kCIInputContrastKey: compiled.contrast, kCIInputBrightnessKey: 0.0])
     }
-    let blackPoint = number(tone, "blackPoint", 0, 0...0.95)
-    if blackPoint > 0 {
-      let scale = 1.0 / (1.0 - blackPoint)
+    if compiled.blackPoint > 0 {
+      let scale = 1.0 / (1.0 - compiled.blackPoint)
       image = filter("CIColorMatrix", image, [
         "inputRVector": CIVector(x: CGFloat(scale), y: 0, z: 0, w: 0),
         "inputGVector": CIVector(x: 0, y: CGFloat(scale), z: 0, w: 0),
         "inputBVector": CIVector(x: 0, y: 0, z: CGFloat(scale), w: 0),
-        "inputBiasVector": CIVector(x: CGFloat(-blackPoint * scale), y: CGFloat(-blackPoint * scale), z: CGFloat(-blackPoint * scale), w: 0)
+        "inputBiasVector": CIVector(x: CGFloat(-compiled.blackPoint * scale), y: CGFloat(-compiled.blackPoint * scale), z: CGFloat(-compiled.blackPoint * scale), w: 0)
       ])
     }
-    if let points = toneCurve(tone["curve"]), !isIdentityToneCurve(points) {
+    if let points = compiled.toneCurve {
       image = filter("CIToneCurve", image, Dictionary(uniqueKeysWithValues: points.enumerated().map { ("inputPoint\($0.offset)", $0.element) }))
     }
 
     return image.cropped(to: source.extent)
   }
 
+  /// Identity contract self-check: an identity normalizer on a neutral profile must
+  /// compile to cube == nil and tone == skipped (zero filters). Runs in getDiagnostics.
+  static func identitySelfCheck() -> String {
+    let normalizer = CameraInputNormalizer.definition(for: .processedPhoto)
+    let compiled = compile([:], normalizer: normalizer)
+    if compiled.effectiveCube != nil { return "FAIL: identity compile produced a color cube" }
+    if !compiled.isIdentity { return "FAIL: identity compile is not flagged identity" }
+    return "pass"
+  }
+
   private static func dictionary(_ value: Any?) -> [String: Any] { value as? [String: Any] ?? [:] }
 
-  // ── Effective color cube (expert review §4) ────────────────────────────────────
-  // Fuses, per profile: base LUT × lutIntensity → temperature/tint → saturation →
-  // 7-band HSL fine trim — into ONE 33³ cube, cached by profile identity. Profile
-  // switching only swaps cube + tone; nothing is regenerated per frame.
-  private struct EffectiveCubeKey: Hashable {
-    let id: String
-    let revision: Int
+  // ── Compile + cache (v2) ───────────────────────────────────────────────────────
+  // The effective cube fuses, per profile: Input Normalizer → base LUT × lutIntensity →
+  // temperature/tint → saturation → 7-band HSL fine trim — into ONE 33³ cube. The cache
+  // key is the FULL identity: profile.id + profile.revision + normalizer.id +
+  // normalizer.revision + rendererVersion, so any algorithm/normalizer change invalidates
+  // stale cubes by construction.
+  private struct CompiledKey: Hashable {
+    let profileID: String
+    let profileRevision: Int
+    let normalizerID: String
+    let normalizerRevision: Int
+    let rendererVersion: Int
   }
-  private static var effectiveCubeCache: [EffectiveCubeKey: (dimension: Int, data: Data)] = [:]
+  private static var compiledCache: [CompiledKey: CompiledCameraProfile] = [:]
   private static var profileRevisions: [String: Int] = [:]
   /// Last-seen color payload fingerprint per profile id: lets repeated setProfile calls
   /// with an UNCHANGED profile keep the current revision (no rebuild, no cache growth).
@@ -1748,8 +1901,8 @@ private enum CameraDNARenderer {
   /// Bump the revision ONLY when a profile's COLOR payload actually changed. setProfile
   /// runs on every RN prop application AND through applyProfile — historically twice per
   /// aperture-drag tick, which rebuilt this 33³ cube on the render queue each time and
-  /// leaked one ~0.5 MB cache entry per rebuild. Tone/grain/vignette are read per frame
-  /// from the live profile dict and never need a cube rebuild.
+  /// leaked one ~0.5 MB cache entry per rebuild. Tone is compiled once with the cube and
+  /// read from the CompiledCameraProfile afterwards — never from JSON per frame.
   static func invalidateCompiledProfile(_ profile: [String: Any]) {
     guard let id = profile["id"] as? String else { return }
     let fingerprint = colorFingerprint(profile["color"])
@@ -1771,35 +1924,85 @@ private enum CameraDNARenderer {
     return hasher.finalize()
   }
 
-  private static func effectiveColorCube(for profile: [String: Any]) -> (dimension: Int, data: Data)? {
+  /// Compiles (or cache-hits) the per-frame render state for one profile + normalizer.
+  static func compile(_ profile: [String: Any], normalizer: CameraInputNormalizer.Definition) -> CompiledCameraProfile {
+    let id = (profile["id"] as? String) ?? "anonymous"
+    let tone = dictionary(profile["tone"])
     let color = dictionary(profile["color"])
-    guard let lutName = color["lut"] as? String, let baseLUT = LUTLoader.load(lutName) else {
-      // No LUT: fall back to the legacy standalone hue-band cube path (still one cube).
-      return hueBandCube(dictionary(color["hueBands"]))
-    }
-    let id = (profile["id"] as? String) ?? lutName
-    let revision: Int
+
+    // Tone interpretation happens HERE, once — never per frame.
+    let exposureEV = number(tone, "exposure", 0, -5...5)
+    let contrast = number(tone, "contrast", 1, 0...4)
+    let blackPoint = number(tone, "blackPoint", 0, 0...0.95)
+    let rawCurve = toneCurve(tone["curve"])
+    let curve = (rawCurve != nil && !isIdentityToneCurve(rawCurve!)) ? rawCurve : nil
+    let toneIsNeutral = abs(exposureEV) <= 0.001 && abs(contrast - 1.0) <= 0.001 && blackPoint <= 0 && curve == nil
+
+    let revision: Int = {
+      cubeLock.lock(); defer { cubeLock.unlock() }
+      return profileRevisions[id] ?? 0
+    }()
+
+    let key = CompiledKey(
+      profileID: id,
+      profileRevision: revision,
+      normalizerID: normalizer.id,
+      normalizerRevision: normalizer.revision,
+      rendererVersion: rendererVersion,
+    )
     cubeLock.lock()
-    revision = profileRevisions[id] ?? 0
-    let key = EffectiveCubeKey(id: id, revision: revision)
-    if let hit = effectiveCubeCache[key] { cubeLock.unlock(); return hit }
+    if let hit = compiledCache[key] { cubeLock.unlock(); return hit }
     cubeLock.unlock()
 
-    let cube = buildEffectiveCube(profile: profile, base: baseLUT)
+    // Effective cube: normalizer (identity today) fused ahead of the base LUT inside
+    // the SAME single 33³ cube — never a second per-frame cube pass. A profile without
+    // a LUT but with non-neutral HSL still compiles via the legacy hue-band cube.
+    let effectiveCube: (dimension: Int, data: Data)?
+    if let lutName = color["lut"] as? String, let baseLUT = LUTLoader.load(lutName) {
+      effectiveCube = buildEffectiveCube(profile: profile, base: baseLUT, normalizer: normalizer)
+    } else {
+      effectiveCube = hueBandCube(dictionary(color["hueBands"]))
+    }
+
+    let compiled = CompiledCameraProfile(
+      effectiveCube: effectiveCube,
+      exposureEV: exposureEV,
+      contrast: contrast,
+      blackPoint: blackPoint,
+      toneCurve: curve,
+      profileID: id,
+      profileRevision: revision,
+      normalizerID: normalizer.id,
+      normalizerRevision: normalizer.revision,
+      rendererVersion: rendererVersion,
+      isIdentity: effectiveCube == nil && toneIsNeutral,
+    )
+
     cubeLock.lock()
-    effectiveCubeCache[key] = cube
-    // Drop superseded revisions: only the newest cube per profile is reachable, the
-    // rest used to accumulate forever (~0.5 MB per rebuild → Jetsam during long sessions).
-    effectiveCubeCache = effectiveCubeCache.filter { $0.key.id != id || $0.key.revision == revision }
+    compiledCache[key] = compiled
+    // Drop superseded entries: per profile keep only the newest revision (both live
+    // normalizer variants of it — preview + final); older revisions are unreachable.
+    compiledCache = compiledCache.filter { $0.key.profileID != id || $0.key.profileRevision == revision }
     cubeLock.unlock()
-    return cube
+    return compiled
   }
 
-  private static func buildEffectiveCube(profile: [String: Any], base: (dimension: Int, data: Data)) -> (dimension: Int, data: Data) {
+  private static func buildEffectiveCube(profile: [String: Any], base: (dimension: Int, data: Data), normalizer: CameraInputNormalizer.Definition) -> (dimension: Int, data: Data) {
     let color = dictionary(profile["color"])
     let dim = base.dimension
     var values = floatArray(base.data)
     let count = dim * dim * dim
+
+    // 0. INPUT NORMALIZER fusion hook (architecture v2). The normalizer maps the input
+    // family's technical deviations onto camera18-neutral-v1 BEFORE the LUT — fused
+    // into this same cube (per grid entry: output = profileChain(normalizer(coord))).
+    // Identity correction (the only wired type today) is a mathematical no-op here:
+    // the compiled cube must be bit-identical to the pre-normalizer architecture, so
+    // the six cameras' current visuals are untouched.
+    // Identity correction (the only wired type today) is a mathematical no-op here:
+    // the compiled cube must be bit-identical to the pre-normalizer architecture, so
+    // the six cameras' current visuals are untouched.
+    assert(normalizer.correctionType == "identity", "non-identity normalizer corrections need cube-fusion support first")
 
     // 1. lutIntensity: blend each entry toward its own grid coordinate (the identity
     // mapping), i.e. out = intensity·LUT(coord) + (1−intensity)·coord — the cube form of
