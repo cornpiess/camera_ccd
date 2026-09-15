@@ -1349,6 +1349,11 @@ public final class CameraEngineView: ExpoView {
       return
     }
     slider.addObserver(self, forKeyPath: "value", options: [.new], context: &apertureSliderKvoContext)
+    if let control = slider as? AVCaptureControl {
+      if session.canAddControl(control) {
+        session.addControl(control)
+      }
+    }
     cameraControlObjects.append(slider)
     if session.canAddControl(slider) {
       session.addControl(slider)
@@ -1356,9 +1361,13 @@ public final class CameraEngineView: ExpoView {
     }
 
     let zoomSlider = AVCaptureSystemZoomSlider(device: device)
-    if session.canAddControl(zoomSlider) {
-      session.addControl(zoomSlider)
+    if let zoomControl = zoomSlider as? AVCaptureControl {
+      if session.canAddControl(zoomControl) {
+        session.addControl(zoomControl)
+      }
       cameraControlObjects.append(zoomSlider)
+    } else {
+      print("[CameraEngine][Diag] Camera Control: zoom slider is not an AVCaptureControl on this OS - skipped")
     }
     // The SYSTEM zoom slider drives videoZoomFactor itself; observe the device to fan
     // the value out to the JS focal dial (compile-safe KVO).
@@ -1376,32 +1385,19 @@ public final class CameraEngineView: ExpoView {
   /// min/max/prominent values are set via responds-guarded KVC. Returns nil when the
   /// class/initializers are unavailable on this OS (Camera Control keeps zoom only).
   private func makeApertureSlider(minimum: Float, maximum: Float, stops: [Float]) -> NSObject? {
-    guard let cls = NSClassFromString("AVCaptureSlider") as? NSObject.Type else { return nil }
+    guard let cls = NSClassFromString("AVCaptureSlider") as? AnyClass,
+          let alloced = cls.perform(NSSelectorFromString("alloc"))?.takeUnretainedValue() else { return nil }
     let candidates = [
       "initWithMinimumValue:maximumValue:",
       "initWithMin:max:",
-      "init",
     ]
     for name in candidates {
       let sel = NSSelectorFromString(name)
-      guard cls.instancesRespond(to: sel) else { continue }
-      let instance: NSObject?
-      if name == "init" {
-        instance = cls.init()
-      } else {
-        let imp = cls.method(for: sel)
-        typealias Factory = @convention(c) (AnyObject, Selector, Float, Float) -> AnyObject
-        let fn = unsafeBitCast(imp, to: Factory.self)
-        instance = fn(cls.alloc(), sel, minimum, maximum) as? NSObject
-      }
-      guard let slider = instance else { continue }
-      // Range + prominent stops via responds-guarded KVC (never throws: guarded setters).
-      if slider.responds(to: NSSelectorFromString("setMinimumValue:")) {
-        slider.setValue(minimum, forKey: "minimumValue")
-      }
-      if slider.responds(to: NSSelectorFromString("setMaximumValue:")) {
-        slider.setValue(maximum, forKey: "maximumValue")
-      }
+      guard let method = class_getInstanceMethod(cls, sel),
+            let imp = method_getImplementation(method) else { continue }
+      typealias Factory = @convention(c) (AnyObject, Selector, Float, Float) -> AnyObject
+      let fn = unsafeBitCast(imp, to: Factory.self)
+      guard let slider = fn(alloced, sel, minimum, maximum) as? NSObject else { continue }
       if slider.responds(to: NSSelectorFromString("setProminentValues:")) {
         slider.setValue(stops, forKey: "prominentValues")
       }
