@@ -1134,7 +1134,6 @@ public final class CameraEngineView: ExpoView {
         equivalentFocalMM: equivalentFocalMM,
         apertureMode: self.apertureMode,
         simulatedFNumber: self.simulatedFNumber,
-        equivalentFocalMM: equivalentFocalMM,
       ) { [weak self] result, detail in
         self?.sessionQueue.async { self?.captureDelegates.removeValue(forKey: id) }
         completion(result, detail)
@@ -1342,14 +1341,12 @@ public final class CameraEngineView: ExpoView {
     let maximum = (caps["maxAperture"] as? Double) ?? 4.0
     let stops = (caps["supportedApertures"] as? [Double]) ?? []
 
-    // Compiler-proven surface: AVCaptureSlider() takes NO arguments — range/prominence
-    // via properties, value changes via KVO (compile-safe; the guessed addAction API
-    // does not exist in this SDK).
-    let slider = AVCaptureSlider()
-    slider.minimumValue = Float(minimum)
-    slider.maximumValue = Float(maximum)
-    if !stops.isEmpty {
-      slider.prominentValues = stops.map { Float($0) }
+    // The init labels are not visible in the Swift interface (CI-proven), so construct
+    // the slider through the ObjC runtime, trying the documented selectors in order.
+    // No selector matching -> aperture slider skipped; Camera Control still offers zoom.
+    guard let slider = makeApertureSlider(minimum: Float(minimum), maximum: Float(maximum), stops: stops.map { Float($0) }) else {
+      print("[CameraEngine][Diag] Camera Control: no compatible AVCaptureSlider initializer — aperture slider skipped")
+      return
     }
     slider.addObserver(self, forKeyPath: "value", options: [.new], context: &apertureSliderKvoContext)
     cameraControlObjects.append(slider)
@@ -1372,6 +1369,45 @@ public final class CameraEngineView: ExpoView {
       session.perform(NSSelectorFromString("setControlsDelegate:"), with: self)
     }
     print("[CameraEngine][Diag] Camera Control controls added: aperture slider + system zoom slider")
+  }
+
+  /// Constructs the Camera Control aperture slider through the ObjC runtime — the init
+  /// labels are not exposed in the Swift interface. Candidates are tried in order and
+  /// min/max/prominent values are set via responds-guarded KVC. Returns nil when the
+  /// class/initializers are unavailable on this OS (Camera Control keeps zoom only).
+  private func makeApertureSlider(minimum: Float, maximum: Float, stops: [Float]) -> NSObject? {
+    guard let cls = NSClassFromString("AVCaptureSlider") as? NSObject.Type else { return nil }
+    let candidates = [
+      "initWithMinimumValue:maximumValue:",
+      "initWithMin:max:",
+      "init",
+    ]
+    for name in candidates {
+      let sel = NSSelectorFromString(name)
+      guard cls.instancesRespond(to: sel) else { continue }
+      let instance: NSObject?
+      if name == "init" {
+        instance = cls.init()
+      } else {
+        let imp = cls.method(for: sel)
+        typealias Factory = @convention(c) (AnyObject, Selector, Float, Float) -> AnyObject
+        let fn = unsafeBitCast(imp, to: Factory.self)
+        instance = fn(cls.alloc(), sel, minimum, maximum) as? NSObject
+      }
+      guard let slider = instance else { continue }
+      // Range + prominent stops via responds-guarded KVC (never throws: guarded setters).
+      if slider.responds(to: NSSelectorFromString("setMinimumValue:")) {
+        slider.setValue(minimum, forKey: "minimumValue")
+      }
+      if slider.responds(to: NSSelectorFromString("setMaximumValue:")) {
+        slider.setValue(maximum, forKey: "maximumValue")
+      }
+      if slider.responds(to: NSSelectorFromString("setProminentValues:")) {
+        slider.setValue(stops, forKey: "prominentValues")
+      }
+      return slider
+    }
+    return nil
   }
 
   fileprivate func capabilities(controller: ApertureController, completion: @escaping (Result<[String: Any], CameraEngineError>) -> Void) {
