@@ -1355,10 +1355,6 @@ public final class CameraEngineView: ExpoView {
       }
     }
     cameraControlObjects.append(slider)
-    if session.canAddControl(slider) {
-      session.addControl(slider)
-      cameraControlObjects.append(slider)
-    }
 
     let zoomSlider = AVCaptureSystemZoomSlider(device: device)
     if let zoomControl = zoomSlider as? AVCaptureControl {
@@ -1393,8 +1389,8 @@ public final class CameraEngineView: ExpoView {
     ]
     for name in candidates {
       let sel = NSSelectorFromString(name)
-      guard let method = class_getInstanceMethod(cls, sel),
-            let imp = method_getImplementation(method) else { continue }
+      guard let method = class_getInstanceMethod(cls, sel) else { continue }
+      let imp = method_getImplementation(method)
       typealias Factory = @convention(c) (AnyObject, Selector, Float, Float) -> AnyObject
       let fn = unsafeBitCast(imp, to: Factory.self)
       guard let slider = fn(alloced, sel, minimum, maximum) as? NSObject else { continue }
