@@ -1381,8 +1381,13 @@ public final class CameraEngineView: ExpoView {
   /// min/max/prominent values are set via responds-guarded KVC. Returns nil when the
   /// class/initializers are unavailable on this OS (Camera Control keeps zoom only).
   private func makeApertureSlider(minimum: Float, maximum: Float, stops: [Float]) -> NSObject? {
-    guard let cls = NSClassFromString("AVCaptureSlider") as? AnyClass,
-          let alloced = cls.perform(NSSelectorFromString("alloc"))?.takeUnretainedValue() else { return nil }
+    // alloc goes through the class-method IMP too: `AnyClass` has no statically visible
+    // `perform` (run 65: "no exact matches in call to instance method 'perform'").
+    guard let cls = NSClassFromString("AVCaptureSlider"),
+          let allocMethod = class_getClassMethod(cls, NSSelectorFromString("alloc")) else { return nil }
+    typealias AllocFactory = @convention(c) (AnyObject, Selector) -> AnyObject
+    let allocFn = unsafeBitCast(method_getImplementation(allocMethod), to: AllocFactory.self)
+    let alloced = allocFn(cls, NSSelectorFromString("alloc"))
     let candidates = [
       "initWithMinimumValue:maximumValue:",
       "initWithMin:max:",
