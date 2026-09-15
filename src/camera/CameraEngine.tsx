@@ -45,6 +45,8 @@ export type CapturedPhoto = {
   assetLocalIdentifier: string | null;
   /** True when Camera DNA processing failed and the untouched Apple-processed photo was saved instead. */
   processingFallback?: boolean | null;
+  /** Final photo codec actually used: "heif" (preferred) or "jpeg" (fallback). */
+  codec?: string | null;
   /** Zoom ACTUALLY applied to the device at shutter time (diagnostics). */
   appliedZoom?: number | null;
   /** 35mm-equivalent focal stamped into the saved EXIF (base × zoom). */

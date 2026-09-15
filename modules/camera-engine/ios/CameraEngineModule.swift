@@ -742,24 +742,14 @@ public final class CameraEngineView: ExpoView {
     if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { device.whiteBalanceMode = .continuousAutoWhiteBalance }
   }
 
-  /// FOCAL LADDER (user-confirmed): the dial must offer REAL 13mm ultra-wide + the 26mm
-  /// main, so the session needs a VIRTUAL device (Apple's seamless crossfade handles the
-  /// lens swap). The previous quality fix pinned the physical wide — that killed the real
-  /// 13mm stop and made the dial lie. The JS layer defaults the dial to 26mm (zoom 2.0 on
-  /// a virtual body), so captures land on the MAIN lens, not the ultra-wide.
+  /// CAPTURE MAIN PATH (user directive, final): the 1× main photo path is the PHYSICAL
+  /// `builtInWideAngleCamera` — never a virtual multi-camera. Virtual devices start on
+  /// the ultra-wide constituent and rely on crossfade; the physical main lens delivers
+  /// Apple's best fully processed single-lens photo with OIS. The dial becomes
+  /// 26/35/52 (crop zoom on the main); the real 13mm ultra-wide stop is not available
+  /// on this path by design.
   fileprivate static func preferredCaptureDevice() -> AVCaptureDevice? {
-    let types: [AVCaptureDevice.DeviceType] = [
-      .builtInTripleCamera,
-      .builtInDualCamera,
-      .builtInDualWideCamera,
-      .builtInWideAngleCamera,
-    ]
-    for type in types {
-      if let device = AVCaptureDevice.default(type, for: .video, position: .back) {
-        return device
-      }
-    }
-    return nil
+    AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
   }
 
   private func configureSession() throws {
@@ -798,40 +788,54 @@ public final class CameraEngineView: ExpoView {
     // acceptable price while base image quality is being fixed.
     output.maxPhotoQualityPrioritization = .quality
 
-    // 24MP TARGET (final photo spec): Camera 18 prefers Apple's fully processed
-    // multi-frame FUSED photo at 24MP over the raw 48MP binned-less size — fusion is
-    // where Apple's HDR stacking, noise reduction and detail recovery live. Pick the
-    // supported output dimension whose pixel count is CLOSEST to 24M (never blindly the
-    // largest, which would select 48MP and skip the fusion benefit).
+    // PHOTO FORMAT POLICY (user directive): the activeFormat must serve the device's
+    // BEST fully processed photo — never a preview/fps-oriented low-quality format.
+    // The session preset is .photo (AVFoundation selects the max-quality photo format);
+    // preview comes from a separate VideoDataOutput and is downscaled only AFTER capture
+    // (previewCap in captureOutput), never by format choice. This audit logs the facts
+    // so any mismatch between device best and activeFormat is visible in the field.
+    do {
+      let machine = {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        return withUnsafeBytes(of: &systemInfo.machine) { raw in
+          String(decoding: raw.prefix(while: { $0 != 0 }), as: UInt8.self)
+        }
+      }()
+      let supported = device.activeFormat.supportedMaxPhotoDimensions
+      let dimsText = supported.map { "\($0.width)x\($0.height)" }.joined(separator: ", ")
+      let has24MP = supported.contains { $0.width * $0.height >= 23_000_000 && $0.width * $0.height <= 25_000_000 }
+      print("[CameraEngine][Diag] device=\(device.deviceType.rawValue) model=\(machine) lens=\(device.localizedName)")
+      print("[CameraEngine][Diag] activeFormat photo dimensions: [\(dimsText)] exact24MP=\(has24MP)")
+      if #available(iOS 27.0, *) {
+        // CRASH SAFETY: responds-guarded KVC (see capture() note).
+        let format = device.activeFormat as NSObject
+        let hasMin = format.responds(to: NSSelectorFromString("minLensAperture"))
+        let hasMax = format.responds(to: NSSelectorFromString("maxLensAperture"))
+        let minA = hasMin ? (format.value(forKey: "minLensAperture") as? NSNumber)?.doubleValue : nil
+        let maxA = hasMax ? (format.value(forKey: "maxLensAperture") as? NSNumber)?.doubleValue : nil
+        print("[CameraEngine][Diag] activeFormat lens aperture range: \(minA ?? 0)–\(maxA ?? 0) (variable = \(minA.map { $0 > 0 } ?? false))")
+      }
+    }
+
+    // 24MP TARGET: on iPhone 15+ class devices whose activeFormat explicitly supports a
+    // ~24MP photo dimension, request it (Apple multi-frame fused, .quality). On devices
+    // without a 24MP option (e.g. iPhone 14 Plus → 12MP ladder) fall back to the device's
+    // BEST processed dimension instead of squeezing an interpolation out of nothing.
     if #available(iOS 16.0, *) {
       let supported = device.activeFormat.supportedMaxPhotoDimensions
       if !supported.isEmpty {
-        let targetPixels = 24_000_000.0
-        let chosen = supported.min(by: {
-          abs(Double($0.width) * Double($0.height) - targetPixels)
-            < abs(Double($1.width) * Double($1.height) - targetPixels)
-        })!
+        let exact24 = supported.filter { $0.width * $0.height >= 23_000_000 && $0.width * $0.height <= 25_000_000 }
+        let chosen: CMVideoDimensions
+        if let best24 = exact24.max(by: { $0.width * $0.height < $1.width * $1.height }) {
+          chosen = best24
+        } else {
+          chosen = supported.max(by: { $0.width * $0.height < $1.width * $1.height })!
+          print("[CameraEngine][Diag] no ~24MP dimension on this device — using device best \(chosen.width)x\(chosen.height)")
+        }
         output.maxPhotoDimensions = chosen
-        let list = supported.map { "\($0.width)x\($0.height)" }.joined(separator: ", ")
-        print("[CameraEngine][Diag] photo dimension options: [\(list)] → 24MP target selected \(chosen.width)x\(chosen.height) (\(chosen.width * chosen.height / 1_000_000)MP)")
+        print("[CameraEngine][Diag] maxPhotoDimensions = \(chosen.width)x\(chosen.height) (\(chosen.width * chosen.height / 1_000_000)MP)")
       }
-      // RUNTIME FORMAT CHECK: the active main-camera format must simultaneously support
-      // the 24MP photo dimensions AND (iPhone 18 Pro) real variable aperture control.
-      // Both facts are logged so a device that fails either is diagnosable without a
-      // debugger. Format SWITCHING is not a public API — the default activeFormat of the
-      // physical wide camera carries the full dimension ladder on every Pro body.
-      let has24MP = supported.contains { $0.width * $0.height >= 23_000_000 && $0.width * $0.height <= 25_000_000 }
-      print("[CameraEngine][Diag] activeFormat supports ~24MP dims: \(has24MP)")
-    }
-    if #available(iOS 27.0, *) {
-      // CRASH SAFETY: responds-guarded KVC (see capture() note) — #available proves the
-      // OS, not the property; a missing key would otherwise be an ObjC-level crash.
-      let format = device.activeFormat as NSObject
-      let hasMin = format.responds(to: NSSelectorFromString("minLensAperture"))
-      let hasMax = format.responds(to: NSSelectorFromString("maxLensAperture"))
-      let minA = hasMin ? (format.value(forKey: "minLensAperture") as? NSNumber)?.doubleValue : nil
-      let maxA = hasMax ? (format.value(forKey: "maxLensAperture") as? NSNumber)?.doubleValue : nil
-      print("[CameraEngine][Diag] activeFormat lens aperture range: \(minA ?? 0)–\(maxA ?? 0) (variable = \(minA.map { $0 > 0 } ?? false))")
     }
 
     // ProRAW capability stays available in code, but is NOT enabled by default (expert
@@ -1313,10 +1317,16 @@ private enum CameraTempFiles {
   private static let lock = NSLock()
   private static var current: Set<URL> = []
 
-  static func makeURLs() -> (URL, URL) {
-    let directory = FileManager.default.temporaryDirectory
-    return (directory.appendingPathComponent("camera-engine-\(UUID().uuidString).jpg"),
-            directory.appendingPathComponent("camera-engine-thumb-\(UUID().uuidString).jpg"))
+  static func makeThumbURL() -> URL {
+    return FileManager.default.temporaryDirectory
+      .appendingPathComponent("camera-engine-thumb-\(UUID().uuidString).jpg")
+  }
+
+  /// Full-resolution final photo; the extension ALWAYS matches the actual codec
+  /// (heif | jpg) so PhotoKit never has to sniff.
+  static func makeFinalURL(pathExtension: String) -> URL {
+    return FileManager.default.temporaryDirectory
+      .appendingPathComponent("camera-engine-\(UUID().uuidString).\(pathExtension)")
   }
 
   /// Track the newest displayed generation and delete only the generation it replaces, so the
@@ -1473,21 +1483,46 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
 
       let context = Self.sharedContext
 
-      let (fileURL, thumbURL) = CameraTempFiles.makeURLs()
-      completionLock.lock(); generatedURLs = [fileURL, thumbURL]; completionLock.unlock()
-
-      do {
-        guard let jpeg = Self.jpegRepresentation(
+      // FINAL ENCODING — HEIF first (user directive): HEIF keeps the same pixels at a
+      // much smaller file and avoids re-compressing the Apple photo through a second
+      // lossy JPEG generation. JPEG (0.95) remains the fallback if HEIF encoding is
+      // unavailable. The saved file extension always matches the actual codec.
+      let heifData = Self.encodedRepresentation(
+        image,
+        metadata: metadata,
+        colorSpace: colorSpace,
+        quality: 0.95,
+        equivalentFocalMM: equivalentFocalMM,
+        type: "public.heif",
+      )
+      let fileURL: URL
+      let encoded: Data
+      let codec: String
+      if let heifData {
+        fileURL = CameraTempFiles.makeFinalURL(pathExtension: "heif")
+        encoded = heifData
+        codec = "heif"
+      } else {
+        guard let jpeg = Self.encodedRepresentation(
           image,
           metadata: metadata,
           colorSpace: colorSpace,
           quality: 0.95,
           equivalentFocalMM: equivalentFocalMM,
+          type: "public.jpeg",
         ) else {
-          throw CameraEngineError.processingFailed
+          finish(.failure(.processingFailed))
+          return
         }
-        print("[CameraEngine][Diag] export dims=\(extent.width)x\(extent.height) jpegBytes=\(jpeg.count) quality=0.95")
-        try jpeg.write(to: fileURL, options: .atomic)
+        fileURL = CameraTempFiles.makeFinalURL(pathExtension: "jpg")
+        encoded = jpeg
+        codec = "jpeg"
+      }
+      completionLock.lock(); generatedURLs = [fileURL, thumbURL]; completionLock.unlock()
+
+      do {
+        print("[CameraEngine][Diag] export dims=\(extent.width)x\(extent.height) codec=\(codec) bytes=\(encoded.count) quality=0.95")
+        try encoded.write(to: fileURL, options: .atomic)
         let scale = min(CGFloat(1), CGFloat(512) / max(extent.width, extent.height))
         let thumb = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         guard let thumbData = context.jpegRepresentation(of: thumb, colorSpace: colorSpace, options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.8]) else {
@@ -1537,6 +1572,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
             "assetLocalIdentifier": localIdentifier ?? NSNull(),
             "appliedZoom": appliedZoom,
             "equivalentFocal": equivalentFocalMM,
+            "codec": codec,
           ]))
         }
       }
@@ -1561,10 +1597,10 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
   // carried over untouched. CIContext.jpegRepresentation would drop all of it. The native
   // lens focal in that metadata ignores crop zoom, so FocalLengthIn35mmFilm is overwritten
   // with base×zoom — what the Photos app displays as the shot's focal length.
-  private static func jpegRepresentation(_ image: CIImage, metadata: [AnyHashable: Any]?, colorSpace: CGColorSpace, quality: Double, equivalentFocalMM: Int) -> Data? {
+  private static func encodedRepresentation(_ image: CIImage, metadata: [AnyHashable: Any]?, colorSpace: CGColorSpace, quality: Double, equivalentFocalMM: Int, type: CFString) -> Data? {
     guard let cgImage = sharedContext.createCGImage(image, from: image.extent, format: CIFormat.RGBA8, colorSpace: colorSpace) else { return nil }
     let output = NSMutableData()
-    guard let destination = CGImageDestinationCreateWithData(output, "public.jpeg" as CFString, 1, nil) else { return nil }
+    guard let destination = CGImageDestinationCreateWithData(output, type, 1, nil) else { return nil }
 
     var properties = cfProperties(metadata)
     properties[kCGImageDestinationLossyCompressionQuality] = quality
