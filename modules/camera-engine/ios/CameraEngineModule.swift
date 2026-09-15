@@ -835,14 +835,17 @@ public final class CameraEngineView: ExpoView {
         var systemInfo = utsname()
         uname(&systemInfo)
         return withUnsafeBytes(of: &systemInfo.machine) { raw in
-          String(decoding: raw.prefix(while: { $0 != 0 }), as: UInt8.self)
+          let cchars = raw.bindMemory(to: CChar.self)
+          return String(cString: cchars.baseAddress ?? "")
         }
       }()
-      let supported = device.activeFormat.supportedMaxPhotoDimensions
-      let dimsText = supported.map { "\($0.width)x\($0.height)" }.joined(separator: ", ")
-      let has24MP = supported.contains { $0.width * $0.height >= 23_000_000 && $0.width * $0.height <= 25_000_000 }
       print("[CameraEngine][Diag] device=\(device.deviceType.rawValue) model=\(machine) lens=\(device.localizedName)")
-      print("[CameraEngine][Diag] activeFormat photo dimensions: [\(dimsText)] exact24MP=\(has24MP)")
+      if #available(iOS 16.0, *) {
+        let supported = device.activeFormat.supportedMaxPhotoDimensions
+        let dimsText = supported.map { "\($0.width)x\($0.height)" }.joined(separator: ", ")
+        let has24MP = supported.contains { $0.width * $0.height >= 23_000_000 && $0.width * $0.height <= 25_000_000 }
+        print("[CameraEngine][Diag] activeFormat photo dimensions: [\(dimsText)] exact24MP=\(has24MP)")
+      }
       if #available(iOS 27.0, *) {
         // CRASH SAFETY: responds-guarded KVC (see capture() note).
         let format = device.activeFormat as NSObject
@@ -1527,13 +1530,14 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
       // much smaller file and avoids re-compressing the Apple photo through a second
       // lossy JPEG generation. JPEG (0.95) remains the fallback if HEIF encoding is
       // unavailable. The saved file extension always matches the actual codec.
+      let thumbURL = CameraTempFiles.makeThumbURL()
       let heifData = Self.encodedRepresentation(
         image,
         metadata: metadata,
         colorSpace: colorSpace,
         quality: 0.95,
         equivalentFocalMM: equivalentFocalMM,
-        type: "public.heif",
+        type: "public.heif" as CFString,
       )
       let fileURL: URL
       let encoded: Data
@@ -1549,7 +1553,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
           colorSpace: colorSpace,
           quality: 0.95,
           equivalentFocalMM: equivalentFocalMM,
-          type: "public.jpeg",
+          type: "public.jpeg" as CFString,
         ) else {
           finish(.failure(.processingFailed))
           return
