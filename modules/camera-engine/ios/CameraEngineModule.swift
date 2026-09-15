@@ -470,6 +470,10 @@ public final class CameraEngineView: ExpoView {
   private let output = AVCapturePhotoOutput()
   private let sessionQueue = DispatchQueue(label: "camera-engine.session")
   private let profileLock = NSLock()
+  // Raw profile is retained so compilation happens LAZILY on the consumer queue
+  // (render queue for preview, photo-processing queue for capture) — compiling two
+  // 33³ cubes synchronously on the RN main thread visibly hitched profile switches.
+  private var profile: [String: Any] = [:]
   // CompiledCameraProfile v2: per-frame rendering consumes ONLY these. The preview and
   // final variants differ ONLY in the fused Input Normalizer (video-frame vs
   // processed-photo); LUT, Fine Color and Tone are identical by contract.
@@ -564,17 +568,38 @@ public final class CameraEngineView: ExpoView {
   }
 
   fileprivate func setProfile(_ value: [String: Any]) {
-    // New color payload → bump the revision so the compiled cube rebuilds.
+    // New color payload → bump the revision so the compiled cube rebuilds. Compilation
+    // itself is deferred to the first consumer (see compiledSnapshot) so the RN main
+    // thread never pays for a 33³ cube build.
     CameraDNARenderer.invalidateCompiledProfile(value)
-    // Compile BOTH per-input variants (processed-photo / video-frame). Normalizers are
-    // identity today, so the two variants are equivalent — the split exists so future
-    // calibrated normalizers land without touching the render loop again.
-    let finalCompiled = CameraDNARenderer.compile(value, normalizer: CameraInputNormalizer.definition(for: .processedPhoto))
-    let previewCompiled = CameraDNARenderer.compile(value, normalizer: CameraInputNormalizer.definition(for: .videoFrame))
     profileLock.lock()
-    compiledFinal = finalCompiled
-    compiledPreview = previewCompiled
+    profile = value
+    compiledFinal = nil
+    compiledPreview = nil
     profileLock.unlock()
+  }
+
+  /// Lazy compile: the FIRST consumer after a profile change pays the 33³ build once,
+  /// on its own queue (exactly the old effectiveColorCube timing profile). The cache
+  /// inside CameraDNARenderer makes every later consumer a key hit.
+  private func compiledSnapshot(_ source: CameraInputNormalizer.Source) -> CameraDNARenderer.CompiledCameraProfile? {
+    profileLock.lock()
+    let compiledExisting = source == .processedPhoto ? compiledFinal : compiledPreview
+    let value = profile
+    profileLock.unlock()
+    if let compiledExisting { return compiledExisting }
+
+    let compiled = CameraDNARenderer.compile(value, normalizer: CameraInputNormalizer.definition(for: source))
+    profileLock.lock()
+    // A newer setProfile may have invalidated meanwhile — only cache if still empty.
+    if source == .processedPhoto {
+      if compiledFinal == nil { compiledFinal = compiled }
+    } else {
+      if compiledPreview == nil { compiledPreview = compiled }
+    }
+    let compiledLatest = source == .processedPhoto ? compiledFinal : compiledPreview
+    profileLock.unlock()
+    return compiledLatest
   }
 
   // Rounded viewfinder card: clip the preview (and every sublayer) to a continuous-corner
@@ -605,17 +630,6 @@ public final class CameraEngineView: ExpoView {
     }
     renderLayer.cornerRadius = radius
     renderLayer.masksToBounds = radius > 0
-  }
-
-  /// Per-frame render state for the CAPTURE path (compiled against the
-  /// processed-photo normalizer). Nil until the first profile arrives → passthrough.
-  private func compiledFinalSnapshot() -> CameraDNARenderer.CompiledCameraProfile? {
-    profileLock.lock(); defer { profileLock.unlock() }; return compiledFinal
-  }
-
-  /// Per-frame render state for the PREVIEW path (video-frame normalizer).
-  private func compiledPreviewSnapshot() -> CameraDNARenderer.CompiledCameraProfile? {
-    profileLock.lock(); defer { profileLock.unlock() }; return compiledPreview
   }
 
   fileprivate func start(completion: @escaping (Result<Bool, CameraEngineError>) -> Void) {
@@ -977,7 +991,7 @@ public final class CameraEngineView: ExpoView {
       let equivalentFocalMM = Int((baseEquivalentMM * appliedZoom).rounded())
       let id = photoSettings.uniqueID
       let delegate = PhotoCaptureDelegate(
-        compiled: self.compiledFinalSnapshot(),
+        compiled: self.compiledSnapshot(.processedPhoto),
         appliedZoom: appliedZoom,
         equivalentFocalMM: equivalentFocalMM,
       ) { [weak self] result, detail in
@@ -1161,7 +1175,7 @@ extension CameraEngineView: AVCaptureVideoDataOutputSampleBufferDelegate {
       let downscale = previewCap / longest
       image = image.transformed(by: CGAffineTransform(scaleX: downscale, y: downscale))
     }
-    if let compiled = compiledPreviewSnapshot() {
+    if let compiled = compiledSnapshot(.videoFrame) {
       image = CameraDNARenderer.apply(compiled, to: image)
     }
     image = image.cropped(to: image.extent.integral)
