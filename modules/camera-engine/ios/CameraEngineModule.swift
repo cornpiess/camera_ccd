@@ -219,7 +219,9 @@ final class ApertureController {
     case .physical:
       setPhysicalAperture(Double(fStop), on: device, completion: completion)
     case .simulated:
-      simulatedFNumber = min(16.0, max(1.4, fStop))
+      // RANGE CONTRACT: matches the iPhone 18 Pro physical iris (f/1.4-f/4) so the ring
+      // behaves identically whether capability routed physical or simulated.
+      simulatedFNumber = min(4.0, max(1.4, fStop))
       DispatchQueue.main.async { completion(.success(())) }
     }
   }
@@ -247,7 +249,7 @@ final class ApertureController {
     guard let range = variableApertureRange(device) else {
       // Capability flipped away from physical between route and call — degrade to
       // simulated silently (store the value), never surface an error to the UI.
-      simulatedFNumber = Float(min(16.0, max(1.4, fStop)))
+      simulatedFNumber = Float(min(4.0, max(1.4, fStop)))
       mode = .simulated
       DispatchQueue.main.async { completion(.success(())) }
       return
@@ -1203,7 +1205,7 @@ public final class CameraEngineView: ExpoView {
       caps["apertureMode"] = apertureMode == .physical ? "physical" : "simulated"
       if apertureMode == .simulated {
         caps["minAperture"] = 1.4
-        caps["maxAperture"] = 16.0
+        caps["maxAperture"] = 4.0
         caps["supportedApertures"] = NSNull()
       }
 
@@ -1523,13 +1525,16 @@ private enum CameraControlProbe {
 /// blur); starburst only from THRESHOLDED specular highlights; no CoC/PSF/depth layers;
 /// no PNG star overlays; no sharpening/NR of any kind.
 enum ApertureSimulationProcessor {
+  /// RANGE: f/1.4-f/4 everywhere (the iPhone 18 Pro physical iris range) — simulated
+  /// and physical share one grid, so the ring never changes behavior across devices.
   /// Gaussian radius (px at full res) per f-number — piecewise-linear over the anchors.
   private static let blurAnchors: [(f: Float, radius: CGFloat)] = [
-    (1.4, 28), (2.0, 18), (2.8, 11), (4.0, 5), (5.6, 2), (8.0, 0),
+    (1.4, 28), (2.0, 20), (2.8, 13), (4.0, 6),
   ]
-  /// Starburst intensity 0..1 per f-number.
+  /// Starburst intensity 0..1 per f-number, compressed into the same grid: the old
+  /// 5.6-16 knee rescales to 2.2-4 (2.2~0, 2.8~0.35, 3.4~0.7, 4.0~1.0).
   private static let starAnchors: [(f: Float, strength: CGFloat)] = [
-    (4.0, 0), (5.6, 0.30), (8.0, 0.55), (11.0, 0.80), (16.0, 1.0),
+    (1.4, 0), (2.2, 0), (2.8, 0.35), (3.4, 0.7), (4.0, 1.0),
   ]
 
   private static func interpolate(_ table: [(f: Float, v: CGFloat)], _ f: Float) -> CGFloat {

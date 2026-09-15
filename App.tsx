@@ -385,8 +385,8 @@ function CameraAppScreen(): React.JSX.Element {
               setApertureRange(null);
             }
           } else if (simulated) {
-            // Simulation grid (native ApertureSimulationProcessor mapping).
-            setApertureRange({ min: 1.4, max: 16 });
+            // Simulation grid — same f/1.4-4 range as the physical iris (unified ring).
+            setApertureRange({ min: 1.4, max: 4 });
           } else {
             setApertureRange(null);
           }
@@ -503,7 +503,7 @@ function CameraAppScreen(): React.JSX.Element {
       const range = supportsVariableAperture
         ? (apertureRange ?? { min: capabilitiesRef.current?.minAperture ?? null, max: capabilitiesRef.current?.maxAperture ?? null })
         : (apertureSimulated
-          ? (apertureRange ?? { min: 1.4, max: 16 })
+          ? (apertureRange ?? { min: 1.4, max: 4 })
           : (demo ? DEMO_APERTURE_RANGE : { min: null, max: null }));
       return apertureVisualFactors(
         currentAperture,
