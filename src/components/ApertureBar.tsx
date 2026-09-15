@@ -46,8 +46,8 @@ const FULL_DRAG_PX = 400;
 const BAND_SPAN = TRACK_WIDTH * 3;
 /** Detent grid: one click per 0.1 f-number (ƒ/1.5 → ƒ/1.6 → … ƒ/4.0), like a tight lens ring. */
 const FSTEPS_PER_TENTH = 10;
-/** Ruler-style scale: 48 ticks per stop — every 1/48 stop, ruler-dense. */
-const TICKS_PER_STOP = 48;
+/** Ruler-style scale: 96 ticks per stop — half the previous spacing, ruler-dense. */
+const TICKS_PER_STOP = 96;
 /** The tick BASELINE: horizontally level with the iris glyph's center (the aperture hole). */
 const TICK_BASELINE = BAR_HEIGHT / 2 - 8; // in trackClip coords (clip starts at top: 8)
 /** Iris sits to the LEFT of the track so the pointer line stays exactly on the shutter axis. */
@@ -211,9 +211,9 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
             const fullStop = Math.abs(f - toF(Math.round(toLog(f)))) < 1e-6;
             lastDetentRef.current = detent;
             if (fullStop) {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Rigid).catch(() => {});
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
             } else {
-              Haptics.selectionAsync().catch(() => {});
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
             }
           }
           // The band CHASES the finger through the damped spring (target, not 1:1).
