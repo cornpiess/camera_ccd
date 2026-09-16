@@ -47,9 +47,8 @@ const TICKS_PER_STOP = 48;
 const IRIS_SIZE = 44;
 const IRIS_LEFT = 8;
 const IRIS_GAP = 10;
-/** Side-view cross-section width (always visible between the iris and the scale). */
-const SIDE_WIDTH = 118;
-const SIDE_LEFT = IRIS_LEFT + IRIS_SIZE + IRIS_GAP;
+/** Side-view cross-section width (shown centered; toggles with the tick scale). */
+const SIDE_WIDTH = 170;
 /** The tick BASELINE: horizontally level with the iris glyph's center (the aperture hole). */
 const TICK_BASELINE = BAR_HEIGHT / 2 - 8; // in trackClip coords (clip starts at top: 8)
 
@@ -83,10 +82,13 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   const { width: screenWidth } = useWindowDimensions();
   const topInset = 8;
   const scaleH = BAR_HEIGHT - topInset;
-  // 刻度与侧视图互斥（切换展示，永不同框）：可变光圈（范围有效）= 刻度条占满光圈
-  // 右侧；否则 = 侧视图 + 机械 f 值，无刻度。
-  const trackLeft = isVariableAperture ? IRIS_LEFT + IRIS_SIZE + IRIS_GAP : SIDE_LEFT + SIDE_WIDTH + 8;
-  const trackWidth = Math.max(140, screenWidth - trackLeft - 10);
+  // 刻度与侧视图互斥（切换展示，永不同框）：默认显示刻度条（占光圈右侧），
+  // 轻点条带切换到侧视图；固定光圈只有侧视图。
+  const trackLeft = IRIS_LEFT + IRIS_SIZE + IRIS_GAP;
+  // 可视窗口宽度 = 屏幕宽度的一半（保底 140，防极窄屏裁没）。
+  const trackWidth = Math.max(140, screenWidth * 0.5);
+  // 侧视图：条带内水平居中。
+  const sideLeft = (screenWidth - SIDE_WIDTH) / 2;
   const lo = Math.min(minAperture, maxAperture);
   const hi = Math.max(minAperture, maxAperture);
   const logLo = toLog(lo);
@@ -96,9 +98,9 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   /** 0 = stopped down (ƒ/max), 1 = wide open (ƒ/min). Feeds iris hole + scroll direction. */
   const openness = clamp(1 - (toLog(currentAperture) - logLo) / span, 0, 1);
 
-  // BAND_SCALE = band length in screen widths; halved (3 → 1.5) to compress the visual
-  // spacing between adjacent ticks — same tick count, half the on-screen gap.
-  const BAND_SCALE = 1.5;
+  // BAND_SCALE = band length in screen widths; halved twice (3 → 1.5 → 0.75) to compress
+  // the visual spacing between adjacent ticks — same tick count, tighter on-screen gap.
+  const BAND_SCALE = 0.75;
   // Ruler-style tick scale: three sizes per stop —
   //   full stop  (k % 48 === 0): tallest, labeled
   //   half stop  (k % 24 === 0): medium
@@ -127,9 +129,6 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   // The band scrolls under the fixed pointer: engaged value always sits at band-x = t*BAND_SPAN,
   // rendered at screen-center via translateX = trackWidth/2 - t*BAND_SPAN.
   const BAND_SPAN = trackWidth * BAND_SCALE;
-
-  // The band scrolls under the fixed pointer: engaged value always sits at band-x = t*BAND_SPAN,
-  // rendered at screen-center via translateX = trackWidth/2 - t*BAND_SPAN.
   const translateX = useRef(new Animated.Value(0)).current;
 
   /**
@@ -178,8 +177,10 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   };
 
   const interactive = isVariableAperture && hi > lo;
-  // 互斥开关：刻度条（可交互）或侧视图（展示态）二选一，永不同框、也不空档。
-  const sideVisible = !interactive;
+  // 刻度⇄侧视图切换：可变光圈默认刻度，轻点条带切换到侧视图（再点切回）；
+  // 固定光圈只有侧视图。两者永不同框、也不空档。
+  const [viewMode, setViewMode] = useState<'scale' | 'side'>('scale');
+  const sideVisible = !interactive || viewMode === 'side';
   const irisLeft = IRIS_LEFT;
 
   // Live values via refs: the PanResponder must be created ONCE per aperture range. It
@@ -230,9 +231,14 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
           animateBandTo(t);
           v.onApertureChange(Number(f.toFixed(2)));
         },
-        onPanResponderRelease: () => {
+        onPanResponderRelease: (_evt, gestureState) => {
           dragState.current.active = false;
           setDraggingState(false);
+          // 轻点（几乎没移动）= 刻度⇄侧视图切换；拖动才调光圈。
+          if (dragValuesRef.current.interactive && Math.abs(gestureState.dx) < 4 && Math.abs(gestureState.dy) < 4) {
+            setViewMode((m) => (m === 'scale' ? 'side' : 'scale'));
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+          }
           settleAtLastPosition();
         },
         onPanResponderTerminate: () => {
@@ -248,15 +254,27 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
     // Whole-strip drag surface: iris hole, side view, tick scale and f-value are all
     // bound to the ONE ApertureState — dragging anywhere adjusts the aperture.
     <View style={styles.bar} pointerEvents="auto" {...(interactive ? panResponder.panHandlers : {})}>
-      {/* Side-view cross-section: FIXED lens only — switches out with the tick scale,
-          the two are never on screen at the same time. */}
+      {/* Side-view cross-section: horizontally centered; the f-value sits to its RIGHT.
+          Toggles with the tick scale (tap the strip); fixed lenses only ever see this. */}
       {sideVisible ? (
         <View
-          style={[styles.sideSlot, { left: SIDE_LEFT, top: (BAR_HEIGHT - (SIDE_WIDTH * 92) / 260) / 2, width: SIDE_WIDTH }]}
+          style={[styles.sideSlot, { left: sideLeft, top: (BAR_HEIGHT - (SIDE_WIDTH * 92) / 260) / 2, width: SIDE_WIDTH }]}
           pointerEvents="none"
         >
-          <ApertureSideView openness={openness} accent={accent} label={formatF(currentAperture)} width={SIDE_WIDTH} />
+          <ApertureSideView openness={openness} accent={accent} width={SIDE_WIDTH} />
         </View>
+      ) : null}
+      {sideVisible ? (
+        <Text
+          style={[
+            styles.sideValueText,
+            { left: sideLeft + SIDE_WIDTH + 12 },
+            accent ? { color: accent } : null,
+          ]}
+          numberOfLines={1}
+        >
+          {formatF(currentAperture)}
+        </Text>
       ) : null}
 
       {/* Iris: the physical diaphragm (element 1; f/1.4 → big hole; f/4 → tiny hole) */}
@@ -264,9 +282,9 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
         <IrisGlyph size={IRIS_SIZE} openness={interactive ? openness : 0.55} accent={accent} />
       </View>
 
-      {/* The tick scale (element 4; variable lenses only) — ruler ticks sit on a baseline
-          LEVEL with the iris center; the band scrolls under the fixed pointer. */}
-      {interactive ? (
+      {/* The tick scale — variable lenses, scale view only; the band scrolls under
+          the fixed pointer. */}
+      {!sideVisible ? (
         <View style={[styles.trackClip, { left: trackLeft, top: topInset, height: scaleH, width: trackWidth }]}>
           <Animated.View style={[styles.band, { height: scaleH, transform: [{ translateX }] }]} pointerEvents="none">
             {ticks.map((tick) => (
@@ -307,12 +325,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
             style={[styles.pointer, { left: trackWidth / 2 - 0.75 }, accent ? { backgroundColor: accent } : null]}
           />
         </View>
-      ) : (
-        // FIXED lens: no ticks, no marker — the real mechanical f-value beside the iris.
-        <Text style={[styles.fixedValueText, accent ? { color: accent } : null]} numberOfLines={1}>
-          {formatF(currentAperture)}
-        </Text>
-      )}
+      ) : null}
 
       {
         // Small mode caption: 真实光圈 = variable iris; 固定光圈 = single mechanical aperture.
@@ -419,10 +432,9 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontVariant: ['tabular-nums'],
   },
-  fixedValueText: {
+  sideValueText: {
     position: 'absolute',
-    left: SIDE_LEFT + SIDE_WIDTH + 12,
-    top: (BAR_HEIGHT - 17) / 2 - 8,
+    top: (BAR_HEIGHT - 20) / 2,
     fontSize: 20,
     fontWeight: '800',
     color: '#FFFFFF',
