@@ -116,16 +116,19 @@ step('expo-modules-autolinking 发现 camera-engine', () => {
 step('camera-profiles.json 与 LUT 资源', () => {
   const doc = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/camera-profiles.json'), 'utf8'));
   must(doc.schemaVersion === 1, 'schemaVersion 必须是 1');
-  must(Array.isArray(doc.profiles) && doc.profiles.length === 6, '必须恰好 6 个核心 Profile');
+  must(Array.isArray(doc.profiles) && doc.profiles.length === 8, '必须恰好 8 个公开 Profile（SNAP 28P/28N, SKIN 50, CC 35, NC 35, RF 35, MF 50, ORIG）');
   const ids = new Set();
   for (const p of doc.profiles) {
     must(typeof p.id === 'string' && p.id.length > 0, 'profile.id 为空');
     must(!ids.has(p.id), `重复 id: ${p.id}`);
     ids.add(p.id);
     must(Array.isArray(p.tone.curve) && p.tone.curve.length === 5, `${p.id} tone.curve 必须恰好 5 点`);
-    must(typeof p.color.lut === 'string' && p.color.lut.length > 0, `${p.id} 缺少 color.lut`);
-    const lutPath = path.join(ROOT, 'modules/camera-engine/ios/LUTs', `${p.color.lut.replace(/\.cube$/, '')}.cube`);
-    must(fs.existsSync(lutPath), `${p.id} 的 LUT 文件缺失: ${lutPath}`);
+    // lut 可为 null（MF 50 / ORIG 无 LUT）；非 null 时必须是字符串且文件真实存在
+    if (p.color.lut !== null) {
+      must(typeof p.color.lut === 'string' && p.color.lut.length > 0, `${p.id} 的 color.lut 必须是非空字符串或 null`);
+      const lutPath = path.join(ROOT, 'modules/camera-engine/ios/LUTs', `${p.color.lut.replace(/\.cube$/, '')}.cube`);
+      must(fs.existsSync(lutPath), `${p.id} 的 LUT 文件缺失: ${lutPath}`);
+    }
   }
 });
 

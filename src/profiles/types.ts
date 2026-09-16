@@ -84,7 +84,8 @@ export interface CameraProfile {
    * this at runtime, so it can never reach production state or the UI.
    */
   readonly developmentReference?: { readonly target?: string; readonly note?: string };
-  readonly aperture: ApertureSettings;
+  /** Optional: the passthrough ORIG profile carries no aperture identity. */
+  readonly aperture?: ApertureSettings;
   readonly ui: ProfileUi;
   readonly raw: RawAdjustments;
   readonly tone: ToneSettings;

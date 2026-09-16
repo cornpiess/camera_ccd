@@ -28,7 +28,8 @@ const pushProfileErrors = (v: unknown, e: (message: string) => void): void => {
   for (const k of ['id','name'] as const) if (typeof v[k] !== 'string' || v[k].trim() === '') e(`${k} must be a non-empty string`);
   if (v.displayName !== undefined && (typeof v.displayName !== 'string' || v.displayName.trim() === '')) e('displayName must be a non-empty string');
   if (v.developmentReference !== undefined && !obj(v.developmentReference)) e('developmentReference must be an object');
-  if (nums(v.aperture, ['preferred'], 'aperture', e)) {
+  // Optional: the passthrough ORIG profile legitimately has no aperture identity.
+  if (v.aperture !== undefined && nums(v.aperture, ['preferred'], 'aperture', e)) {
     if (typeof v.aperture.preferred === 'number' && v.aperture.preferred <= 0) e('aperture.preferred must be greater than zero');
     optNum(v.aperture, 'starZone', 'aperture', e, [1, 32]);
   }
