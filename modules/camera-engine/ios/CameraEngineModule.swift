@@ -1922,7 +1922,7 @@ enum ApertureSimulationProcessor {
     let spec = Camera18ApertureSpec.load()
     let closedness = min(1.0, max(0.0, (fNumber - spec.min) / (spec.max - spec.min)))
     let blurStrength = 1.0 - closedness
-    let radius = blurStrength * 28.0
+    let radius = blurStrength * CGFloat(28.0)
     if radius >= 1.5, let mask = personMask(for: input) {
       // Blur a QUARTER-SCALE copy and upscale: the background is defocused anyway, so
       // the detail loss is invisible, and a 24MP r=24 gaussian stays cheap.
@@ -1990,7 +1990,7 @@ enum StarburstProcessor {
     let spec = Camera18ApertureSpec.load()
     let closedness = min(1.0, max(0.0, (fNumber - spec.min) / (spec.max - spec.min)))
     let strength = closedness
-    let rayRadius = 10.0 + closedness * 30.0
+    let rayRadius = 10.0 + closedness * CGFloat(30.0)
     guard strength > 0.01 else { return input }
     return input.appStarburst(strength: strength, rayRadius: rayRadius)
   }
