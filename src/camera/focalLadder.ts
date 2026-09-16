@@ -31,7 +31,19 @@ const SINGLE_BASE_MM = 26;
 
 const isVirtual = (kind: DeviceKind): boolean => kind.startsWith('virtual');
 
-export function buildFocalStops(kind: DeviceKind): FocalStop[] {
+export interface BuildFocalStopsOptions {
+  /** Native switchover zoom factor of the TELEPHOTO constituent (nil = no tele). */
+  readonly teleZoom?: number | null;
+}
+
+/**
+ * Ladder order (user spec, capability-driven):
+ *   Ultra Wide (REAL, only when the device has one) -> 26 -> 35 -> 52 -> Tele (REAL,
+ *   only when the device has one, at the DEVICE'S OWN tele mm - never a fixed 3x/4x/5x).
+ * 26/35/52 are identical on every iPhone (main 1x + crops). Tele mm = 13 * teleZoom
+ * (the native switchover factor IS the tele's own multiplier over the 13mm base).
+ */
+export function buildFocalStops(kind: DeviceKind, options: BuildFocalStopsOptions = {}): FocalStop[] {
   const base = isVirtual(kind) ? VIRTUAL_BASE_MM : SINGLE_BASE_MM;
   const zoomFor = (mm: number): number => mm / base;
   const stops: FocalStop[] = [];
@@ -41,6 +53,13 @@ export function buildFocalStops(kind: DeviceKind): FocalStop[] {
   stops.push({ mm: 26, lensId: 'wide', zoom: zoomFor(26) });
   stops.push({ mm: 35, lensId: 'wide', zoom: zoomFor(35) });
   stops.push({ mm: 52, lensId: 'wide', zoom: zoomFor(52) });
+  const teleZoom = options.teleZoom;
+  if (isVirtual(kind) && typeof teleZoom === 'number' && Number.isFinite(teleZoom) && teleZoom > 0) {
+    const teleMm = Math.round(VIRTUAL_BASE_MM * teleZoom);
+    if (teleMm > 52 && !stops.some((stop) => stop.mm === teleMm)) {
+      stops.push({ mm: teleMm, lensId: 'wide', zoom: teleZoom });
+    }
+  }
   return stops;
 }
 
@@ -48,4 +67,12 @@ export function buildFocalStops(kind: DeviceKind): FocalStop[] {
 export function defaultFocalStop(kind: DeviceKind): FocalStop {
   const base = isVirtual(kind) ? VIRTUAL_BASE_MM : SINGLE_BASE_MM;
   return { mm: 26, lensId: 'wide', zoom: 26 / base };
+}
+
+/** Convenience: tele stop for the dial when the device reports a tele zoom factor. */
+export function teleFocalStop(kind: DeviceKind, teleZoom: number): FocalStop | null {
+  if (!isVirtual(kind) || !(teleZoom > 0)) return null;
+  const teleMm = Math.round(VIRTUAL_BASE_MM * teleZoom);
+  if (teleMm <= 52) return null;
+  return { mm: teleMm, lensId: 'wide', zoom: teleZoom };
 }

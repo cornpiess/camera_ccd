@@ -284,11 +284,8 @@ function CameraAppScreen(): React.JSX.Element {
   const [apertureSimulated, setApertureSimulated] = useState<boolean>(false);
   // Developer-mode extra: side-view lens cross-section above the tick scale (default off).
   const [apertureSideView, setApertureSideView] = useState<boolean>(false);
-  // Demo honesty: the ultra-wide module has NO aperture mechanism at all — when it is
-  // engaged, the aperture strip is replaced by a fixed-aperture note (only the main
-  // module carries the aperture demo).
-  const isUltraWideEngaged =
-    currentFocalMm != null && focalStops.length > 1 && currentFocalMm === focalStops[0]?.mm;
+  // (The old ultra-wide fixed-aperture note is retired: simulated aperture keeps the
+  // ring live on every lens, so no lens disables the control anymore.)
   /** Continuous demo range for fixed-lens devices (like a fast compact: ƒ/1.48–ƒ/4). */
   const DEMO_APERTURE_RANGE = useMemo(() => ({ min: 1.48, max: 4 }), []);
 
@@ -406,7 +403,7 @@ function CameraAppScreen(): React.JSX.Element {
       try {
         const info = await CameraEngine.getAvailableLenses();
         const kind = (info?.kind ?? 'single') as DeviceKind;
-        const stops = buildFocalStops(kind);
+        const stops = buildFocalStops(kind, { teleZoom: info?.teleZoom ?? null });
         setFocalStops(stops);
         setCurrentFocalMm((previous) => previous ?? defaultFocalStop(kind).mm);
         const engaged = stops.find((stop) => stop.mm === (currentFocalMmRef.current ?? defaultFocalStop(kind).mm));
@@ -1084,36 +1081,30 @@ function CameraAppScreen(): React.JSX.Element {
           {/* Bottom control stack: the hero aperture ring + shutter row. */}
           {isCameraRunning && !permissionOverlayVisible && (
             <View style={[styles.bottomControlsContainer, { backgroundColor: skin.chrome }]} pointerEvents="box-none">
-              {isUltraWideEngaged ? (
-                // Ultra-wide module: no aperture mechanism exists — a fixed-aperture note
-                // replaces the whole control (honesty over fake controls, red line 4).
-                <View style={styles.ultraWideNote} pointerEvents="none">
-                  <Text style={styles.ultraWideNoteText}>超广角 · 固定光圈</Text>
-                </View>
-              ) : (
-                // Aperture ring: continuous (无极) — iris glyph + tick scale + thin
-                // centered accent pointer. Demo mode on fixed lenses is visual-only.
+              {
+                // Aperture ring: continuous (无极) on EVERY lens — simulated mode keeps
+                // it live on ultra-wide/tele (blur + starburst still apply per spec).
                 <ApertureBar
                 minAperture={
-                  supportsVariableAperture
-                    ? (apertureRange?.min ?? capabilitiesRef.current?.minAperture ?? 1.8)
+                  supportsVariableAperture || apertureSimulated
+                    ? (apertureRange?.min ?? capabilitiesRef.current?.minAperture ?? DEMO_APERTURE_RANGE.min)
                     : DEMO_APERTURE_RANGE.min
                 }
                 maxAperture={
-                  supportsVariableAperture
-                    ? (apertureRange?.max ?? capabilitiesRef.current?.maxAperture ?? 4)
+                  supportsVariableAperture || apertureSimulated
+                    ? (apertureRange?.max ?? capabilitiesRef.current?.maxAperture ?? DEMO_APERTURE_RANGE.max)
                     : DEMO_APERTURE_RANGE.max
                 }
                 currentAperture={currentAperture}
                 isVariableAperture={supportsVariableAperture || apertureSimulated || apertureDemoMode}
                 onApertureChange={handleApertureChange}
                 onApertureSettle={handleApertureSettle}
-                demoMode={!supportsVariableAperture && !apertureSimulated && apertureDemoMode}
+                simulatedMode={apertureSimulated}
                 sideViewEnabled={apertureSideView}
                 onToggleSideView={() => setApertureSideView((enabled) => !enabled)}
                 accent={skin.accent}
               />
-              )}
+              }
 
               {/* Bottom Actions Row: Recent Thumbnail & Shutter Button */}
               <View style={styles.bottomActionRow}>

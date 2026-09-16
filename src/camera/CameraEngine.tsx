@@ -91,7 +91,14 @@ type NativeCameraEngine = {
   applyProfile(profile: CameraProfile): Promise<void>;
   /** Read-only authorization probe; the system dialog only fires from startCamera. */
   getCameraAuthorizationStatus(): Promise<CameraAuthorizationStatus>;
-  getAvailableLenses(): Promise<{ kind: string; deviceModel: string }>;
+  getAvailableLenses(): Promise<{
+    kind: string;
+    deviceModel: string;
+    /** True when the device exposes a real ultra-wide (virtual device). */
+    ultraWide?: boolean;
+    /** Switchover zoom factor of the telephoto constituent (nil = no tele). */
+    teleZoom?: number | null;
+  }>;
   setLens(lensId: string): Promise<void>;
   /** Crop zoom (videoZoomFactor) on the ACTIVE lens; ≥1, applies to preview AND capture. */
   setZoomFactor(factor: number): Promise<void>;
@@ -209,7 +216,8 @@ export const getDiagnostics = (): Promise<EngineDiagnostics> => typed(NativeModu
 export const applyProfile = (profile: CameraProfile): Promise<void> => typed(NativeModule.applyProfile(profile));
 export const getCameraAuthorizationStatus = (): Promise<CameraAuthorizationStatus> =>
   typed(NativeModule.getCameraAuthorizationStatus());
-export const getAvailableLenses = (): Promise<{ kind: string; deviceModel: string }> =>
+export type LensInfo = { kind: string; deviceModel: string; ultraWide?: boolean; teleZoom?: number | null };
+export const getAvailableLenses = (): Promise<LensInfo> =>
   typed(NativeModule.getAvailableLenses());
 export const setLens = (lensId: string): Promise<void> => typed(NativeModule.setLens(lensId));
 export const setZoomFactor = (factor: number): Promise<void> => typed(NativeModule.setZoomFactor(factor));

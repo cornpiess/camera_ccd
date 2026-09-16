@@ -517,6 +517,9 @@ public final class CameraEngineModule: Module {
       Prop("cornerRadius") { (view: CameraEngineView, radius: Double?) in
         view.setCornerRadius(CGFloat(radius ?? 0))
       }
+      Prop("borderColor") { (view: CameraEngineView, color: String?) in
+        view.setBorderColor(color)
+      }
       OnViewDidUpdateProps { view in
         self.activeView = view
       }
@@ -832,6 +835,31 @@ public final class CameraEngineView: ExpoView {
     applyCornerRadius()
   }
 
+  private var borderColorStorage: UIColor?
+  /// Theme-accent hairline around the viewfinder card (质感边框). Nil = no border.
+  fileprivate func setBorderColor(_ hex: String?) {
+    func applyHex(_ hexString: String) -> UIColor? {
+      var value = hexString.trimmingCharacters(in: .whitespacesAndNewlines)
+      if value.hasPrefix("#") { value.removeFirst() }
+      guard value.count == 6, let rgb = UInt64(value, radix: 16) else { return nil }
+      return UIColor(red: CGFloat((rgb >> 16) & 0xFF) / 255.0,
+                     green: CGFloat((rgb >> 8) & 0xFF) / 255.0,
+                     blue: CGFloat(rgb & 0xFF) / 255.0, alpha: 1)
+    }
+    borderColorStorage = hex.flatMap(applyHex)
+    let color = borderColorStorage
+    for target in [layer, previewView?.layer] {
+      guard let target = target else { continue }
+      if let color {
+        target.borderWidth = 1.5
+        target.borderColor = color.cgColor
+      } else {
+        target.borderWidth = 0
+        target.borderColor = nil
+      }
+    }
+  }
+
   private func applyCornerRadius() {
     let radius = cornerRadiusStorage
     // UIView-level clipsToBounds (not just CALayer masks) so the Metal-backed subview
@@ -998,14 +1026,24 @@ public final class CameraEngineView: ExpoView {
     if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { device.whiteBalanceMode = .continuousAutoWhiteBalance }
   }
 
-  /// CAPTURE MAIN PATH (user directive, final): the 1× main photo path is the PHYSICAL
-  /// `builtInWideAngleCamera` — never a virtual multi-camera. Virtual devices start on
-  /// the ultra-wide constituent and rely on crossfade; the physical main lens delivers
-  /// Apple's best fully processed single-lens photo with OIS. The dial becomes
-  /// 26/35/52 (crop zoom on the main); the real 13mm ultra-wide stop is not available
-  /// on this path by design.
+  /// DEVICE SELECTION (user spec): real Ultra Wide / real Tele REQUIRE the virtual
+  /// device (system seamless crossfade between constituents). Preference:
+  /// triple -> dual -> dual-wide -> physical wide. The JS dial defaults to 26mm
+  /// (zoom 2.0 on virtual bodies), so the MAIN lens still owns the default capture.
+  /// Aperture capability is re-resolved per active physical lens (see zoom KVO).
   fileprivate static func preferredCaptureDevice() -> AVCaptureDevice? {
-    AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+    let types: [AVCaptureDevice.DeviceType] = [
+      .builtInTripleCamera,
+      .builtInDualCamera,
+      .builtInDualWideCamera,
+      .builtInWideAngleCamera,
+    ]
+    for type in types {
+      if let device = AVCaptureDevice.default(type, for: .video, position: .back) {
+        return device
+      }
+    }
+    return nil
   }
 
   private func configureSession() throws {
@@ -1333,8 +1371,26 @@ public final class CameraEngineView: ExpoView {
       case .builtInDualWideCamera: kind = "virtual-dual-wide"
       default: kind = "single"
       }
+      // CAPABILITY-BASED lens availability (no model names): virtual devices always
+      // contain the ultra-wide; a TELE exists only when the system publishes a
+      // switchover zoom factor BEYOND the main camera (last switchover = tele).
+      // Tele stop mm = 13 (virtual base) * teleZoom.
+      let isVirtual = kind.hasPrefix("virtual")
+      var teleZoom: Double? = nil
+      if isVirtual, device.responds(to: NSSelectorFromString("virtualDeviceSwitchOverVideoZoomFactors")),
+         let factors = device.value(forKey: "virtualDeviceSwitchOverVideoZoomFactors") as? [NSNumber] {
+        let sorted = factors.map(\.doubleValue).sorted()
+        if sorted.count >= 2, let last = sorted.last, last > 2.0 {
+          teleZoom = last
+        }
+      }
       DispatchQueue.main.async {
-        completion(.success(["kind": kind, "deviceModel": device.localizedName]))
+        completion(.success([
+          "kind": kind,
+          "deviceModel": device.localizedName,
+          "ultraWide": isVirtual,
+          "teleZoom": teleZoom ?? NSNull(),
+        ]))
       }
     }
   }
@@ -1390,6 +1446,9 @@ public final class CameraEngineView: ExpoView {
       if let zoom = (change?[.newKey] as? NSNumber)?.doubleValue {
         Self.zoomEventSink?(zoom)
       }
+      // A zoom switchover means the ACTIVE PHYSICAL LENS changed (wide <-> tele):
+      // re-resolve aperture capability per the current lens (spec section 10).
+      refreshApertureCapabilities()
       return
     }
     super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)

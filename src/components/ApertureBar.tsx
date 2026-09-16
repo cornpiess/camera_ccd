@@ -22,11 +22,11 @@ export interface ApertureBarProps {
    */
   readonly onApertureSettle?: (fStop: number) => void;
   /**
-   * Demo mode (fixed-lens devices, on by default): the ring is fully draggable for the
-   * feel, but the capture stays at the lens's fixed aperture. Always labeled DEMO so the
-   * simulation can never be mistaken for hardware control.
+   * TRUE when the unified aperture system routed to .simulated (capture-time blur +
+   * starburst on this lens); FALSE = .physical (real iris). Only selects the small
+   * mode caption — the ring itself behaves identically either way.
    */
-  readonly demoMode?: boolean;
+  readonly simulatedMode?: boolean;
   /** Camera identity accent — pointer line, value and iris rim wear the camera skin. */
   readonly accent?: string;
   /**
@@ -46,8 +46,9 @@ const FULL_DRAG_PX = 400;
 const BAND_SPAN = TRACK_WIDTH * 3;
 /** Detent grid: one click per 0.1 f-number (ƒ/1.5 → ƒ/1.6 → … ƒ/4.0), like a tight lens ring. */
 const FSTEPS_PER_TENTH = 10;
-/** Ruler-style scale: 96 ticks per stop — half the previous spacing, ruler-dense. */
-const TICKS_PER_STOP = 96;
+/** Ruler-style scale: 48 ticks per stop - previous count halved for controllability,
+  * while the minimum tick width stays 1px so spacing reads looser, not denser. */
+const TICKS_PER_STOP = 48;
 /** The tick BASELINE: horizontally level with the iris glyph's center (the aperture hole). */
 const TICK_BASELINE = BAR_HEIGHT / 2 - 8; // in trackClip coords (clip starts at top: 8)
 /** Iris sits to the LEFT of the track so the pointer line stays exactly on the shutter axis. */
@@ -81,7 +82,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   isVariableAperture,
   onApertureChange,
   onApertureSettle,
-  demoMode = false,
+  simulatedMode = false,
   accent,
   sideViewEnabled = false,
   onToggleSideView,
@@ -150,6 +151,10 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   );
   const tRef = useRef(0);
   useEffect(() => {
+    // JUMP FIX: while the finger owns the ring, native settle echoes / capability
+    // reloads push a DIFFERENT f-number through props; animating to it mid-drag is
+    // what snapped the band between the scale extremes. The finger wins until release.
+    if (draggingRef.current) return;
     const t = 1 - openness; // band coordinate: 0 = wide open end (left), 1 = stopped down
     tRef.current = t;
     animateBandTo(t);
@@ -161,6 +166,12 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   const dragState = useRef({ startOpenness: 0, active: false });
   const lastDetentRef = useRef<number | null>(null);
   const [dragging, setDragging] = useState(false);
+  // Mirror for stable reads inside effects/handlers.
+  const draggingRef = useRef(false);
+  const setDraggingState = (value: boolean) => {
+    draggingRef.current = value;
+    setDragging(value);
+  };
 
   const interactive = isVariableAperture && hi > lo;
   const trackLeft = screenWidth / 2 - TRACK_WIDTH / 2;
@@ -196,7 +207,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
         onMoveShouldSetPanResponder: () => dragValuesRef.current.interactive,
         onPanResponderGrant: () => {
           dragState.current = { startOpenness: dragValuesRef.current.openness, active: true };
-          setDragging(true);
+          setDraggingState(true);
           lastDetentRef.current = detentIndexFor(dragValuesRef.current.currentAperture);
         },
         onPanResponderMove: (_evt, gestureState) => {
@@ -224,12 +235,12 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
         },
         onPanResponderRelease: () => {
           dragState.current.active = false;
-          setDragging(false);
+          setDraggingState(false);
           settleAtLastPosition();
         },
         onPanResponderTerminate: () => {
           dragState.current.active = false;
-          setDragging(false);
+          setDraggingState(false);
           settleAtLastPosition();
         },
       }),
@@ -304,16 +315,17 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
         </TouchableOpacity>
       ) : null}
 
-      {(!isVariableAperture || demoMode) ? (
+      {
+        // Small mode caption: 真实光圈 = real hardware iris; 模拟光圈 = simulated.
         <View
-          style={[styles.demoBadge, { left: irisLeft }, demoMode && accent ? { borderColor: hexToRgba(accent, 0.55) } : null]}
+          style={[styles.demoBadge, { left: irisLeft }, accent ? { borderColor: hexToRgba(accent, 0.55) } : null]}
           pointerEvents="none"
         >
-          <Text style={[styles.demoBadgeText, demoMode && accent ? { color: accent } : null]}>
-            {demoMode ? 'DEMO' : 'FIXED'}
+          <Text style={[styles.demoBadgeText, accent ? { color: accent } : null]}>
+            {simulatedMode ? '模拟光圈' : '真实光圈'}
           </Text>
         </View>
-      ) : null}
+      }
     </View>
   );
 };
