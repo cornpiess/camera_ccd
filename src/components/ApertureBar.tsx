@@ -22,11 +22,11 @@ export interface ApertureBarProps {
    */
   readonly onApertureSettle?: (fStop: number) => void;
   /**
-   * TRUE when the unified aperture system routed to .simulated (capture-time blur +
-   * starburst on this lens); FALSE = .physical (real iris). Only selects the small
-   * mode caption — the ring itself behaves identically either way.
+   * TRUE (fixed lens): the ring is not draggable and shows the lens's real mechanical
+   * aperture ("固定光圈"). FALSE: real variable iris ("真实光圈"). Caption only —
+   * the ring mechanics are identical either way.
    */
-  readonly simulatedMode?: boolean;
+  readonly fixedMode?: boolean;
   /** Camera identity accent — pointer line, value and iris rim wear the camera skin. */
   readonly accent?: string;
   /**
@@ -82,7 +82,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   isVariableAperture,
   onApertureChange,
   onApertureSettle,
-  simulatedMode = false,
+  fixedMode = false,
   accent,
   sideViewEnabled = false,
   onToggleSideView,
@@ -322,7 +322,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
           pointerEvents="none"
         >
           <Text style={[styles.demoBadgeText, accent ? { color: accent } : null]}>
-            {simulatedMode ? '模拟光圈' : '真实光圈'}
+            {fixedMode ? '固定光圈' : '真实光圈'}
           </Text>
         </View>
       }

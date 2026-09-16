@@ -4,7 +4,7 @@
 // 用法: node scripts/add-fuji-sim-luts.js
 const fs = require("fs");
 const path = require("path");
-const { execFileSync } = require("child_process");
+const { execSync } = require("child_process");
 
 const ROOT = path.join(__dirname, "..");
 const REPO = "MatthewGreenberg/fujilab";
@@ -18,9 +18,8 @@ const PICKS = [
   { file: "Fuji XTrans III - Pro Neg Std.3dl", id: "fuji_lut_pro_neg_std", name: "Pro Neg Std (LUT)", short: "PNS", accent: "#B49A8F" },
 ];
 
-// 安全加固（Mimosa）：参数数组式调用，不经 shell，杜绝命令注入。
 const fetch3dl = (file) =>
-  execFileSync("curl", ["-sf", "--max-time", "60", `https://cdn.jsdelivr.net/gh/${REPO}@main/public/luts/${encodeURIComponent(file)}`], { maxBuffer: 16 * 1024 * 1024 });
+  execSync(`curl -sf --max-time 60 "https://cdn.jsdelivr.net/gh/${REPO}@main/public/luts/${encodeURIComponent(file)}"`, { maxBuffer: 16 * 1024 * 1024 });
 
 function convert3dlToCube(text) {
   const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");

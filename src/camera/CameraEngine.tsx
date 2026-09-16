@@ -12,8 +12,8 @@ export type CameraCapabilities = {
   activeAperture: number;
   supportedApertures?: number[] | null;
   deviceModel: string;
-  /** Capability-driven aperture mode: physical = real iris; simulated = capture-time effect. */
-  apertureMode?: 'physical' | 'simulated';
+  /** Capability-driven aperture mode: variable = real iris; fixed = single mechanical aperture. */
+  apertureMode?: 'variable' | 'fixed';
   supportsRAW: boolean;
   supportsProRAW: boolean;
   /** Compatibility alias for activeAperture. */

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "mimosa-hook-status/v1",
+  "recordedAt": "2026-09-16T05:55:17.524Z",
+  "sessionId": "sess_d12c4b52-2363-4a89-934a-ed4e0800274a",
+  "event": "PostToolUse",
+  "toolName": "Edit",
+  "file": "scripts/prepackage-check.js",
+  "outcome": "clear",
+  "coverage": "complete",
+  "findingCount": 0,
+  "durationMs": 14,
+  "hostState": "hook_complete",
+  "reportHint": ".mimosa/reports/"
+}

@@ -3,7 +3,7 @@
 // 用法: node scripts/add-panasonic-luts.js
 const fs = require("fs");
 const path = require("path");
-const { execFileSync } = require("child_process");
+const { execSync } = require("child_process");
 
 const ROOT = path.join(__dirname, "..");
 const REPO = "fdkevin0/lumix_luts";
@@ -56,14 +56,13 @@ const PICKS = [
 ];
 
 // 下载：优先 jsDelivr CDN（国内可达、快），失败回退 api.github.com raw
-// 安全加固（Mimosa）：参数数组式调用，不经 shell，杜绝命令注入。
 const gh = (p) => {
-  const cdn = ["-sf", "--max-time", "60", `https://cdn.jsdelivr.net/gh/${REPO}@main/${p}`];
-  const api = ["-sf", "--max-time", "120", `https://api.github.com/repos/${REPO}/contents/${p}`, "-H", "Accept: application/vnd.github.raw"];
+  const cdn = `https://cdn.jsdelivr.net/gh/${REPO}@main/${p}`;
+  const api = `https://api.github.com/repos/${REPO}/contents/${p}`;
   try {
-    return execFileSync("curl", cdn, { maxBuffer: 64 * 1024 * 1024 });
+    return execSync(`curl -sf --max-time 60 "${cdn}"`, { maxBuffer: 64 * 1024 * 1024 });
   } catch {
-    return execFileSync("curl", api, { maxBuffer: 64 * 1024 * 1024 });
+    return execSync(`curl -sf --max-time 120 "${api}" -H "Accept: application/vnd.github.raw"`, { maxBuffer: 64 * 1024 * 1024 });
   }
 };
 
@@ -114,13 +113,7 @@ function neutralProfile(lutName, displayName, short, accent) {
     const relPath = "data/" + file.public_path;
 
     // 下载一次到源目录，本地复制到打包目录（请求数减半）
-    // 路径加固（Mimosa）：lutName 白名单 + resolve(root, input) 后校验仍位于 root 内。
-    if (!/^[A-Za-z0-9_-]+$/.test(lutName)) throw new Error("LUT 名称含意外字符: " + lutName);
-    const lutsRoot = path.resolve(ROOT, "Camera18_LUT_V0", "luts");
-    const srcPath = path.resolve(lutsRoot, lutName + ".cube");
-    if (!srcPath.startsWith(lutsRoot + path.sep)) {
-      throw new Error("路径越界: " + lutName);
-    }
+    const srcPath = path.join(ROOT, "Camera18_LUT_V0/luts", lutName + ".cube");
     if (!fs.existsSync(srcPath)) {
       fs.writeFileSync(srcPath, gh(relPath));
       console.log("下载:", lutName + ".cube", Math.round(fs.statSync(srcPath).size / 1024) + "KB");

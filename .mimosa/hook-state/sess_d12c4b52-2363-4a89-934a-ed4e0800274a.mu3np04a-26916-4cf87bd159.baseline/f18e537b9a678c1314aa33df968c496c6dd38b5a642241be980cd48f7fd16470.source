@@ -144,13 +144,10 @@ step('密钥红线扫描', () => {
   const exts = new Set(['.ts', '.tsx', '.js', '.json', '.md', '.swift', '.yml', '.sh', '.podspec']);
   const offenders = [];
   const walk = (dir) => {
-    const scanRoot = path.resolve(dir);
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (entry.name.startsWith('.') && entry.name !== '.github') continue;
       if (skip.has(entry.name)) continue;
-      const full = path.resolve(dir, entry.name);
-      // 路径加固（Mimosa）：解析后必须仍在扫描根目录内。
-      if (!full.startsWith(scanRoot + path.sep) && full !== scanRoot) continue;
+      const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(full);
       } else if (exts.has(path.extname(entry.name))) {

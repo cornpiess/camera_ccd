@@ -281,13 +281,11 @@ function CameraAppScreen(): React.JSX.Element {
   // Capability-driven SIMULATED aperture (native .simulated mode): the ring stays a real
   // control — the chosen f-number drives capture-time blur/starburst — but the lens has
   // no physical iris, so it is NOT "variable hardware".
-  const [apertureSimulated, setApertureSimulated] = useState<boolean>(false);
+  const [apertureVariable, setApertureVariable] = useState<boolean>(false);
   // Developer-mode extra: side-view lens cross-section above the tick scale (default off).
   const [apertureSideView, setApertureSideView] = useState<boolean>(false);
   // (The old ultra-wide fixed-aperture note is retired: simulated aperture keeps the
   // ring live on every lens, so no lens disables the control anymore.)
-  /** Continuous demo range for fixed-lens devices (like a fast compact: ƒ/1.48–ƒ/4). */
-  const DEMO_APERTURE_RANGE = useMemo(() => ({ min: 1.48, max: 4 }), []);
 
   // -------------------------------------------------------------
   // 4b. Formal Camera Selector (top-badge entry) & Tap-to-Focus states
@@ -365,8 +363,8 @@ function CameraAppScreen(): React.JSX.Element {
               : reportedStops.length > 1;
           const variable = Boolean(capabilities.supportsVariableAperture) && spanOK;
           setSupportsVariableAperture(variable);
-          const simulated = capabilities.apertureMode === 'simulated';
-          setApertureSimulated(simulated);
+          const variableMode = capabilities.apertureMode === 'variable';
+          setApertureVariable(variableMode);
           const aperture = capabilities.activeAperture ?? capabilities.activeLensAperture ?? 1.8;
           confirmedApertureRef.current = aperture;
           setActiveAperture(aperture);
@@ -382,16 +380,19 @@ function CameraAppScreen(): React.JSX.Element {
             } else {
               setApertureRange(null);
             }
-          } else if (simulated) {
-            // Simulation grid — same f/1.4-4 range as the physical iris (unified ring).
-            setApertureRange({ min: 1.4, max: 4 });
+          } else if (variableMode) {
+            // Variable iris: the REAL range/stops from capabilities (native spec).
+            setApertureRange({
+              min: capabilities.minAperture ?? 0,
+              max: capabilities.maxAperture ?? 0,
+            });
           } else {
             setApertureRange(null);
           }
         }
       } catch {
         setSupportsVariableAperture(false);
-        setApertureSimulated(false);
+        setApertureVariable(false);
         confirmedApertureRef.current = 1.8;
         setActiveAperture(1.8);
         setCurrentAperture(1.8);
@@ -497,20 +498,17 @@ function CameraAppScreen(): React.JSX.Element {
   // optics handle it. Neutral factors on fixed lenses keep profiles exactly as calibrated.
   const apertureVisual = useMemo(
     () => {
-      const demo = !supportsVariableAperture && !apertureSimulated && apertureDemoMode;
-      const range = supportsVariableAperture
+      const range = apertureVariable
         ? (apertureRange ?? { min: capabilitiesRef.current?.minAperture ?? null, max: capabilitiesRef.current?.maxAperture ?? null })
-        : (apertureSimulated
-          ? (apertureRange ?? { min: 1.4, max: 4 })
-          : (demo ? DEMO_APERTURE_RANGE : { min: null, max: null }));
+        : { min: null, max: null };
       return apertureVisualFactors(
         currentAperture,
-        supportsVariableAperture || apertureSimulated || demo,
+        apertureVariable,
         range.min,
         range.max,
       );
     },
-    [currentAperture, supportsVariableAperture, apertureSimulated, apertureDemoMode, DEMO_APERTURE_RANGE, apertureRange],
+    [currentAperture, supportsVariableAperture, apertureVariable, apertureRange],
   );
   const effectiveProfile = useMemo(
     () => (activeProfile ? applyApertureVisual(activeProfile as unknown as Record<string, unknown>, apertureVisual) : null),
@@ -534,7 +532,7 @@ function CameraAppScreen(): React.JSX.Element {
     preferredApertureProfileRef.current = activeProfile.id;
     const preferred = activeProfile.aperture?.preferred;
     if (typeof preferred !== 'number' || !Number.isFinite(preferred) || preferred <= 0) return;
-    if (supportsVariableAperture || apertureSimulated) {
+    if (apertureVariable) {
       const min = capabilitiesRef.current?.minAperture ?? apertureRange?.min ?? preferred;
       const max = capabilitiesRef.current?.maxAperture ?? apertureRange?.max ?? preferred;
       const clamped = Math.min(Math.max(preferred, min), max);
@@ -550,7 +548,7 @@ function CameraAppScreen(): React.JSX.Element {
       setCurrentAperture(preferred);
       setActiveAperture(preferred);
     }
-  }, [activeProfile, isCameraRunning, supportsVariableAperture, apertureSimulated, apertureRange]);
+  }, [activeProfile, isCameraRunning, apertureVariable, apertureRange]);
 
   // Native -> ApertureState sync: the Camera Control slider (and any native aperture
   // source) flows back here so the SCREEN RING always shows the same f-number. There is
@@ -609,7 +607,7 @@ function CameraAppScreen(): React.JSX.Element {
   // lockForConfiguration commands on the native session queue per drag (capture lag
   // right after a drag, and a command storm on real variable-aperture hardware).
   const handleApertureChange = (aperture: number) => {
-    if (!supportsVariableAperture && !apertureSimulated && !apertureDemoMode) {
+    if (!apertureVariable) {
       // Fixed devices without the demo ring never move.
       return;
     }
@@ -621,7 +619,7 @@ function CameraAppScreen(): React.JSX.Element {
   // Reverts to the last confirmed stop when the hardware rejects, and self-heals a lens
   // misreported as variable (iOS 27 quirk) by demoting to fixed + DEMO for the session.
   const handleApertureSettle = (aperture: number) => {
-    if (!supportsVariableAperture && !apertureSimulated) return;
+    if (!apertureVariable) return;
     const min = capabilitiesRef.current?.minAperture ?? apertureRange?.min ?? aperture;
     const max = capabilitiesRef.current?.maxAperture ?? apertureRange?.max ?? aperture;
     const clamped = Math.min(Math.max(aperture, min), max);
@@ -1082,24 +1080,24 @@ function CameraAppScreen(): React.JSX.Element {
           {isCameraRunning && !permissionOverlayVisible && (
             <View style={[styles.bottomControlsContainer, { backgroundColor: skin.chrome }]} pointerEvents="box-none">
               {
-                // Aperture ring: continuous (无极) on EVERY lens — simulated mode keeps
-                // it live on ultra-wide/tele (blur + starburst still apply per spec).
+                // Aperture ring: draggable ONLY on a variable-iris lens; a fixed
+                // lens shows its real mechanical aperture (no drag, no simulation).
                 <ApertureBar
                 minAperture={
-                  supportsVariableAperture || apertureSimulated
-                    ? (apertureRange?.min ?? capabilitiesRef.current?.minAperture ?? DEMO_APERTURE_RANGE.min)
-                    : DEMO_APERTURE_RANGE.min
+                  apertureVariable
+                    ? (apertureRange?.min ?? capabilitiesRef.current?.minAperture ?? currentAperture)
+                    : currentAperture
                 }
                 maxAperture={
-                  supportsVariableAperture || apertureSimulated
-                    ? (apertureRange?.max ?? capabilitiesRef.current?.maxAperture ?? DEMO_APERTURE_RANGE.max)
-                    : DEMO_APERTURE_RANGE.max
+                  apertureVariable
+                    ? (apertureRange?.max ?? capabilitiesRef.current?.maxAperture ?? currentAperture)
+                    : currentAperture
                 }
                 currentAperture={currentAperture}
-                isVariableAperture={supportsVariableAperture || apertureSimulated || apertureDemoMode}
+                isVariableAperture={apertureVariable}
                 onApertureChange={handleApertureChange}
                 onApertureSettle={handleApertureSettle}
-                simulatedMode={apertureSimulated}
+                fixedMode={!apertureVariable}
                 sideViewEnabled={apertureSideView}
                 onToggleSideView={() => setApertureSideView((enabled) => !enabled)}
                 accent={skin.accent}

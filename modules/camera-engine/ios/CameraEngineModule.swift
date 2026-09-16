@@ -6,7 +6,6 @@ import CoreFoundation
 import ImageIO
 import CoreMotion
 import AudioToolbox
-import Vision
 import UIKit
 import MetalKit
 
@@ -59,84 +58,13 @@ private extension CameraEngineError {
   }
 }
 
-// MARK: - Camera 18 Aperture Spec (THE single range source)
-/// One aperture range for the WHOLE app — screen ring, Camera Control slider, simulated
-/// blur and simulated starburst all read THIS. The spec comes from a REAL physical
-/// variable-aperture device: the first time capability detection resolves .physical,
-/// the live activeFormat values are captured and persisted to Documents. Simulated
-/// devices then use exactly that range — no invented f-numbers anywhere. Fallback when
-/// no capture exists yet: the range recorded in this repo (f/1.48-f/4, see App.tsx
-/// DEMO_APERTURE_RANGE and the CineStill profile's 1.48 preferred), stops empty (they
-/// are only ever filled from REAL device reports).
-struct Camera18ApertureSpec {
-  /// Session-latest captured spec (nil until a physical device reports one).
-  static var current: Camera18ApertureSpec?
-  let min: Float
-  let max: Float
-  let stops: [Float]
-
-  /// Repo-recorded range (NOT invented): 1.48-4 appears in DEMO_APERTURE_RANGE and the
-  /// CineStill profile. Stops stay empty until a physical device reports them.
-  static let recordedFallback = Camera18ApertureSpec(min: 1.48, max: 4.0, stops: [])
-
-  static var persistenceURL: URL {
-    FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("camera18-aperture-spec.json")
-  }
-
-  /// Capture from a CONFIRMED physical device (call only when capabilityMode == .physical).
-  @discardableResult
-  static func capture(device: AVCaptureDevice) -> Camera18ApertureSpec? {
-    let format = device.activeFormat as NSObject
-    guard format.responds(to: NSSelectorFromString("minLensAperture")),
-          format.responds(to: NSSelectorFromString("maxLensAperture")),
-          let minValue = (format.value(forKey: "minLensAperture") as? NSNumber)?.floatValue,
-          let maxValue = (format.value(forKey: "maxLensAperture") as? NSNumber)?.floatValue,
-          minValue > 0, maxValue > minValue
-    else { return nil }
-    var stops: [Float] = []
-    if format.responds(to: NSSelectorFromString("recommendedLensApertureStops")),
-       let raw = format.value(forKey: "recommendedLensApertureStops") as? [NSNumber] {
-      stops = raw.map(\.floatValue).sorted()
-    }
-    let spec = Camera18ApertureSpec(min: minValue, max: maxValue, stops: stops)
-    current = spec
-    persist(spec)
-    print("[CameraEngine][Diag] Camera18ApertureSpec CAPTURED from physical device: \(minValue)-\(maxValue) stops=\(stops)")
-    return spec
-  }
-
-  /// Load order: in-memory capture of this session -> persisted capture -> repo fallback.
-  static func load() -> Camera18ApertureSpec {
-    if let current { return current }
-    if let data = try? Data(contentsOf: persistenceURL),
-       let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-       let minValue = (root["min"] as? NSNumber)?.floatValue,
-       let maxValue = (root["max"] as? NSNumber)?.floatValue,
-       minValue > 0, maxValue > minValue {
-      let stops = (root["stops"] as? [NSNumber])?.map(\.floatValue) ?? []
-      let spec = Camera18ApertureSpec(min: minValue, max: maxValue, stops: stops)
-      current = spec
-      return spec
-    }
-    return recordedFallback
-  }
-
-  static func persist(_ spec: Camera18ApertureSpec) {
-    let payload: [String: Any] = ["min": spec.min, "max": spec.max, "stops": spec.stops]
-    if let data = try? JSONSerialization.data(withJSONObject: payload) {
-      try? data.write(to: persistenceURL, options: .atomic)
-    }
-  }
-}
-
 // MARK: - Unified Aperture System (capability-driven, never model-name-driven)
-///   physical  — current lens + activeFormat + system API expose real variable aperture
-///   simulated — everything else; f/1.4-f/16 grid, capture-time simulation only
-/// The UI never knows which one is active: it calls setAperture(fNumber) either way.
+///   variable — the CURRENT lens + activeFormat + system API expose a real variable iris
+///   fixed    — the CURRENT lens has a single mechanical aperture; the UI shows it and
+///              does not drag; Camera 18 simulates NOTHING (no blur/starburst/exposure)
 enum ApertureMode {
-  case physical
-  case simulated
+  case variable
+  case fixed
 }
 
 // MARK: - Aperture Controller Abstraction
@@ -146,16 +74,12 @@ enum ApertureMode {
 /// true aperture-priority (hardware aperture under our control, shutter/ISO stay auto),
 /// with the real range in `activeFormat.minLensAperture / maxLensAperture` and the
 /// hardware detents in `activeFormat.recommendedLensApertureStops`.
-/// Devices WITHOUT a variable aperture enter .simulated mode: the ring keeps working and
-/// the chosen f-number drives capture-time ApertureSimulationProcessor (person-mask
-/// background blur + highlight starburst) — no brightness fakery, no fake bokeh overlays.
+/// Devices WITHOUT a variable aperture report their single real mechanical aperture;
+/// the UI shows it fixed and is not draggable. Camera 18 simulates no optics.
 final class ApertureController {
   /// Resolved from CAPABILITY (device + activeFormat + API presence), refreshed on every
-  /// getCapabilities/setAperture. Defaults to .simulated — the honest default.
-  var mode: ApertureMode = .simulated
-  /// Last f-number set while in .simulated mode (consumed by ApertureSimulationProcessor
-  /// at capture time). Physical mode reads the lens truth via getCapabilities instead.
-  private(set) var simulatedFNumber: Float = 1.8
+  /// getCapabilities/setAperture. Defaults to .fixed — the honest default.
+  var mode: ApertureMode = .fixed
 
   /// Capability detection: physical iff the CURRENT device + activeFormat satisfy ALL of
   /// - non-degenerate variable-aperture range (min < max),
@@ -169,14 +93,14 @@ final class ApertureController {
     // obtainable — without them AE cannot compensate aperture changes and the frame
     // darkens (frozen shutter/ISO). Capability = range + stops + setter + supports
     // check + live auto sentinels. All of it, or simulated.
-    guard autoSentinels() != nil else { return .simulated }
+    guard autoSentinels() != nil else { return .fixed }
     guard let device,
           let range = variableApertureRange(device),
           (range.stops?.count ?? 0) > 1,
           device.responds(to: NSSelectorFromString("setExposureModeCustomWithLensAperture:duration:ISO:completionHandler:")),
           supportsExposureModeCustom(device.activeFormat, aperture: Float(range.min))
-    else { return .simulated }
-    return .physical
+    else { return .fixed }
+    return .variable
   }
 
   /// Dynamic availability check for the iOS 27 aperture/exposure combination. Compiled
@@ -203,7 +127,7 @@ final class ApertureController {
     pendingPhysical?.cancel()
     let work = DispatchWorkItem { [weak self] in
       guard let self else { return }
-      mode = .physical
+      mode = .variable
       setPhysicalAperture(Double(fStop), on: device, completion: completion)
     }
     pendingPhysical = work
@@ -325,20 +249,16 @@ final class ApertureController {
   }
 
   /// UNIFIED ENTRY POINT (the only thing the UI path ever calls). Resolves the mode from
-  /// capability, then routes: physical -> real AVFoundation lens control; simulated ->
-  /// store the f-number for ApertureSimulationProcessor at capture time (no error, no
-  /// brightness fakery). Never hangs: simulated settles immediately on main.
+  /// capability, then routes: variable -> real AVFoundation lens control. On a FIXED
+  /// lens the UI shows the real mechanical aperture and is not draggable, so this only
+  /// ever executes on .variable lenses.
   func setAperture(_ fStop: Float, on device: AVCaptureDevice?, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
     mode = capabilityMode(for: device)
-    switch mode {
-    case .physical:
-      setPhysicalAperture(Double(fStop), on: device, completion: completion)
-    case .simulated:
-      // RANGE CONTRACT: matches the iPhone 18 Pro physical iris (f/1.4-f/4) so the ring
-      // behaves identically whether capability routed physical or simulated.
-      simulatedFNumber = min(4.0, max(1.4, fStop))
-      DispatchQueue.main.async { completion(.success(())) }
+    guard mode == .variable else {
+      completion(.failure(.apertureUnsupported))
+      return
     }
+    setPhysicalAperture(Double(fStop), on: device, completion: completion)
   }
 
   /// Set the physical lens aperture (aperture-priority: shutter and ISO stay automatic
@@ -362,21 +282,18 @@ final class ApertureController {
     }
 
     guard let range = variableApertureRange(device) else {
-      // Capability flipped away from physical between route and call — degrade to
-      // simulated silently (store the value), never surface an error to the UI.
-      simulatedFNumber = Float(min(4.0, max(1.4, fStop)))
-      mode = .simulated
-      DispatchQueue.main.async { completion(.success(())) }
+      // Capability flipped away from variable between route and call - honest failure.
+      mode = .fixed
+      DispatchQueue.main.async { completion(.failure(.apertureUnsupported)) }
       return
     }
     // APERTURE PRIORITY GUARD: the format must accept (target aperture + auto shutter +
     // auto ISO). Shutter and ISO are NEVER locked — Apple auto exposure compensates the
     // light change, so .quality still gets full multi-frame fusion (user directive).
     if !supportsExposureModeCustom(device.activeFormat, aperture: Float(min(max(fStop, range.min), range.max))) {
-      // Combination unsupported on this format — honest degrade to simulated.
-      simulatedFNumber = Float(min(4.0, max(1.4, fStop)))
-      mode = .simulated
-      DispatchQueue.main.async { completion(.success(())) }
+      // Combination unsupported on this format - honest failure, no simulation.
+      mode = .fixed
+      DispatchQueue.main.async { completion(.failure(.apertureUnsupported)) }
       return
     }
     // NO FREEZING FALLBACK: without the system auto sentinels the physical aperture
@@ -1258,8 +1175,6 @@ public final class CameraEngineView: ExpoView {
         compiled: self.compiledSnapshot(.processedPhoto),
         appliedZoom: appliedZoom,
         equivalentFocalMM: equivalentFocalMM,
-        apertureMode: self.apertureMode,
-        simulatedFNumber: self.simulatedFNumber,
       ) { [weak self] result, detail in
         self?.sessionQueue.async { self?.captureDelegates.removeValue(forKey: id) }
         completion(result, detail)
@@ -1269,12 +1184,11 @@ public final class CameraEngineView: ExpoView {
     }
   }
 
-  // Aperture state for the CAPTURE path (consumed by ApertureSimulationProcessor).
+  // Aperture capability for the CAPTURE path (drives real iris vs fixed UI).
   // Defaults mirror the controller so captures taken before any ring touch are sane
   // (f/1.8 simulated would blur — but the processor skips when no person mask exists,
   // and the DEFAULT aperture state on fixed-lens devices is resolved by capabilities).
-  fileprivate var apertureMode: ApertureMode = .simulated
-  fileprivate var simulatedFNumber: Float = 1.8
+  fileprivate var apertureMode: ApertureMode = .fixed
   // Camera Control (hardware side button): retained controls + interaction objects.
   private var cameraControlObjects: [AnyObject] = []
   // The module owns the controller; the view keeps a weak ref for control callbacks.
@@ -1300,7 +1214,6 @@ public final class CameraEngineView: ExpoView {
       controller.setAperture(Float(fStop), on: device) { result in
         if case .success = result {
           self.apertureMode = controller.mode
-          self.simulatedFNumber = controller.simulatedFNumber
           // ApertureState fan-out: the screen ring and the Camera Control slider stay
           // numerically in sync through this single channel.
           Self.apertureEventSink?(Double(fStop))
@@ -1431,15 +1344,11 @@ public final class CameraEngineView: ExpoView {
     if context == &apertureSliderKvoContext {
       guard let slider = object as? NSObject,
             let value = (slider.value(forKey: "value") as? NSNumber)?.doubleValue else { return }
-      if let controller = apertureControllerRef, let device = camera {
-        if controller.mode == .physical {
-          controller.requestCoalescedPhysicalAperture(Float(value), on: device) { _ in }
-        } else {
-          controller.setAperture(Float(value), on: device) { _ in }
-        }
+      if let controller = apertureControllerRef, controller.mode == .variable,
+         let device = camera {
+        controller.requestCoalescedPhysicalAperture(Float(value), on: device) { _ in }
+        Self.apertureEventSink?(value)
       }
-      simulatedFNumber = Float(value)
-      Self.apertureEventSink?(value)
       return
     }
     if context == &zoomKvoContext {
@@ -1462,10 +1371,7 @@ public final class CameraEngineView: ExpoView {
       let mode = controller.capabilityMode(for: device)
       controller.mode = mode
       self.apertureMode = mode
-      if mode == .simulated {
-        self.simulatedFNumber = min(4.0, max(1.4, self.simulatedFNumber))
-      }
-      print("[CameraEngine][Diag] aperture capability refresh: mode=\(mode == .physical ? "physical" : "simulated") device=\(device.localizedName)")
+      print("[CameraEngine][Diag] aperture capability refresh: mode=\(mode == .variable ? "variable" : "fixed") device=\(device.localizedName)")
     }
   }
 
@@ -1483,11 +1389,21 @@ public final class CameraEngineView: ExpoView {
       print("[CameraEngine][Diag] Camera Control: session does not support controls on this device")
       return
     }
+    // Aperture slider ONLY when the current lens has a real variable iris (capability);
+    // a fixed lens skips it entirely (Camera Control keeps the zoom slider).
+    controller.mode = controller.capabilityMode(for: device)
+    let variableIris = controller.mode == .variable
     let caps = controller.getCapabilities(device: device).asDictionary
     let minimum = (caps["minAperture"] as? Double) ?? 1.4
     let maximum = (caps["maxAperture"] as? Double) ?? 4.0
     let stops = (caps["supportedApertures"] as? [Double]) ?? []
 
+    // Aperture slider ONLY when the current lens has a real variable iris (capability);
+    // a fixed lens skips it entirely (Camera Control keeps the zoom slider).
+    guard variableIris else {
+      print("[CameraEngine][Diag] Camera Control: fixed lens - aperture slider skipped (zoom only)")
+      return
+    }
     // The init labels are not visible in the Swift interface (CI-proven), so construct
     // the slider through the ObjC runtime, trying the documented selectors in order.
     // No selector matching -> aperture slider skipped; Camera Control still offers zoom.
@@ -1572,16 +1488,16 @@ public final class CameraEngineView: ExpoView {
 
       var caps = controller.getCapabilities(device: device).asDictionary
 
-      // UNIFIED APERTURE: resolve the mode from capability and expose it. In simulated
-      // mode the RING still spans f/1.4-f/16 (the simulation grid) so the UI stays a
-      // working aperture control; supportsVariableAperture remains the PHYSICAL truth.
+      // UNIFIED APERTURE: resolve the mode from capability and expose it. .fixed lenses
+      // report their single mechanical aperture in min/max (UI shows it, no drag).
       let apertureMode = controller.capabilityMode(for: device)
       controller.mode = apertureMode
       self.apertureMode = apertureMode
-      caps["apertureMode"] = apertureMode == .physical ? "physical" : "simulated"
-      if apertureMode == .simulated {
-        caps["minAperture"] = 1.4
-        caps["maxAperture"] = 4.0
+      caps["apertureMode"] = apertureMode == .variable ? "variable" : "fixed"
+      if apertureMode == .fixed {
+        let fixedAperture = controller.currentAperture(device)
+        caps["minAperture"] = Double(fixedAperture)
+        caps["maxAperture"] = Double(fixedAperture)
         caps["supportedApertures"] = NSNull()
       }
 
@@ -1639,11 +1555,6 @@ extension CameraEngineView: AVCaptureVideoDataOutputSampleBufferDelegate {
     if longest > previewCap {
       let downscale = previewCap / longest
       image = image.transformed(by: CGAffineTransform(scaleX: downscale, y: downscale))
-    }
-    // SIMULATED APERTURE (preview): starburst only (no Vision per frame - user spec).
-    // Same StarburstProcessor as the final photo, at 1280px.
-    if apertureMode == .simulated {
-      image = StarburstProcessor.apply(image, fNumber: simulatedFNumber)
     }
     if let compiled = compiledSnapshot(.videoFrame) {
       image = CameraDNARenderer.apply(compiled, to: image)
@@ -1905,239 +1816,12 @@ private enum CameraControlProbe {
   }
 }
 
-// MARK: - Aperture Simulation Processor (simulated mode, CAPTURE TIME ONLY)
-/// MVP simulation for lenses WITHOUT a physical variable aperture. Runs BEFORE Camera
-/// DNA / LUT (user-fixed order), on the photo-processing queue, never in the preview.
-///   f/1.4-f/4  -> person-mask background blur (strong -> light)
-///   f/5.6-f/16 -> highlight starburst (light -> strongest)
-/// Hard limits (user spec): person mask unavailable -> SKIP the blur (never full-frame
-/// blur); starburst only from THRESHOLDED specular highlights; no CoC/PSF/depth layers;
-/// no PNG star overlays; no sharpening/NR of any kind.
-enum ApertureSimulationProcessor {
-  static func apply(_ input: CIImage, fNumber: Float) -> CIImage {
-    var output = input
-    // 1) BACKGROUND BLUR - normalized over the single Camera18ApertureSpec range:
-    //    closedness = clamp((f - min) / (max - min), 0, 1); blur = 1 - closedness.
-    //    (Wide open -> strongest blur; smallest stop -> weakest. Max 28px.)
-    let spec = Camera18ApertureSpec.load()
-    let closedness = CGFloat(min(1.0, max(0.0, (fNumber - spec.min) / (spec.max - spec.min))))
-    let blurStrength = 1.0 - closedness
-    let radius = blurStrength * 28.0
-    if radius >= 1.5, let mask = personMask(for: input) {
-      // Blur a QUARTER-SCALE copy and upscale: the background is defocused anyway, so
-      // the detail loss is invisible, and a 24MP r=24 gaussian stays cheap.
-      let scale = CGFloat(0.25)
-      let small = input.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        .cropped(to: input.extent)
-      let blurredSmall = small.appGaussianBlur(radius: radius * scale)
-      let blurred = blurredSmall.transformed(by: CGAffineTransform(scaleX: 1 / scale, y: 1 / scale))
-        .cropped(to: input.extent)
-      let fullMask = mask.transformed(by: CGAffineTransform(
-        scaleX: input.extent.width / mask.extent.width,
-        y: input.extent.height / mask.extent.height,
-      )).cropped(to: input.extent)
-      output = blurred.appBlendWithMask(foreground: output, mask: fullMask)
-    }
-
-    // 2) STARBURST (strong specular highlights; strength AND ray length follow the
-    // same normalized closedness over the shared spec range).
-    output = StarburstProcessor.apply(output, fNumber: fNumber)
-    return output.cropped(to: input.extent)
-  }
-
-  /// Vision person segmentation -> single-channel mask CIImage (nil = unusable).
-  private static func personMask(for input: CIImage) -> CIImage? {
-    // Downscale for the model: masks only need silhouette fidelity.
-    let long = max(input.extent.width, input.extent.height)
-    guard long > 1 else { return nil }
-    let scale = CGFloat(512) / long
-    let small = input.transformed(by: CGAffineTransform(scaleX: scale, y: scale)).cropped(to: input.extent)
-    guard let cg = CameraEngineGPU.ciContext.createCGImage(small, from: small.extent) else { return nil }
-
-    let request = VNGeneratePersonSegmentationRequest()
-    request.qualityLevel = .balanced
-    request.outputPixelFormat = kCVPixelFormatType_OneComponent8
-    let handler = VNImageRequestHandler(cgImage: cg, options: [:])
-    do { try handler.perform([request]) } catch { return nil }
-    guard let observation = request.results?.first as? VNPixelBufferObservation else { return nil }
-    let mask = CIImage(cvPixelBuffer: observation.pixelBuffer)
-    guard mask.extent.width > 1, mask.extent.height > 1 else { return nil }
-
-    // DEGENERATE-MASK GUARD (user spec: never full-frame blur). A mask with no
-    // meaningful person signal (max ~ 0) would blend the ENTIRE frame from the blurred
-    // branch. Sample the area max; below it we skip the blur entirely.
-    if let maxFilter = CIFilter(name: "CIAreaMaximum", parameters: [
-      kCIInputImageKey: mask,
-      "inputExtent": NSValue(cgRect: CGRect(x: 0, y: 0, width: 1, height: 1)),
-    ]), let onePx = maxFilter.outputImage,
-       let cg = CameraEngineGPU.ciContext.createCGImage(onePx, from: CGRect(x: 0, y: 0, width: 1, height: 1)),
-       let data = cg.dataProvider?.data,
-       let bytes = CFDataGetBytePtr(data) {
-      // Red channel of the RGBA8 render of the max-filtered single-channel mask.
-      if bytes[0] < 90 { return nil }
-    }
-    return mask
-  }
-}
-
-// MARK: - Starburst Processor (shared by Final photo AND live Preview)
-/// The ONLY starburst implementation. Strength and ray length are driven by the
-/// normalized closedness over Camera18ApertureSpec: wide open -> weakest, smallest
-/// stop -> strongest. Called on the full-res photo (simulated captures) AND on the
-/// 1280px preview frame (simulated mode) - same public CI filters, no new renderer.
-enum StarburstProcessor {
-  static func apply(_ input: CIImage, fNumber: Float) -> CIImage {
-    let spec = Camera18ApertureSpec.load()
-    let closedness = CGFloat(min(1.0, max(0.0, (fNumber - spec.min) / (spec.max - spec.min))))
-    let strength = closedness
-    let rayRadius = 10.0 + closedness * 30.0
-    guard strength > 0.01 else { return input }
-    return input.appStarburst(strength: strength, rayRadius: rayRadius)
-  }
-}
-
-// MARK: - CIImage helpers for the simulation (prefixed `app` to stay out of CI's space)
-
-extension CIImage {
-  /// Gaussian blur; below a quarter-pixel it is a mathematical no-op.
-  func appGaussianBlur(radius: CGFloat) -> CIImage {
-    guard radius > 0.25 else { return self }
-    return CIFilter(name: "CIGaussianBlur", parameters: [
-      kCIInputImageKey: self,
-      kCIInputRadiusKey: radius,
-    ])?.outputImage ?? self
-  }
-
-  /// Foreground over blurred background, keyed by the person mask (soft edges).
-  func appBlendWithMask(foreground: CIImage, mask: CIImage) -> CIImage {
-    CIFilter(name: "CIBlendWithMask", parameters: [
-      kCIInputImageKey: foreground,
-      "inputBackgroundImage": self,
-      "inputMaskImage": mask,
-    ])?.outputImage ?? foreground
-  }
-
-  /// 8-ray starburst. Highlight mask = ABSOLUTE brightness x LOCAL CONTRAST (user
-  /// spec): absolute = max(0, Y - 0.78); local = max(0, Y - boxBlur5(Y) - 0.12);
-  /// highlight = clamp(absolute * local * 8, 0, 1). Flat bright areas (walls/sky)
-  /// have Y ~= localAverage -> local term ~0 -> NO starburst; small hot speculars
-  /// spike on the product term.
-  func appStarburst(strength: CGFloat, rayRadius: CGFloat) -> CIImage {
-    // Luminance in all three channels.
-    let lum = CIFilter(name: "CIColorMatrix", parameters: [
-      kCIInputImageKey: self,
-      "inputRVector": CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0),
-      "inputGVector": CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0),
-      "inputBVector": CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0),
-      "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-    ])?.outputImage ?? self
-    // LOCAL CONTRAST: localAverage = CIBoxBlur(Y, r=5); highPass = Y - localAverage
-    // realized as (-1)*localAverage added to Y (CIAdditionCompositing adds channels).
-    let localAverage = CIFilter(name: "CIBoxBlur", parameters: [
-      kCIInputImageKey: lum,
-      kCIInputRadiusKey: CGFloat(5),
-    ])?.outputImage ?? lum
-    let negLocal = CIFilter(name: "CIColorMatrix", parameters: [
-      kCIInputImageKey: localAverage,
-      "inputRVector": CIVector(x: -1, y: 0, z: 0, w: 0),
-      "inputGVector": CIVector(x: 0, y: -1, z: 0, w: 0),
-      "inputBVector": CIVector(x: 0, y: 0, z: -1, w: 0),
-      "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-    ])?.outputImage ?? localAverage
-    let highPass = CIFilter(name: "CIAdditionCompositing", parameters: [
-      kCIInputImageKey: lum,
-      "inputBackgroundImage": negLocal,
-    ])?.outputImage ?? lum
-
-    // absolute = clamp(Y - 0.78); local = clamp(highPass - 0.12)
-    func clampedOffset(_ image: CIImage, _ offset: CGFloat) -> CIImage {
-      let biased = CIFilter(name: "CIColorMatrix", parameters: [
-        kCIInputImageKey: image,
-        "inputRVector": CIVector(x: 1, y: 0, z: 0, w: 0),
-        "inputGVector": CIVector(x: 0, y: 1, z: 0, w: 0),
-        "inputBVector": CIVector(x: 0, y: 0, z: 1, w: 0),
-        "inputBiasVector": CIVector(x: 0 - offset, y: 0 - offset, z: 0 - offset, w: 1),
-      ])?.outputImage ?? image
-      return CIFilter(name: "CIColorClamp", parameters: [
-        kCIInputImageKey: biased,
-        "inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 0),
-        "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1),
-      ])?.outputImage ?? biased
-    }
-    let absolute = clampedOffset(lum, 0.78)
-    let localTerm = clampedOffset(highPass, 0.12)
-    // product = absolute * local (per-channel multiply), then gain x8 and clamp.
-    let multiplied = CIFilter(name: "CIMultiplyCompositing", parameters: [
-      kCIInputImageKey: absolute,
-      "inputBackgroundImage": localTerm,
-    ])?.outputImage ?? absolute
-    let gained = CIFilter(name: "CIColorMatrix", parameters: [
-      kCIInputImageKey: multiplied,
-      "inputRVector": CIVector(x: 8, y: 0, z: 0, w: 0),
-      "inputGVector": CIVector(x: 0, y: 8, z: 0, w: 0),
-      "inputBVector": CIVector(x: 0, y: 0, z: 8, w: 0),
-      "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-    ])?.outputImage ?? multiplied
-    let highlights = CIFilter(name: "CIColorClamp", parameters: [
-      kCIInputImageKey: gained,
-      "inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 0),
-      "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1),
-    ])?.outputImage ?? gained
-
-    // 8 rays: H, V, and the two diagonals (diagonals shorter — classic star look).
-    // Ray length follows the SAME closedness driving the strength: r = 10 + c * 30.
-    func ray(_ angle: CGFloat, _ radius: CGFloat) -> CIImage? {
-      CIFilter(name: "CIMotionBlur", parameters: [
-        kCIInputImageKey: highlights,
-        kCIInputRadiusKey: radius,
-        kCIInputAngleKey: angle * .pi / 180,
-      ])?.outputImage
-    }
-    var rays: [CIImage] = []
-    if let h = ray(0, rayRadius) { rays.append(h) }
-    if let v = ray(90, rayRadius) { rays.append(v) }
-    if let d1 = ray(45, rayRadius * 0.55) { rays.append(d1) }
-    if let d2 = ray(135, rayRadius * 0.55) { rays.append(d2) }
-    guard !rays.isEmpty else { return self }
-
-    // Accumulate rays (additive), tint them to warm white, scale by strength.
-    var acc = rays[0]
-    for r in rays.dropFirst() {
-      acc = CIFilter(name: "CIAdditionCompositing", parameters: [
-        kCIInputImageKey: r,
-        "inputBackgroundImage": acc,
-      ])?.outputImage ?? acc
-    }
-    let tinted = CIFilter(name: "CIColorMatrix", parameters: [
-      kCIInputImageKey: acc,
-      "inputRVector": CIVector(x: strength, y: 0, z: 0, w: 0),
-      "inputGVector": CIVector(x: 0, y: strength * 0.96, z: 0, w: 0),
-      "inputBVector": CIVector(x: 0, y: 0, z: strength * 0.88, w: 0),
-      "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-    ])?.outputImage ?? acc
-
-    let composited = CIFilter(name: "CIAdditionCompositing", parameters: [
-      kCIInputImageKey: tinted,
-      "inputBackgroundImage": self,
-    ])?.outputImage ?? self
-    // Clamp so stacked rays can never blow a channel past legal range.
-    return CIFilter(name: "CIColorClamp", parameters: [
-      kCIInputImageKey: composited,
-      "inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 0),
-      "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1),
-    ])?.outputImage ?? composited
-  }
-}
-
 // MARK: - Photo Capture Delegate (Apple Processed Photo → LUT → Tone → JPEG)
 private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
   private static let processingQueue = DispatchQueue(label: "camera-engine.photo-processing", qos: .userInitiated)
   // ponytail: static shared CIContext avoids allocating GPU command queue/shader cache per shutter press
   private static let sharedContext = CameraEngineGPU.ciContext
   private let compiled: CameraDNARenderer.CompiledCameraProfile?
-  // Simulated-aperture inputs (capability-driven; physical mode ignores both).
-  private let apertureMode: ApertureMode
-  private let simulatedFNumber: Float
   private let completion: (Result<[String: Any], CameraEngineError>, String?) -> Void
   private let completionLock = NSLock()
   private var didComplete = false
@@ -2146,10 +1830,8 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
   /// (base × zoom) — stamped into EXIF so crop-zoomed shots read correctly in Photos.
   private let appliedZoom: Double
   private let equivalentFocalMM: Int
-  init(compiled: CameraDNARenderer.CompiledCameraProfile?, appliedZoom: Double, equivalentFocalMM: Int, apertureMode: ApertureMode = .simulated, simulatedFNumber: Float = 1.8, completion: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
+  init(compiled: CameraDNARenderer.CompiledCameraProfile?, appliedZoom: Double, equivalentFocalMM: Int, completion: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
     self.compiled = compiled
-    self.apertureMode = apertureMode
-    self.simulatedFNumber = simulatedFNumber
     self.appliedZoom = appliedZoom
     self.equivalentFocalMM = equivalentFocalMM
     self.completion = completion
@@ -2195,11 +1877,6 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
       let inputExtent = source.extent.integral
       print("[CameraEngine][Diag] pipeline input extent=\(Int(inputExtent.width))x\(Int(inputExtent.height))")
 
-      // PRODUCTION ORDER (user-fixed): simulated aperture FIRST, then Camera DNA / LUT.
-      var image = source
-      if apertureMode == .simulated {
-        image = ApertureSimulationProcessor.apply(image, fNumber: simulatedFNumber)
-      }
       // Compiled final pipeline (processed-photo normalizer + LUT + fine color + tone).
       // compiled == nil → true passthrough (no profile applied yet).
       if let compiled = compiled {
