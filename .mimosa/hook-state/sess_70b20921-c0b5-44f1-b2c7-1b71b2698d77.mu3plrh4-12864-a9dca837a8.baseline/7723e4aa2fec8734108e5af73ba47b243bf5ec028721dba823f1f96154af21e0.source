@@ -1,0 +1,274 @@
+import React, { useCallback, useState } from 'react';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import { useProfiles } from '../profiles';
+import { CameraEngine } from '../camera/CameraEngine';
+import { getDiagLogText } from '../utils/diagLog';
+
+export interface CalibrationModalProps {
+  readonly visible: boolean;
+  readonly onClose: () => void;
+  /** Aperture demo mode (fixed-lens test): ring is interactive, capture stays fixed. */
+  readonly apertureDemoMode?: boolean;
+  readonly onToggleApertureDemo?: () => void;
+  /** Developer-mode extra: side-view lens cross-section above the tick scale. */
+  readonly apertureSideView?: boolean;
+  readonly onToggleApertureSideView?: () => void;
+}
+
+interface ActionButtonProps {
+  readonly label: string;
+  readonly onPress: () => void;
+  readonly disabled?: boolean;
+  readonly destructive?: boolean;
+}
+
+function ActionButton({ label, onPress, disabled = false, destructive = false }: ActionButtonProps): React.JSX.Element {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [styles.button, destructive && styles.destructiveButton, (pressed || disabled) && styles.buttonDimmed]}
+    >
+      <Text style={[styles.buttonText, destructive && styles.destructiveText]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+export function CalibrationModal({ visible, onClose, apertureDemoMode = false, onToggleApertureDemo, apertureSideView = false, onToggleApertureSideView }: CalibrationModalProps): React.JSX.Element {
+  const { applyText, clearErrors, document, errors, exportJson, importJson, loading, reload, reset } = useProfiles();
+  const [text, setText] = useState('');
+  const [diagText, setDiagText] = useState<string | null>(null);
+  const [engineDiag, setEngineDiag] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
+
+  const run = useCallback(async (action: () => Promise<boolean>, clearOnSuccess = false): Promise<void> => {
+    setWorking(true);
+    try {
+      const succeeded = await action();
+      if (succeeded && clearOnSuccess) setText('');
+    } finally {
+      setWorking(false);
+    }
+  }, []);
+
+  // Export = load the active document into the editor below, ready to be copied out.
+  // The editor is selectable, so "long-press -> Select All -> Copy" is all it takes.
+  const handleExport = useCallback((): void => {
+    const json = exportJson();
+    if (json === null) return;
+    clearErrors();
+    setText(json);
+  }, [clearErrors, exportJson]);
+
+  const close = useCallback((): void => {
+    clearErrors();
+    onClose();
+  }, [clearErrors, onClose]);
+
+  // Engine triage: everything needed to tell apart "the feature is broken" from "this
+  // build is stale" — LUT bundle inventory vs the profiles the JS layer advertises, the
+  // add-only photo permission, and the hardware aperture report (demo-mode input).
+  const loadEngineDiag = useCallback(async (): Promise<void> => {
+    try {
+      const d = await CameraEngine.getDiagnostics();
+      const expected = Array.from(
+        new Set(
+          ((document?.profiles ?? []) as unknown as { color?: { lut?: string | null } }[])
+            .map((p) => p.color?.lut ?? '')
+            .filter((lut) => lut !== ''),
+        ),
+      );
+      const missing = expected.filter((lut) => !d.bundledLuts.includes(lut));
+      const apertureLine = d.supportsVariableAperture
+        ? `variable ƒ/${d.minAperture}–ƒ/${d.maxAperture}`
+        : 'fixed (hardware)';
+      const lines = [
+        `iOS: ${d.osVersion}`,
+        `Device: ${d.deviceModel ?? '?'}`,
+        `Aperture: ${apertureLine}, active ƒ/${d.activeAperture ?? '?'}`,
+        `Aperture Demo mode: ${apertureDemoMode ? 'ON' : 'OFF'}`,
+        `Photos add permission: ${d.photoAddAuthorization}${
+          d.photoAddAuthorization === 'denied' ? '  → 设置 > 隐私与安全性 > 照片 > 添加照片' : ''
+        }`,
+        `LUTs bundled this build: ${d.bundledLuts.length}`,
+        missing.length > 0
+          ? `MISSING LUTs (${missing.length}) — JS 列表比原生资源新，需重新出包: ${missing.join(', ')}`
+          : 'All profile LUTs present in the native bundle ✓',
+      ];
+      setEngineDiag(lines.join('\n'));
+    } catch (err: unknown) {
+      setEngineDiag(`getDiagnostics failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [apertureDemoMode, document]);
+
+  const busy = working || loading;
+
+  return (
+    <Modal
+      animationType="slide"
+      onRequestClose={close}
+      presentationStyle="pageSheet"
+      transparent={false}
+      visible={visible}
+    >
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.screen}>
+        <View style={styles.header}>
+          <Text accessibilityRole="header" style={styles.title}>Camera calibration</Text>
+          <Pressable accessibilityLabel="Close calibration" accessibilityRole="button" hitSlop={12} onPress={close}>
+            <Text style={styles.close}>Close</Text>
+          </Pressable>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <Text style={styles.help}>
+            Import a profile document or paste its complete JSON below. Valid changes are saved and applied immediately.
+            Export loads the active JSON into the editor — long-press it to select all and copy.
+          </Text>
+
+          <View style={styles.actions}>
+            <ActionButton disabled={busy} label="Import JSON" onPress={() => { void run(importJson); }} />
+            <ActionButton disabled={busy || document === null} label="Export Current JSON" onPress={handleExport} />
+            <ActionButton disabled={busy} label="Reload" onPress={() => { void run(reload); }} />
+            <ActionButton destructive disabled={busy} label="Reset Default" onPress={() => { void run(reset, true); }} />
+          </View>
+
+          {onToggleApertureDemo ? (
+            <View style={styles.demoRow}>
+              <ActionButton
+                label={apertureDemoMode ? 'Aperture Demo: ON' : 'Aperture Demo: OFF'}
+                onPress={onToggleApertureDemo}
+              />
+              <Text style={styles.demoHint}>
+                Fixed-lens test mode: the aperture ring becomes interactive (visual only) —
+                photos stay at the lens&apos;s fixed aperture.
+              </Text>
+            </View>
+          ) : null}
+
+          {onToggleApertureSideView ? (
+            <View style={styles.demoRow}>
+              <ActionButton
+                label={apertureSideView ? 'Aperture Side View: ON' : 'Aperture Side View: OFF'}
+                onPress={onToggleApertureSideView}
+              />
+              <Text style={styles.demoHint}>
+                Developer mode: show the side-view lens cross-section above the tick scale.
+              </Text>
+            </View>
+          ) : null}
+
+          <Text style={styles.label}>Profile document JSON</Text>
+          <TextInput
+            accessibilityLabel="Profile document JSON"
+            autoCapitalize="none"
+            autoCorrect={false}
+            multiline
+            onChangeText={setText}
+            placeholder={'{\n  "version": 1,\n  "profiles": […]\n}'}
+            placeholderTextColor="#777"
+            spellCheck={false}
+            style={styles.editor}
+            textAlignVertical="top"
+            value={text}
+          />
+          <View style={styles.editorActions}>
+            <ActionButton
+              disabled={busy || text.trim() === ''}
+              label="Apply Pasted JSON"
+              onPress={() => { void run(() => applyText(text)); }}
+            />
+            <ActionButton
+              disabled={busy || text === ''}
+              label="Clear"
+              onPress={() => { setText(''); clearErrors(); }}
+            />
+          </View>
+
+          {busy ? <ActivityIndicator accessibilityLabel="Loading profiles" style={styles.progress} /> : null}
+          {errors.length > 0 ? (
+            <View accessibilityLiveRegion="polite" style={styles.errorBox}>
+              <Text style={styles.errorTitle}>Could not apply profiles</Text>
+              {errors.map((error, index) => (
+                <Text key={`${index}-${error}`} selectable style={styles.errorText}>• {error}</Text>
+              ))}
+            </View>
+          ) : null}
+
+          <Text style={styles.label}>Engine diagnostics</Text>
+          <ActionButton disabled={engineDiag !== null} label="Load Engine Diagnostics" onPress={() => { void loadEngineDiag(); }} />
+          {engineDiag !== null ? (
+            <TextInput
+              accessibilityLabel="Engine diagnostics content"
+              editable={false}
+              multiline
+              scrollEnabled
+              selectTextOnFocus
+              style={[styles.editor, styles.diagEditor]}
+              textAlignVertical="top"
+              value={engineDiag}
+            />
+          ) : null}
+
+          <Text style={styles.label}>Diagnostic log</Text>
+          <ActionButton
+            disabled={diagText !== null}
+            label="Load Diagnostic Log"
+            onPress={() => setDiagText(getDiagLogText() || '(log is empty)')}
+          />
+          {diagText !== null ? (
+            <TextInput
+              accessibilityLabel="Diagnostic log content"
+              editable={false}
+              multiline
+              scrollEnabled
+              selectTextOnFocus
+              style={styles.editor}
+              textAlignVertical="top"
+              value={diagText}
+            />
+          ) : null}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: '#101114' },
+  header: { minHeight: 58, paddingHorizontal: 20, borderBottomColor: '#2b2d32', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  title: { color: '#fff', fontSize: 20, fontWeight: '700' },
+  close: { color: '#8db8ff', fontSize: 16, fontWeight: '600' },
+  content: { padding: 20, gap: 14, paddingBottom: 40 },
+  help: { color: '#b8bbc3', fontSize: 14, lineHeight: 20 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  demoRow: { gap: 8 },
+  demoHint: { color: '#8e939e', fontSize: 12.5, lineHeight: 17 },
+  button: { minHeight: 44, borderRadius: 9, borderWidth: 1, borderColor: '#4776bd', backgroundColor: '#182840', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
+  buttonDimmed: { opacity: 0.45 },
+  buttonText: { color: '#dbe9ff', fontSize: 15, fontWeight: '600' },
+  destructiveButton: { borderColor: '#824a4a', backgroundColor: '#361d20' },
+  destructiveText: { color: '#ffb6b6' },
+  label: { color: '#e8e9ed', fontSize: 15, fontWeight: '600', marginTop: 4 },
+  editor: { minHeight: 260, borderColor: '#3b3e45', borderWidth: 1, borderRadius: 10, backgroundColor: '#17191d', color: '#f4f4f5', fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }), fontSize: 13, lineHeight: 19, padding: 12 },
+  diagEditor: { minHeight: 150 },
+  editorActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  progress: { marginVertical: 8 },
+  errorBox: { borderRadius: 9, borderWidth: 1, borderColor: '#8b4444', backgroundColor: '#30191c', padding: 12, gap: 5 },
+  errorTitle: { color: '#ffc1c1', fontWeight: '700', marginBottom: 2 },
+  errorText: { color: '#ffcece', fontSize: 13, lineHeight: 18 },
+});
+
+export default CalibrationModal;

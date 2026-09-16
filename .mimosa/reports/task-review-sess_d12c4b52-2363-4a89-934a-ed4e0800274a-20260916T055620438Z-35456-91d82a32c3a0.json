@@ -1,0 +1,576 @@
+{
+  "schema_version": "mimosa-task-review/v2",
+  "run_id": "20260916T055620438Z-35456-91d82a32c3a0",
+  "run_status": "inconclusive",
+  "errors": [
+    {
+      "stage": "candidate-select",
+      "target": ".tmp-rm1.py",
+      "reason": "changed_file_unreadable: observed changed file no longer exists or cannot be read"
+    },
+    {
+      "stage": "candidate-select",
+      "target": ".tmp-js.py",
+      "reason": "changed_file_unreadable: observed changed file no longer exists or cannot be read"
+    },
+    {
+      "stage": "candidate-select",
+      "target": ".tmp-js2.py",
+      "reason": "changed_file_unreadable: observed changed file no longer exists or cannot be read"
+    },
+    {
+      "stage": "baseline",
+      "target": ".",
+      "reason": "baseline_partial: baseline capture had enumeration or snapshot errors"
+    }
+  ],
+  "coverage": {
+    "schema_version": "mimosa-hook-coverage/v1",
+    "status": "partial",
+    "scope": "hook_observed_diff",
+    "baseline": {
+      "complete": false,
+      "captured_files": 8,
+      "candidate_limit": 5000,
+      "truncated": false,
+      "enumeration_error_count": 0,
+      "snapshot_error_count": 0,
+      "compensated_target_count": 4
+    },
+    "change_tracking": {
+      "touched_observed": 7,
+      "touched_retained": 7,
+      "truncated": false,
+      "bash_mutation": true,
+      "bash_discovered": 4,
+      "bash_discovery_limit": 80,
+      "bash_discovery_truncated": false
+    },
+    "candidates": {
+      "eligible_files": 4,
+      "selected_files": 4,
+      "limit": 20,
+      "truncated": false
+    },
+    "scanning": {
+      "required_files": 4,
+      "scanned_files": 4,
+      "skipped_files": 0,
+      "failed_files": 0,
+      "project_checks_required": 0,
+      "project_checks_completed": 0
+    },
+    "notification": {
+      "eligible_findings": 0,
+      "detailed_findings": 0,
+      "detail_limit": 3,
+      "truncated": false
+    },
+    "reason_counts": {
+      "changed_file_unreadable": 3,
+      "baseline_partial": 1,
+      "project_check_failed": 4
+    },
+    "reasons": [
+      {
+        "code": "changed_file_unreadable",
+        "stage": "candidate-select",
+        "target": ".tmp-rm1.py",
+        "detail": "observed changed file no longer exists or cannot be read",
+        "affects_completion": true
+      },
+      {
+        "code": "changed_file_unreadable",
+        "stage": "candidate-select",
+        "target": ".tmp-js.py",
+        "detail": "observed changed file no longer exists or cannot be read",
+        "affects_completion": true
+      },
+      {
+        "code": "changed_file_unreadable",
+        "stage": "candidate-select",
+        "target": ".tmp-js2.py",
+        "detail": "observed changed file no longer exists or cannot be read",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_partial",
+        "stage": "baseline",
+        "target": ".",
+        "detail": "baseline capture had enumeration or snapshot errors",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "candidate-select",
+        "target": ".tmp-rm1.py",
+        "detail": "changed_file_unreadable: observed changed file no longer exists or cannot be read",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "candidate-select",
+        "target": ".tmp-js.py",
+        "detail": "changed_file_unreadable: observed changed file no longer exists or cannot be read",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "candidate-select",
+        "target": ".tmp-js2.py",
+        "detail": "changed_file_unreadable: observed changed file no longer exists or cannot be read",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline",
+        "target": ".",
+        "detail": "baseline_partial: baseline capture had enumeration or snapshot errors",
+        "affects_completion": true
+      }
+    ],
+    "reasons_truncated": false
+  },
+  "generated_at": "2026-09-16T05:56:20.438Z",
+  "session_id": "sess_d12c4b52-2363-4a89-934a-ed4e0800274a",
+  "target": ".",
+  "revision": "3a27aafbcc5480fb7b05601492a765b893b39baa",
+  "rules_version": "unavailable",
+  "diff_hash": "8a06d5d8ea1ca41e34ac1713278e4bf0f50472a82265fbcadda0a2ffc40445a9",
+  "diff": {
+    "algorithm": "sha256",
+    "changed_file_count": 4,
+    "changed_files": [
+      {
+        "file": ".tmp-rm2.py",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 131
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "83b914befcb277d58e0f4352ec175b5918b1e7819f29c7d7b0c02b7b0be72c60"
+      },
+      {
+        "file": "scripts/add-fuji-sim-luts.js",
+        "ranges": [
+          {
+            "start": 7,
+            "end": 7
+          },
+          {
+            "start": 21,
+            "end": 21
+          },
+          {
+            "start": 23,
+            "end": 23
+          }
+        ],
+        "before_hash": "69fe8edf44bdd13bf675e804ae7594ca4523ecbf8bef4fa7ebaa70c60401184d",
+        "after_hash": "dac449ca02f282a1bbb09fe65f8185aaded4ac8a82f369df99e3b516eefbcdd9"
+      },
+      {
+        "file": "scripts/add-panasonic-luts.js",
+        "ranges": [
+          {
+            "start": 6,
+            "end": 6
+          },
+          {
+            "start": 59,
+            "end": 59
+          },
+          {
+            "start": 61,
+            "end": 62
+          },
+          {
+            "start": 64,
+            "end": 64
+          },
+          {
+            "start": 66,
+            "end": 66
+          },
+          {
+            "start": 117,
+            "end": 123
+          }
+        ],
+        "before_hash": "928c9c0270b76899f4c2088a8e4e2132941c975b9d318cbf2adbd19478fa77dd",
+        "after_hash": "be39f5572eb00afdbfd0420f25173548e8d18a1fcb0978c1e179b27b99fae85b"
+      },
+      {
+        "file": "scripts/prepackage-check.js",
+        "ranges": [
+          {
+            "start": 147,
+            "end": 147
+          },
+          {
+            "start": 151,
+            "end": 153
+          }
+        ],
+        "before_hash": "9bda7b8185e2669d2e32a4a01c1d9cdf900c248c92ac8618b9f3e2e05969bb45",
+        "after_hash": "9906d05e88b94fba9c46d856eba6ab2d4a0fe431ef2ce2bd9420112352765165"
+      }
+    ]
+  },
+  "timing": {
+    "started_at": "2026-09-16T05:56:19.007Z",
+    "completed_at": "2026-09-16T05:56:20.438Z",
+    "duration_ms": 1431,
+    "measurement": "hook_wall_clock"
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "model_calls": 0,
+    "measurement": "known-zero"
+  },
+  "telemetry": {
+    "schemaVersion": "mimosa-gate-telemetry/v1",
+    "profile": "gate",
+    "operation": "Stop",
+    "outcome": "partial/INCONCLUSIVE",
+    "latencyMs": 1431,
+    "peakMemoryBytes": 145530880,
+    "memoryMeasurement": "max-observed-process-rss",
+    "scannedFiles": 4,
+    "cache": {
+      "hits": 0,
+      "misses": 0,
+      "measurement": "not-applicable"
+    },
+    "denyCount": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "total": 0,
+      "modelCalls": 0,
+      "measurement": "known-zero"
+    }
+  },
+  "finding_count": 0,
+  "rewake_finding_count": 0,
+  "evidence_boundary": {
+    "scan": "candidate",
+    "static_fix_verification": "observed_static_only",
+    "runtime_verification": "not_performed"
+  },
+  "finding_events": [
+    {
+      "finding_id": "mimosa-5bca87fb07c9eb1411249407",
+      "file": ".tmp-rm1.py",
+      "line": 139,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "路径穿越",
+      "status": "blocked",
+      "decision": "deny",
+      "at": "2026-09-16T05:24:36.913Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "b0b73d77f8394ab21e3cbb376bef5f46ee96a7e902ef7f2e3c47ef98fe6a8c33",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-5bca87fb07c9eb1411249407",
+      "file": ".tmp-rm1.py",
+      "line": 139,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "路径穿越",
+      "status": "fixed_candidate",
+      "decision": "repair_observed",
+      "at": "2026-09-16T05:32:25.933Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "b0b73d77f8394ab21e3cbb376bef5f46ee96a7e902ef7f2e3c47ef98fe6a8c33",
+        "candidate_before_evidence_hash": "b0b73d77f8394ab21e3cbb376bef5f46ee96a7e902ef7f2e3c47ef98fe6a8c33",
+        "post_change_evidence_hash_at_previous_location": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "runtime_oracle": false,
+        "verification": {
+          "method": "mimosa-posttool-static-rescan",
+          "finding_absent": true,
+          "runtime_oracle": false
+        }
+      }
+    },
+    {
+      "finding_id": "mimosa-5bca87fb07c9eb1411249407",
+      "file": ".tmp-rm1.py",
+      "line": 139,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "路径穿越",
+      "status": "static_verified",
+      "decision": "static_rescan_passed",
+      "at": "2026-09-16T05:32:25.933Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "observed",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "b0b73d77f8394ab21e3cbb376bef5f46ee96a7e902ef7f2e3c47ef98fe6a8c33",
+        "candidate_before_evidence_hash": "b0b73d77f8394ab21e3cbb376bef5f46ee96a7e902ef7f2e3c47ef98fe6a8c33",
+        "post_change_evidence_hash_at_previous_location": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "runtime_oracle": false,
+        "verification": {
+          "method": "mimosa-posttool-static-rescan",
+          "finding_absent": true,
+          "runtime_oracle": false
+        }
+      }
+    },
+    {
+      "finding_id": "mimosa-23d82b60b48a0eeda854faf5",
+      "file": ".tmp-rm2.py",
+      "line": 60,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "路径穿越",
+      "status": "blocked",
+      "decision": "deny",
+      "at": "2026-09-16T05:33:50.340Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "b0b73d77f8394ab21e3cbb376bef5f46ee96a7e902ef7f2e3c47ef98fe6a8c33",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-23d82b60b48a0eeda854faf5",
+      "file": ".tmp-rm2.py",
+      "line": 60,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "路径穿越",
+      "status": "fixed_candidate",
+      "decision": "repair_observed",
+      "at": "2026-09-16T05:36:34.805Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "b0b73d77f8394ab21e3cbb376bef5f46ee96a7e902ef7f2e3c47ef98fe6a8c33",
+        "candidate_before_evidence_hash": "b0b73d77f8394ab21e3cbb376bef5f46ee96a7e902ef7f2e3c47ef98fe6a8c33",
+        "post_change_evidence_hash_at_previous_location": "650c0a24117eb2bb3ffc7166952cbda9b0b09620c40640cc104932b70611e9cc",
+        "runtime_oracle": false,
+        "verification": {
+          "method": "mimosa-posttool-static-rescan",
+          "finding_absent": true,
+          "runtime_oracle": false
+        }
+      }
+    },
+    {
+      "finding_id": "mimosa-23d82b60b48a0eeda854faf5",
+      "file": ".tmp-rm2.py",
+      "line": 60,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "路径穿越",
+      "status": "static_verified",
+      "decision": "static_rescan_passed",
+      "at": "2026-09-16T05:36:34.805Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "observed",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "b0b73d77f8394ab21e3cbb376bef5f46ee96a7e902ef7f2e3c47ef98fe6a8c33",
+        "candidate_before_evidence_hash": "b0b73d77f8394ab21e3cbb376bef5f46ee96a7e902ef7f2e3c47ef98fe6a8c33",
+        "post_change_evidence_hash_at_previous_location": "650c0a24117eb2bb3ffc7166952cbda9b0b09620c40640cc104932b70611e9cc",
+        "runtime_oracle": false,
+        "verification": {
+          "method": "mimosa-posttool-static-rescan",
+          "finding_absent": true,
+          "runtime_oracle": false
+        }
+      }
+    },
+    {
+      "finding_id": "mimosa-0d49df5cfe17345c6a90b2b9",
+      "file": ".tmp-sec.py",
+      "line": 19,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "代码注入",
+      "status": "blocked",
+      "decision": "deny",
+      "at": "2026-09-16T05:49:56.479Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "8be337ecf354f383fdc6b7e0b9b0db0a8422f6499405fe52c953c52ab7ac1e52",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-1106bc6ce15002c47abd595d",
+      "file": "scripts/add-panasonic-luts.js",
+      "line": 118,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "路径穿越",
+      "status": "blocked",
+      "decision": "deny",
+      "at": "2026-09-16T05:53:15.133Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "23c9471ce6ef704ddea436dfcb89e62dc123825c5e9ff0d866fb67acbcdff610",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-d4c5143dca9675b23722e546",
+      "file": "scripts/add-panasonic-luts.js",
+      "line": 119,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "路径穿越",
+      "status": "blocked",
+      "decision": "deny",
+      "at": "2026-09-16T05:54:00.528Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "7daeb78921180c584418166132121a90f73647c0f777d86c797ca8cf35ee2b17",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-1106bc6ce15002c47abd595d",
+      "file": "scripts/add-panasonic-luts.js",
+      "line": 118,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "路径穿越",
+      "status": "fixed_candidate",
+      "decision": "repair_observed",
+      "at": "2026-09-16T05:54:43.264Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "23c9471ce6ef704ddea436dfcb89e62dc123825c5e9ff0d866fb67acbcdff610",
+        "candidate_before_evidence_hash": "23c9471ce6ef704ddea436dfcb89e62dc123825c5e9ff0d866fb67acbcdff610",
+        "post_change_evidence_hash_at_previous_location": "88b270cc5ee344ef93eb15d3bd1337223c3d48d0ad617971290f42928d326f72",
+        "runtime_oracle": false,
+        "verification": {
+          "method": "mimosa-posttool-static-rescan",
+          "finding_absent": true,
+          "runtime_oracle": false
+        }
+      }
+    },
+    {
+      "finding_id": "mimosa-1106bc6ce15002c47abd595d",
+      "file": "scripts/add-panasonic-luts.js",
+      "line": 118,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "路径穿越",
+      "status": "static_verified",
+      "decision": "static_rescan_passed",
+      "at": "2026-09-16T05:54:43.264Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "observed",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "23c9471ce6ef704ddea436dfcb89e62dc123825c5e9ff0d866fb67acbcdff610",
+        "candidate_before_evidence_hash": "23c9471ce6ef704ddea436dfcb89e62dc123825c5e9ff0d866fb67acbcdff610",
+        "post_change_evidence_hash_at_previous_location": "88b270cc5ee344ef93eb15d3bd1337223c3d48d0ad617971290f42928d326f72",
+        "runtime_oracle": false,
+        "verification": {
+          "method": "mimosa-posttool-static-rescan",
+          "finding_absent": true,
+          "runtime_oracle": false
+        }
+      }
+    },
+    {
+      "finding_id": "mimosa-d4c5143dca9675b23722e546",
+      "file": "scripts/add-panasonic-luts.js",
+      "line": 119,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "路径穿越",
+      "status": "fixed_candidate",
+      "decision": "repair_observed",
+      "at": "2026-09-16T05:54:43.264Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "7daeb78921180c584418166132121a90f73647c0f777d86c797ca8cf35ee2b17",
+        "candidate_before_evidence_hash": "7daeb78921180c584418166132121a90f73647c0f777d86c797ca8cf35ee2b17",
+        "post_change_evidence_hash_at_previous_location": "cd978888f087d48c0194bed97b7212894137d62cf11c5feb543370b69fec0ebc",
+        "runtime_oracle": false,
+        "verification": {
+          "method": "mimosa-posttool-static-rescan",
+          "finding_absent": true,
+          "runtime_oracle": false
+        }
+      }
+    },
+    {
+      "finding_id": "mimosa-d4c5143dca9675b23722e546",
+      "file": "scripts/add-panasonic-luts.js",
+      "line": 119,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "路径穿越",
+      "status": "static_verified",
+      "decision": "static_rescan_passed",
+      "at": "2026-09-16T05:54:43.264Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "observed",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "7daeb78921180c584418166132121a90f73647c0f777d86c797ca8cf35ee2b17",
+        "candidate_before_evidence_hash": "7daeb78921180c584418166132121a90f73647c0f777d86c797ca8cf35ee2b17",
+        "post_change_evidence_hash_at_previous_location": "cd978888f087d48c0194bed97b7212894137d62cf11c5feb543370b69fec0ebc",
+        "runtime_oracle": false,
+        "verification": {
+          "method": "mimosa-posttool-static-rescan",
+          "finding_absent": true,
+          "runtime_oracle": false
+        }
+      }
+    }
+  ],
+  "findings": [],
+  "artifacts": {
+    "immutable_report": ".mimosa/reports/task-review-sess_d12c4b52-2363-4a89-934a-ed4e0800274a-20260916T055620438Z-35456-91d82a32c3a0.json",
+    "latest_report": ".mimosa/reports/task-review-sess_d12c4b52-2363-4a89-934a-ed4e0800274a.json",
+    "history_summary": ".mimosa/history/run-20260916T055620438Z-35456-91d82a32c3a0.json"
+  }
+}

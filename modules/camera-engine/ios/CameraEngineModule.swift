@@ -200,7 +200,8 @@ final class ApertureController {
     return nil
   }
 
-  private func currentAperture(_ device: AVCaptureDevice) -> Double {
+  /// The lens's real mechanical aperture (the only aperture a fixed lens has).
+  func currentAperture(_ device: AVCaptureDevice) -> Double {
     if #available(iOS 27.0, *) {
       if device.responds(to: NSSelectorFromString("currentLensAperture")),
          let v = device.value(forKey: "currentLensAperture") as? NSNumber {
@@ -1495,7 +1496,7 @@ public final class CameraEngineView: ExpoView {
       self.apertureMode = apertureMode
       caps["apertureMode"] = apertureMode == .variable ? "variable" : "fixed"
       if apertureMode == .fixed {
-        let fixedAperture = controller.currentAperture(device)
+        let fixedAperture = controller.lensFixedAperture(device)
         caps["minAperture"] = Double(fixedAperture)
         caps["maxAperture"] = Double(fixedAperture)
         caps["supportedApertures"] = NSNull()
@@ -1879,6 +1880,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
 
       // Compiled final pipeline (processed-photo normalizer + LUT + fine color + tone).
       // compiled == nil → true passthrough (no profile applied yet).
+      var image = source
       if let compiled = compiled {
         image = CameraDNARenderer.apply(compiled, to: image)
       }
