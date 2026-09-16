@@ -1218,11 +1218,11 @@ function CameraAppScreen(): React.JSX.Element {
                   style={styles.photoViewerButton}
                   onPress={() => {
                     Linking.openURL('photos-redirect://').catch(() => {
-                      showTransientError('此 iOS 无法从这里跳转「照片」——照片已保存在相册，可从主屏幕打开。');
+                      showTransientError("Can't open the Photos app from this iOS version. Your photo is saved in the library — open Photos from the Home Screen.");
                     });
                   }}
                 >
-                  <Text style={styles.photoViewerButtonText}>在“照片”中打开</Text>
+                  <Text style={styles.photoViewerButtonText}>Open in Photos</Text>
                 </TouchableOpacity>
               </View>
             ) : null}

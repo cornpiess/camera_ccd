@@ -19,9 +19,9 @@
         "UISupportedInterfaceOrientations": [
           "UIInterfaceOrientationPortrait"
         ],
-        "NSCameraUsageDescription": "彩虹相机需要使用相机来取景与拍照。",
-        "NSPhotoLibraryAddUsageDescription": "彩虹相机需要把拍好的照片保存到你的相册。",
-        "NSPhotoLibraryUsageDescription": "彩虹相机需要读取相册，用来显示你最近拍摄的照片。",
+        "NSCameraUsageDescription": "Camera 18 needs camera access to show the live viewfinder and take photos.",
+        "NSPhotoLibraryAddUsageDescription": "Camera 18 saves the photos you take to your photo library.",
+        "NSPhotoLibraryUsageDescription": "Camera 18 reads your photo library to show your recently taken photos.",
         "LSApplicationQueriesSchemes": ["photos-redirect", "photos"]
       }
     },

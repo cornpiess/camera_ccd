@@ -108,7 +108,7 @@ export function ProfileConfigModal({ visible, profileId, onClose }: ProfileConfi
               // blends over the untouched image; applies (and persists) on release, with
               // the live preview visible behind the sheet.
               <View style={styles.lutRow}>
-                <Text style={styles.lutLabel}>LUT 强度</Text>
+                <Text style={styles.lutLabel}>LUT Intensity</Text>
                 <Slider
                   accessibilityLabel="LUT intensity"
                   maximumValue={1}

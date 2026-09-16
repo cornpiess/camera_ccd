@@ -303,14 +303,14 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
       {/* Mode switch: tap to swap between tick scale and side view */}
       {onToggleSideView ? (
         <TouchableOpacity
-          accessibilityLabel={sideMode ? '切换到光圈刻度' : '切换到光圈侧视图'}
+          accessibilityLabel={sideMode ? 'Switch to aperture scale' : 'Switch to aperture side view'}
           accessibilityRole="button"
           hitSlop={6}
           onPress={onToggleSideView}
           style={styles.modeButton}
         >
           <Text style={[styles.modeButtonText, accent ? { color: accent, borderColor: hexToRgba(accent, 0.55) } : null]}>
-            {sideMode ? '刻度' : '侧视'}
+            {sideMode ? 'Scale' : 'Side'}
           </Text>
         </TouchableOpacity>
       ) : null}
@@ -322,7 +322,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
           pointerEvents="none"
         >
           <Text style={[styles.demoBadgeText, accent ? { color: accent } : null]}>
-            {fixedMode ? '固定光圈' : '真实光圈'}
+            {fixedMode ? 'Fixed aperture' : 'Real aperture'}
           </Text>
         </View>
       }

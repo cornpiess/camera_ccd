@@ -1496,7 +1496,7 @@ public final class CameraEngineView: ExpoView {
       self.apertureMode = apertureMode
       caps["apertureMode"] = apertureMode == .variable ? "variable" : "fixed"
       if apertureMode == .fixed {
-        let fixedAperture = controller.lensFixedAperture(device)
+        let fixedAperture = controller.currentAperture(device)
         caps["minAperture"] = Double(fixedAperture)
         caps["maxAperture"] = Double(fixedAperture)
         caps["supportedApertures"] = NSNull()

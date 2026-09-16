@@ -101,11 +101,11 @@ export function CalibrationModal({ visible, onClose, apertureDemoMode = false, o
         `Aperture: ${apertureLine}, active ƒ/${d.activeAperture ?? '?'}`,
         `Aperture Demo mode: ${apertureDemoMode ? 'ON' : 'OFF'}`,
         `Photos add permission: ${d.photoAddAuthorization}${
-          d.photoAddAuthorization === 'denied' ? '  → 设置 > 隐私与安全性 > 照片 > 添加照片' : ''
+          d.photoAddAuthorization === 'denied' ? '  → Settings > Privacy & Security > Photos > Add Photos' : ''
         }`,
         `LUTs bundled this build: ${d.bundledLuts.length}`,
         missing.length > 0
-          ? `MISSING LUTs (${missing.length}) — JS 列表比原生资源新，需重新出包: ${missing.join(', ')}`
+          ? `MISSING LUTs (${missing.length}) — JS list is newer than the native bundle, rebuild required: ${missing.join(', ')}`
           : 'All profile LUTs present in the native bundle ✓',
       ];
       setEngineDiag(lines.join('\n'));
