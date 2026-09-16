@@ -406,7 +406,7 @@ public final class CameraEngineModule: Module {
   public func definition() -> ModuleDefinition {
     Name("CameraEngine")
 
-    Events("onApertureChanged", "onZoomChanged")
+    Events("onApertureChanged", "onZoomChanged", "onPhotoProcessed")
 
     OnCreate {
       CameraEngineView.registrationHandler = { [weak self] view, isActive in
@@ -464,9 +464,32 @@ public final class CameraEngineModule: Module {
       view.stop { promise.resolve(nil) }
     }
 
-    AsyncFunction("capturePhoto") { (promise: Promise) in
+    /// Shutter (spec §6): the promise settles when APPLE'S CAPTURE is done; the
+    /// background pipeline (Camera DNA → HEIF → PhotoKit) reports later via the
+    /// `onPhotoProcessed` event. equivalentMM = the current FocalStop's real
+    /// 35mm-equivalent focal (0 = no ladder info, fall back to the on-device cache).
+    AsyncFunction("capturePhoto") { (equivalentMM: Double, promise: Promise) in
       guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
-      view.capture { result, detail in self.settle(result, promise, detail: detail) }
+      view.capture(
+        equivalentFocalMMRequest: Int(equivalentMM),
+        onCaptured: { result in
+          switch result {
+          case .success: self.settle(.success(()), promise)
+          case .failure(let error): self.reject(promise, error)
+          }
+        },
+        onProcessed: { result, detail in
+          let body: [String: Any]
+          switch result {
+          case .success(var payload):
+            payload["ok"] = true
+            body = payload
+          case .failure(let error):
+            body = ["ok": false, "errorCode": error.rawValue, "detail": detail ?? error.localizedDescription]
+          }
+          self.sendEvent("onPhotoProcessed", body)
+        }
+      )
     }
 
     AsyncFunction("setAperture") { (fStop: Double, promise: Promise) in
@@ -585,9 +608,12 @@ public final class CameraEngineModule: Module {
       view.setLens(lensId) { result in self.settle(result, promise) }
     }
 
-    /// Crop zoom on the ACTIVE lens (videoZoomFactor); applies to preview AND capture.
-    AsyncFunction("setZoomFactor") { (factor: Double, promise: Promise) in
+    /// Crop zoom on the ACTIVE physical lens (videoZoomFactor); applies to preview AND
+    /// capture. equivalentMM = the FocalStop's real 35mm-equivalent focal (spec §3) —
+    /// cached on the view so the EXIF stamp uses the ladder's truth.
+    AsyncFunction("setZoomFactor") { (factor: Double, equivalentMM: Double, promise: Promise) in
       guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
+      if equivalentMM > 0 { view.noteEquivalentFocalMM(Int(equivalentMM)) }
       view.setZoomFactor(factor) { result in self.settle(result, promise) }
     }
 
@@ -624,6 +650,8 @@ public final class CameraEngineView: ExpoView {
   // (render queue for preview, photo-processing queue for capture) — compiling two
   // 33³ cubes synchronously on the RN main thread visibly hitched profile switches.
   private var profile: [String: Any] = [:]
+  // ORIG / true passthrough marker (set from the profile JSON's "passthrough": true).
+  private var profilePassthrough = false
   // CompiledCameraProfile v2: per-frame rendering consumes ONLY these. The preview and
   // final variants differ ONLY in the fused Input Normalizer (video-frame vs
   // processed-photo); LUT, Fine Color and Tone are identical by contract.
@@ -705,7 +733,7 @@ public final class CameraEngineView: ExpoView {
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }
         // Same single capture entry as the on-screen shutter and volume buttons.
-        self.capture { _, _ in }
+        self.capture(equivalentFocalMMRequest: 0, onCaptured: { _ in }, onProcessed: { _, _ in })
       }
     }
     self.addInteraction(interaction)
@@ -739,12 +767,20 @@ public final class CameraEngineView: ExpoView {
     // New color payload → bump the revision so the compiled cube rebuilds. Compilation
     // itself is deferred to the first consumer (see compiledSnapshot) so the RN main
     // thread never pays for a 33³ cube build.
-    CameraDNARenderer.invalidateCompiledProfile(value)
+    // ORIG (profile JSON marks "passthrough": true) never compiles — its capture path
+    // writes Apple's photo bytes VERBATIM (see PhotoCaptureDelegate.processPassthrough).
+    let passthrough = (value["passthrough"] as? Bool) == true
     profileLock.lock()
-    profile = value
+    profile = passthrough ? [:] : value
+    profilePassthrough = passthrough
     compiledFinal = nil
     compiledPreview = nil
     profileLock.unlock()
+    if passthrough {
+      CameraDNARenderer.invalidateCompiledProfile([:])
+    } else {
+      CameraDNARenderer.invalidateCompiledProfile(value)
+    }
   }
 
   /// Lazy compile: the FIRST consumer after a profile change pays the 33³ build once,
@@ -752,6 +788,12 @@ public final class CameraEngineView: ExpoView {
   /// inside CameraDNARenderer makes every later consumer a key hit.
   private func compiledSnapshot(_ source: CameraInputNormalizer.Source) -> CameraDNARenderer.CompiledCameraProfile? {
     profileLock.lock()
+    // ORIG passthrough: no compiled pipeline exists for it — the capture path writes
+    // the Apple photo bytes verbatim and the preview shows the untouched feed.
+    if profilePassthrough {
+      profileLock.unlock()
+      return nil
+    }
     let compiledExisting = source == .processedPhoto ? compiledFinal : compiledPreview
     let value = profile
     profileLock.unlock()
@@ -971,18 +1013,31 @@ public final class CameraEngineView: ExpoView {
     if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { device.whiteBalanceMode = .continuousAutoWhiteBalance }
   }
 
-  /// DEVICE SELECTION (user spec): real Ultra Wide / real Tele REQUIRE the virtual
-  /// device (system seamless crossfade between constituents). Preference:
-  /// triple -> dual -> dual-wide -> physical wide. The JS dial defaults to 26mm
-  /// (zoom 2.0 on virtual bodies), so the MAIN lens still owns the default capture.
-  /// Aperture capability is re-resolved per active physical lens (see zoom KVO).
-  fileprivate static func preferredCaptureDevice() -> AVCaptureDevice? {
-    let types: [AVCaptureDevice.DeviceType] = [
-      .builtInTripleCamera,
-      .builtInDualCamera,
-      .builtInDualWideCamera,
-      .builtInWideAngleCamera,
-    ]
+  /// PHYSICAL LENS ROUTING (spec §1): the capture input is ALWAYS a physical camera —
+  /// never a virtual triple/dual device. Each focal stop maps to one known lens:
+  ///   13mm -> builtInUltraWideCamera · 26/35/52mm -> builtInWideAngleCamera (+crop
+  ///   zoom) · tele -> builtInTelephotoCamera. The virtual device is consulted ONLY to
+  ///   inventory which lenses a body has (tele equivalent mm), never as capture input.
+  fileprivate enum PhysicalLens: String {
+    case ultraWide = "ultrawide"
+    case wide = "wide"
+    case tele = "tele"
+  }
+
+  fileprivate static func physicalCaptureDevice(_ lens: PhysicalLens) -> AVCaptureDevice? {
+    let type: AVCaptureDevice.DeviceType
+    switch lens {
+    case .ultraWide: type = .builtInUltraWideCamera
+    case .wide: type = .builtInWideAngleCamera
+    case .tele: type = .builtInTelephotoCamera
+    }
+    return AVCaptureDevice.default(type, for: .video, position: .back)
+  }
+
+  /// The virtual device (when the body has one) — INVENTORY ONLY: its switchover
+  /// factors reveal the telephoto's native multiplier over the 13mm base.
+  fileprivate static func inventoryVirtualDevice() -> AVCaptureDevice? {
+    let types: [AVCaptureDevice.DeviceType] = [.builtInTripleCamera, .builtInDualCamera, .builtInDualWideCamera]
     for type in types {
       if let device = AVCaptureDevice.default(type, for: .video, position: .back) {
         return device
@@ -992,22 +1047,13 @@ public final class CameraEngineView: ExpoView {
   }
 
   private func configureSession() throws {
-    guard let device = CameraEngineView.preferredCaptureDevice() else {
+    // PHYSICAL ROUTING (spec §1/§2): the session input is the physical main (wide)
+    // camera. 26/35/52mm stay on THIS input via videoZoomFactor crops; only 13mm/Tele
+    // ever swap the input (setLens). Fallbacks exist only for exotic single-lens bodies.
+    guard let device = CameraEngineView.physicalCaptureDevice(.wide)
+      ?? CameraEngineView.physicalCaptureDevice(.ultraWide)
+      ?? CameraEngineView.physicalCaptureDevice(.tele) else {
       throw CameraEngineError.cameraUnavailable
-    }
-
-    // Configure the device before touching the session so a lock failure leaves no partial graph.
-    do {
-      try device.lockForConfiguration()
-      defer { device.unlockForConfiguration() }
-      CameraEngineView.applyAutoModes(to: device)
-      // Cap the stream at 30fps to match the viewfinder — min duration 1/30 ⇒ at most
-      // 30fps. Device-level API: the connection-level videoMinFrameDuration /
-      // isVideoMinFrameDurationSupported are UNAVAILABLE in the current iOS SDK
-      // (TestFlight run 43 compile errors).
-      device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
-    } catch {
-      throw CameraEngineError.configurationFailed
     }
 
     let existingInput = session.inputs.first { ($0 as? AVCaptureDeviceInput)?.device.uniqueID == device.uniqueID }
@@ -1022,65 +1068,10 @@ public final class CameraEngineView: ExpoView {
     session.sessionPreset = .photo
     if needsInput { session.addInput(input) }
     if needsOutput { session.addOutput(output) }
-    // BASE-QUALITY FIX: .quality — .balanced shortened Apple's multi-frame fusion and
-    // NR pipeline (the top cause of "noisy, soft" output). Capture latency is the
-    // acceptable price while base image quality is being fixed.
-    output.maxPhotoQualityPrioritization = .quality
-
-    // PHOTO FORMAT POLICY (user directive): the activeFormat must serve the device's
-    // BEST fully processed photo — never a preview/fps-oriented low-quality format.
-    // The session preset is .photo (AVFoundation selects the max-quality photo format);
-    // preview comes from a separate VideoDataOutput and is downscaled only AFTER capture
-    // (previewCap in captureOutput), never by format choice. This audit logs the facts
-    // so any mismatch between device best and activeFormat is visible in the field.
-    do {
-      let machine = {
-        var systemInfo = utsname()
-        uname(&systemInfo)
-        return withUnsafeBytes(of: &systemInfo.machine) { raw in
-          let cchars = raw.bindMemory(to: CChar.self)
-          guard let base = cchars.baseAddress else { return "" }
-          return String(cString: base)
-        }
-      }()
-      print("[CameraEngine][Diag] device=\(device.deviceType.rawValue) model=\(machine) lens=\(device.localizedName)")
-      if #available(iOS 16.0, *) {
-        let supported = device.activeFormat.supportedMaxPhotoDimensions
-        let dimsText = supported.map { "\($0.width)x\($0.height)" }.joined(separator: ", ")
-        let has24MP = supported.contains { $0.width * $0.height >= 23_000_000 && $0.width * $0.height <= 25_000_000 }
-        print("[CameraEngine][Diag] activeFormat photo dimensions: [\(dimsText)] exact24MP=\(has24MP)")
-      }
-      if #available(iOS 27.0, *) {
-        // CRASH SAFETY: responds-guarded KVC (see capture() note).
-        let format = device.activeFormat as NSObject
-        let hasMin = format.responds(to: NSSelectorFromString("minLensAperture"))
-        let hasMax = format.responds(to: NSSelectorFromString("maxLensAperture"))
-        let minA = hasMin ? (format.value(forKey: "minLensAperture") as? NSNumber)?.doubleValue : nil
-        let maxA = hasMax ? (format.value(forKey: "maxLensAperture") as? NSNumber)?.doubleValue : nil
-        print("[CameraEngine][Diag] activeFormat lens aperture range: \(minA ?? 0)–\(maxA ?? 0) (variable = \(minA.map { $0 > 0 } ?? false))")
-      }
-    }
-
-    // 24MP TARGET: on iPhone 15+ class devices whose activeFormat explicitly supports a
-    // ~24MP photo dimension, request it (Apple multi-frame fused, .quality). On devices
-    // without a 24MP option (e.g. iPhone 14 Plus → 12MP ladder) fall back to the device's
-    // BEST processed dimension instead of squeezing an interpolation out of nothing.
-    if #available(iOS 16.0, *) {
-      let supported = device.activeFormat.supportedMaxPhotoDimensions
-      if !supported.isEmpty {
-        let exact24 = supported.filter { $0.width * $0.height >= 23_000_000 && $0.width * $0.height <= 25_000_000 }
-        let chosen: CMVideoDimensions
-        if let best24 = exact24.max(by: { $0.width * $0.height < $1.width * $1.height }) {
-          chosen = best24
-        } else {
-          chosen = supported.max(by: { $0.width * $0.height < $1.width * $1.height })!
-          print("[CameraEngine][Diag] no ~24MP dimension on this device — using device best \(chosen.width)x\(chosen.height)")
-        }
-        output.maxPhotoDimensions = chosen
-        print("[CameraEngine][Diag] maxPhotoDimensions = \(chosen.width)x\(chosen.height) (\(chosen.width * chosen.height / 1_000_000)MP)")
-      }
-    }
-
+    // SHUTTER RESPONSE (spec §6): .balanced — Apple's recommended middle point between
+    // multi-frame fusion quality and capture latency. Per-capture settings mirror this
+    // (see capture()). AE/AF/AWB stay fully automatic; no self-built exposure logic.
+    output.maxPhotoQualityPrioritization = .balanced
     // ProRAW capability stays available in code, but is NOT enabled by default (expert
     // review §3): the current phase targets Preview ≈ Final, and the preview feeds from
     // Apple's live pipeline. Capture through the same Apple-processed photo until a
@@ -1104,45 +1095,172 @@ public final class CameraEngineView: ExpoView {
         session.addOutput(videoOutput)
       }
     }
-    // The 30fps cap for this stream is set device-wide in configureSession's
-    // lockForConfiguration block (activeVideoMinFrameDuration).
-    if let orientation = currentDeviceOrientation() {
-      _ = setOrientation(orientation)
-    }
 
     session.commitConfiguration()
     camera = device
     configured = true
-    refreshApertureCapabilities()
-    setupCameraControls(device: device)
+    // EVERYTHING device-scoped lives in ONE function (spec §2) — the same rebuild runs
+    // at session configuration AND after every physical input swap (setLens).
+    try configureForCurrentPhysicalCamera(device)
     let controlSurface = CameraControlProbe.exposedMethods()
     print("[CameraEngine][Diag] Camera Control public surface (\(controlSurface.count) methods): \(controlSurface.isEmpty ? "none exposed by this OS" : controlSurface.joined(separator: ", "))")
   }
 
-  fileprivate func capture(completion: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
+  /// UNIFIED PER-LENS REBUILD (spec §2): after ANY physical input becomes active — first
+  /// configuration OR a 13mm/Wide/Tele swap — re-read THIS lens's truth and re-apply every
+  /// device-scoped setting. Nothing is carried over from the previous physical lens:
+  ///   activeFormat → maxPhotoDimensions (24MP policy re-evaluated on THIS format)
+  ///   AF/AE/AWB auto · 30fps stream cap · zoom reset · orientation
+  ///   Fast Capture / ZSL / Responsive Capture capability re-check (off when unsupported)
+  ///   Camera Control rebuild · aperture capability re-resolve (this lens's own format)
+  private func configureForCurrentPhysicalCamera(_ device: AVCaptureDevice) throws {
+    // Device-scoped policy for the ACTIVE lens.
+    do {
+      try device.lockForConfiguration()
+      defer { device.unlockForConfiguration() }
+      CameraEngineView.applyAutoModes(to: device)
+      // Cap the stream at 30fps to match the viewfinder — min duration 1/30 ⇒ at most
+      // 30fps. Device-level API: the connection-level videoMinFrameDuration /
+      // isVideoMinFrameDurationSupported are UNAVAILABLE in the current iOS SDK
+      // (TestFlight run 43 compile errors).
+      device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
+      // Every lens starts its life at 1.0 (13mm/Tele have no crop zoom; the wide's
+      // 35/52mm stops re-assert their factor right after via setZoomFactor).
+      device.videoZoomFactor = 1.0
+      currentEquivalentMM = 0
+    } catch {
+      throw CameraEngineError.configurationFailed
+    }
+
+    // PHOTO FORMAT POLICY: the activeFormat must serve THIS device's BEST fully
+    // processed photo. Audit-log the facts so any mismatch is visible in the field.
+    do {
+      let machine = {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        return withUnsafeBytes(of: &systemInfo.machine) { raw in
+          let cchars = raw.bindMemory(to: CChar.self)
+          guard let base = cchars.baseAddress else { return "" }
+          return String(cString: base)
+        }
+      }()
+      print("[CameraEngine][Diag] lens config device=\(device.deviceType.rawValue) model=\(machine) lens=\(device.localizedName)")
+      if #available(iOS 16.0, *) {
+        let supported = device.activeFormat.supportedMaxPhotoDimensions
+        let dimsText = supported.map { "\($0.width)x\($0.height)" }.joined(separator: ", ")
+        let has24MP = supported.contains { $0.width * $0.height >= 23_000_000 && $0.width * $0.height <= 25_000_000 }
+        print("[CameraEngine][Diag] activeFormat photo dimensions: [\(dimsText)] exact24MP=\(has24MP)")
+      }
+      if #available(iOS 27.0, *) {
+        // CRASH SAFETY: responds-guarded KVC (see capture() note).
+        let format = device.activeFormat as NSObject
+        let hasMin = format.responds(to: NSSelectorFromString("minLensAperture"))
+        let hasMax = format.responds(to: NSSelectorFromString("maxLensAperture"))
+        let minA = hasMin ? (format.value(forKey: "minLensAperture") as? NSNumber)?.doubleValue : nil
+        let maxA = hasMax ? (format.value(forKey: "maxLensAperture") as? NSNumber)?.doubleValue : nil
+        print("[CameraEngine][Diag] activeFormat lens aperture range: \(minA ?? 0)–\(maxA ?? 0) (variable = \(minA.map { $0 > 0 } ?? false))")
+      }
+    }
+
+    // PHOTO DIMENSIONS — 24MP policy RE-READ from THIS lens's activeFormat (spec §2):
+    // ~24MP supported → use the largest 24MP tier; otherwise THIS format's best
+    // supported dimension. The previous lens's dimensions are NEVER carried over.
+    if #available(iOS 16.0, *) {
+      let supported = device.activeFormat.supportedMaxPhotoDimensions
+      if !supported.isEmpty {
+        let exact24 = supported.filter { $0.width * $0.height >= 23_000_000 && $0.width * $0.height <= 25_000_000 }
+        let chosen: CMVideoDimensions
+        if let best24 = exact24.max(by: { $0.width * $0.height < $1.width * $1.height }) {
+          chosen = best24
+        } else {
+          chosen = supported.max(by: { $0.width * $0.height < $1.width * $1.height })!
+          print("[CameraEngine][Diag] no ~24MP dimension on this lens — using its best \(chosen.width)x\(chosen.height)")
+        }
+        output.maxPhotoDimensions = chosen
+        print("[CameraEngine][Diag] maxPhotoDimensions = \(chosen.width)x\(chosen.height) (\(chosen.width * chosen.height / 1_000_000)MP)")
+      }
+    }
+
+    // FAST-CAPTURE TRIO re-check per physical lens (spec §2): capability-driven;
+    // supported → on, unsupported → explicitly OFF (never a stale carry-over).
+    //  - Zero Shutter Lag + Fast Capture Prioritization: public since iOS 17; both are
+    //    effective only when a capture asks for .balanced/.speed — which it does.
+    //  - Responsive Capture: iOS 26-era surface, probed DYNAMICALLY (responds + KVC) so
+    //    this file still compiles against older SDKs (AGENTS rule A).
+    if #available(iOS 17.0, *) {
+      if output.isZeroShutterLagSupported {
+        output.isZeroShutterLagEnabled = true
+        print("[CameraEngine][Diag] zero-shutter-lag enabled")
+      } else {
+        output.isZeroShutterLagEnabled = false
+      }
+      if output.isFastCapturePrioritizationSupported {
+        output.isFastCapturePrioritizationEnabled = true
+        print("[CameraEngine][Diag] fast capture prioritization enabled")
+      } else {
+        output.isFastCapturePrioritizationEnabled = false
+      }
+    }
+    if output.responds(to: NSSelectorFromString("isResponsiveCaptureSupported")),
+       (output.value(forKey: "responsiveCaptureSupported") as? Bool) == true,
+       output.responds(to: NSSelectorFromString("setResponsiveCaptureEnabled:")) {
+      output.setValue(true, forKey: "responsiveCaptureEnabled")
+      print("[CameraEngine][Diag] responsive capture enabled (output-level)")
+    }
+    // DEFERRED PHOTO DELIVERY STAYS OFF (final-photo spec): Camera 18 must receive the
+    // FULLY processed photo synchronously in didFinishProcessingPhoto (full photo →
+    // Camera DNA → HEIF → PhotoKit). No deferred proxy / two-phase final photo.
+
+    if let orientation = currentDeviceOrientation() {
+      _ = setOrientation(orientation)
+    }
+    // Camera Control belongs to THIS device — tear down the outgoing lens's sliders
+    // and rebuild against the new one.
+    teardownCameraControls()
+    setupCameraControls(device: device)
+    refreshApertureCapabilities()
+  }
+
+  /// TWO settle channels (spec §6 — shutter response decoupled from post-processing):
+  ///  - onCaptured settles the JS shutter promise at Apple-capture-complete
+  ///    (didFinishProcessingPhoto) — Camera DNA / HEIF / PhotoKit never gate the shutter.
+  ///  - onProcessed reports the background pipeline outcome as the onPhotoProcessed event.
+  /// Gates, in order: session running → Apple captureReadiness (iOS 17+) → in-flight
+  /// pipeline cap → physical-lens switch in progress.
+  fileprivate func capture(equivalentFocalMMRequest: Int, onCaptured: @escaping (Result<Void, CameraEngineError>) -> Void, onProcessed: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
     sessionQueue.async {
-      guard self.session.isRunning else { completion(.failure(.notRunning), nil); return }
+      guard self.session.isRunning else { onCaptured(.failure(.notRunning)); return }
       CameraTempFiles.removeUntrackedFiles()
 
-      // Iteration 4: rapid shutter presses must not pile up unbounded ProRAW buffers.
-      // A small in-flight cap keeps memory flat; the user gets an honest busy signal
-      // instead of a crash or silent queue growth.
+      // SHUTTER READINESS (spec §6): Apple's own captureReadiness — the photo pipe's
+      // honest "can I take another shot right now", independent of the app pipeline.
+      if #available(iOS 17.0, *) {
+        if self.output.captureReadiness != .ready {
+          onCaptured(.failure(.captureBusy))
+          return
+        }
+      }
+      // Background pipelines stay bounded (memory): a small in-flight cap keeps 24MP
+      // CIImage + encode pressure flat; the user gets an honest busy signal instead of
+      // a crash or silent queue growth.
       guard self.captureDelegates.count < 3 else {
-        completion(.failure(.captureBusy), nil)
+        onCaptured(.failure(.captureBusy))
+        return
+      }
+      // Physical input swap in progress (preview mid-crossfade): refuse honestly.
+      guard !self.lensSwitching else {
+        onCaptured(.failure(.captureBusy))
         return
       }
 
       // PRODUCTION PIPELINE: one source, one truth — the full-resolution Apple-processed
-      // photo. ProRAW/DNG and dual-format (RAW + processed companion) capture are removed:
-      // the final architecture is Apple Processed Photo → LUT → Fine Color → Tone →
-      // HEIF/JPEG, one decode → one render → one encode. No in-house multi-frame fusion:
-      // the session is pinned to the physical wide camera, which has no virtual-device
-      // Fusion path (and preserves real variable-aperture semantics on iPhone 18 Pro).
+      // photo (ORIG bypasses rendering entirely — see PhotoCaptureDelegate.processPassthrough).
       let photoSettings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
 
-      photoSettings.photoQualityPrioritization = .quality
-      // Per-capture mirror of output.maxPhotoDimensions (iOS 16+): guarantee the 24MP
-      // fused target every capture, independent of any earlier settings object.
+      photoSettings.photoQualityPrioritization = .balanced
+      // Per-capture mirror of output.maxPhotoDimensions (iOS 16+): guarantee the CURRENT
+      // lens's dimension target every capture — re-derived per physical input in
+      // configureForCurrentPhysicalCamera, never cached across a lens swap.
       if #available(iOS 16.0, *) {
         let maxDims = self.output.maxPhotoDimensions
         if maxDims.width > 0 { photoSettings.maxPhotoDimensions = maxDims }
@@ -1163,8 +1281,6 @@ public final class CameraEngineView: ExpoView {
         // Setter existence verified above → KVC set cannot raise an unknown-key exception.
         photoSettings.setValue(true, forKey: "responsiveCaptureEnabled")
         print("[CameraEngine][Diag] responsive capture ENABLED for this shot")
-      } else {
-        print("[CameraEngine][Diag] responsive capture not available on this device/OS — standard quality path (supported=\(outputResponds), settable=\(settingsResponds))")
       }
       // DEFERRED PHOTO PROCESSING stays OFF (final-photo spec): Camera 18 must receive
       // the fully processed photo in didFinishProcessingPhoto immediately. Read back the
@@ -1176,37 +1292,32 @@ public final class CameraEngineView: ExpoView {
         print("[CameraEngine][Diag] deferred photo processing = \(deferred) (must stay false)")
         assert(!deferred, "deferred photo processing must stay disabled")
       }
-      // ENABLE PHOTO DELIVERY IN PREVIEW-RES? No — keep full-res delivery (default).
-      // (Companion/preview-sized images are never requested; the main photo is the only
-      // consumer of the pipeline.)
       // Landscape-held captures must stay landscape in the photo library: rotate the capture
       // connection to the physical device orientation so buffers arrive already upright and
-      // the saved JPEG needs no EXIF rotation fix-up. Same rotation path as the preview
-      // (videoRotationAngle on iOS 17+) — preview and photo always agree.
+      // the saved file needs no EXIF rotation fix-up.
       if let orientation = self.currentDeviceOrientation() {
         _ = self.applyRotation(orientation, to: self.output.connection(with: .video))
       }
-      // Shutter fidelity relies on .balanced prioritization + the ProRAW dual-format path.
-      // NOTE: AVCapturePhotoSettings exposes no fast-capture toggle in this SDK; do not
-      // re-add speculative API names without verifying against the actual headers.
-      // EXIF focal stamp: the metadata carries the NATIVE lens focal (e.g. 26mm), so
-      // crop-zoomed shots read wrong in the Photos app (device report: 35/52mm shots
-      // labeled 26mm). Read the zoom ACTUALLY applied to the device right before the
-      // shutter — the same zoom the photo pipeline renders with — and derive the
-      // 35mm-equivalent: zoom 1.0 renders 13mm on virtual devices (UW base), 26mm on
-      // single-wide bodies (matches focalLadder.ts).
+      // EXIF focal stamp (spec §3): the JS focal ladder OWNS the truth — each FocalStop
+      // carries its real 35mm-equivalent mm, pushed here (and cached on the view by
+      // setZoomFactor). Legacy base×zoom estimate only survives as a last-resort
+      // fallback for captures with no ladder info (e.g. Camera Control hard shutter
+      // before any dial touch).
       let appliedZoom = self.camera?.videoZoomFactor ?? 1.0
       let baseEquivalentMM: Double = self.camera?.deviceType == .builtInWideAngleCamera ? 26.0 : 13.0
-      let equivalentFocalMM = Int((baseEquivalentMM * appliedZoom).rounded())
+      let requestedMM = equivalentFocalMMRequest > 0 ? equivalentFocalMMRequest : self.currentEquivalentMM
+      let equivalentFocalMM = requestedMM > 0 ? requestedMM : Int((baseEquivalentMM * appliedZoom).rounded())
       let id = photoSettings.uniqueID
       let delegate = PhotoCaptureDelegate(
         compiled: self.compiledSnapshot(.processedPhoto),
         appliedZoom: appliedZoom,
         equivalentFocalMM: equivalentFocalMM,
-      ) { [weak self] result, detail in
-        self?.sessionQueue.async { self?.captureDelegates.removeValue(forKey: id) }
-        completion(result, detail)
-      }
+        onCaptured: onCaptured,
+        onProcessed: { [weak self] result, detail in
+          self?.sessionQueue.async { self?.captureDelegates.removeValue(forKey: id) }
+          onProcessed(result, detail)
+        }
+      )
       self.captureDelegates[id] = delegate
       self.output.capturePhoto(with: photoSettings, delegate: delegate)
     }
@@ -1217,12 +1328,33 @@ public final class CameraEngineView: ExpoView {
   // (f/1.8 simulated would blur — but the processor skips when no person mask exists,
   // and the DEFAULT aperture state on fixed-lens devices is resolved by capabilities).
   fileprivate var apertureMode: ApertureMode = .fixed
+  // Lens-scoped runtime state lock: guards lensSwitching AND currentEquivalentMM,
+  // both written from sessionQueue + renderQueue.
+  private let lensStateLock = NSLock()
+  private var lensSwitchingStorage = false
+  fileprivate var lensSwitching: Bool {
+    get { lensStateLock.lock(); defer { lensStateLock.unlock() }; return lensSwitchingStorage }
+    set { lensStateLock.lock(); lensSwitchingStorage = newValue; lensStateLock.unlock() }
+  }
+  // 35mm-equivalent focal of the CURRENT FocalStop (spec §3) — pushed by the JS ladder
+  // through setZoomFactor; the EXIF stamp prefers it over the legacy base×zoom estimate.
+  private var currentEquivalentMMStorage = 0
+  private var currentEquivalentMM: Int {
+    get { lensStateLock.lock(); defer { lensStateLock.unlock() }; return currentEquivalentMMStorage }
+    set { lensStateLock.lock(); currentEquivalentMMStorage = newValue; lensStateLock.unlock() }
+  }
   // Camera Control (hardware side button): retained controls + interaction objects.
   private var cameraControlObjects: [AnyObject] = []
+  // The aperture slider we observe via KVO (needed for symmetric removal on input swap).
+  private var apertureSliderObservedObject: NSObject?
   // The module owns the controller; the view keeps a weak ref for control callbacks.
   fileprivate weak var apertureControllerRef: ApertureController?
   fileprivate func setApertureController(_ controller: ApertureController) {
     apertureControllerRef = controller
+  }
+  /// JS focal ladder pushes the current FocalStop's real equivalent focal (spec §3).
+  fileprivate func noteEquivalentFocalMM(_ mm: Int) {
+    currentEquivalentMM = mm
   }
   // JS event sinks (wired by the module so the view can stay module-free).
   fileprivate static var apertureEventSink: ((Double) -> Void)?
@@ -1331,40 +1463,32 @@ public final class CameraEngineView: ExpoView {
     }
   }
 
-  /// Focal-ladder info for the JS dial. On a virtual device (triple/dual camera) zoom
-  /// factor 1.0 renders the widest constituent camera (ultra-wide, 13mm-equivalent), so
-  /// the JS side maps mm → zoom as mm/13; single-wide bodies keep the 26mm main native.
+  /// PHYSICAL lens inventory for the JS focal ladder (spec §1): which physical cameras
+  /// exist (ultraWide / tele) plus the tele's native multiplier over the 13mm base.
+  /// The JS side builds one stop per EXISTING physical lens — missing lenses hide.
   fileprivate func availableLenses(completion: @escaping (Result<[String: Any], CameraEngineError>) -> Void) {
     sessionQueue.async {
-      guard let device = self.camera ?? CameraEngineView.preferredCaptureDevice() else {
-        DispatchQueue.main.async { completion(.failure(.cameraUnavailable)) }
-        return
-      }
-      let kind: String
-      switch device.deviceType {
-      case .builtInTripleCamera: kind = "virtual-triple"
-      case .builtInDualCamera: kind = "virtual-dual"
-      case .builtInDualWideCamera: kind = "virtual-dual-wide"
-      default: kind = "single"
-      }
-      // CAPABILITY-BASED lens availability (no model names): virtual devices always
-      // contain the ultra-wide; a TELE exists only when the system publishes a
-      // switchover zoom factor BEYOND the main camera (last switchover = tele).
-      // Tele stop mm = 13 (virtual base) * teleZoom.
-      let isVirtual = kind.hasPrefix("virtual")
+      // PHYSICAL INVENTORY (spec §1): report which PHYSICAL lenses exist. The virtual
+      // device is read ONLY for the tele's native multiplier over the 13mm base — it is
+      // never a capture input.
       var teleZoom: Double? = nil
-      if isVirtual, device.responds(to: NSSelectorFromString("virtualDeviceSwitchOverVideoZoomFactors")),
-         let factors = device.value(forKey: "virtualDeviceSwitchOverVideoZoomFactors") as? [NSNumber] {
+      if let virtual = CameraEngineView.inventoryVirtualDevice(),
+         virtual.responds(to: NSSelectorFromString("virtualDeviceSwitchOverVideoZoomFactors")),
+         let factors = virtual.value(forKey: "virtualDeviceSwitchOverVideoZoomFactors") as? [NSNumber] {
         let sorted = factors.map(\.doubleValue).sorted()
         if sorted.count >= 2, let last = sorted.last, last > 2.0 {
           teleZoom = last
         }
       }
+      let hasUltraWide = CameraEngineView.physicalCaptureDevice(.ultraWide) != nil
+      let hasTele = CameraEngineView.physicalCaptureDevice(.tele) != nil
+      let main = CameraEngineView.physicalCaptureDevice(.wide)
       DispatchQueue.main.async {
         completion(.success([
-          "kind": kind,
-          "deviceModel": device.localizedName,
-          "ultraWide": isVirtual,
+          "kind": "physical",
+          "deviceModel": main?.localizedName ?? "Unknown Device",
+          "ultraWide": hasUltraWide,
+          "tele": hasTele,
           "teleZoom": teleZoom ?? NSNull(),
         ]))
       }
@@ -1391,16 +1515,109 @@ public final class CameraEngineView: ExpoView {
     }
   }
 
-  /// Legacy physical-input swap — superseded by the virtual-device zoom path. On virtual
-  /// devices this MUST NOT run (it would break the seamless switch), so it just succeeds.
+  /// PHYSICAL INPUT SWAP (spec §1/§3): 13mm / Tele switch the physical camera input
+  /// (beginConfiguration → remove old input → add new input → commit); 26/35/52 NEVER
+  /// come here — they stay on the physical wide and only move videoZoomFactor
+  /// (setZoomFactor), so the main lens's variable iris (when the hardware has one)
+  /// serves all three stops without any input churn.
+  /// After a swap, everything device-scoped is re-applied against the NEW lens:
+  /// applyAutoModes, the 30fps stream cap, zoom=1.0, orientation, Camera Control
+  /// rebuild, and the aperture capability re-resolve (13mm/Tele are honest FIXED
+  /// lenses; capability is read from THEIR OWN activeFormat, never inferred from a
+  /// virtual device).
   fileprivate func setLens(_ lensId: String, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
     sessionQueue.async {
-      if let device = self.camera, device.deviceType != .builtInWideAngleCamera {
+      guard let lens = CameraEngineView.PhysicalLens(rawValue: lensId),
+            let target = CameraEngineView.physicalCaptureDevice(lens) else {
+        completion(.failure(.cameraUnavailable))
+        return
+      }
+      if let current = self.camera, current.deviceType == target.deviceType {
+        // Same physical lens (26↔35↔52 all live on the Wide): NO input swap, NO
+        // re-configuration — the user's real aperture and zoom survive untouched.
         completion(.success(()))
         return
       }
+      // PREVIEW CROSSFADE (spec §5): freeze on the OLD lens's last frame while the
+      // session rewires; capture stays refused until the NEW lens's first frame lands.
+      self.lensSwitching = true
+      self.previewRenderer.beginHold()
+      let input: AVCaptureDeviceInput
+      do {
+        input = try AVCaptureDeviceInput(device: target)
+      } catch {
+        self.lensSwitching = false
+        self.previewRenderer.endTransition()
+        completion(.failure(.cameraUnavailable))
+        return
+      }
+      self.session.beginConfiguration()
+      if let old = self.camera {
+        for candidate in self.session.inputs
+        where (candidate as? AVCaptureDeviceInput)?.device.uniqueID == old.uniqueID {
+          self.session.removeInput(candidate)
+        }
+      }
+      guard self.session.canAddInput(input) else {
+        self.session.commitConfiguration()
+        self.lensSwitching = false
+        self.previewRenderer.endTransition()
+        completion(.failure(.configurationFailed))
+        return
+      }
+      self.session.addInput(input)
+      self.session.commitConfiguration()
+      self.camera = target
+      self.configured = true
+      // UNIFIED per-lens rebuild (spec §2): device auto modes, 30fps cap, zoom reset,
+      // maxPhotoDimensions re-read from THIS activeFormat, fast-capture trio re-check,
+      // orientation, Camera Control rebuild, aperture capability re-resolve.
+      do {
+        try self.configureForCurrentPhysicalCamera(target)
+      } catch {
+        // The input swap is already COMMITTED at this point — it cannot roll back, so
+        // keep the new lens and surface the partial configuration loudly (the unified
+        // rebuild is idempotent and the next startCamera/lens pass completes it).
+        print("[CameraEngine][Diag] lens swap: per-lens rebuild FAILED for \(target.localizedName): continuing with committed input")
+        self.lensSwitching = false
+        self.previewRenderer.endTransition()
+        completion(.failure(.configurationFailed))
+        return
+      }
+      // NEW lens is live: fade the preview from the held old frame to the new feed.
+      self.previewRenderer.beginFade()
+      // WATCHDOG: the normal unlock is the new lens's first accepted preview frame
+      // (captureOutput). If frames somehow never resume, never leave the shutter
+      // permanently locked behind the lens-switch embargo.
+      self.sessionQueue.asyncAfter(deadline: .now() + 2.5) {
+        if self.lensSwitching {
+          self.lensSwitching = false
+          print("[CameraEngine][Diag] lens-switch watchdog released the capture embargo")
+        }
+      }
       completion(.success(()))
     }
+  }
+
+  /// Remove every Camera Control binding tied to the outgoing physical device:
+  /// the aperture slider's KVO observation, all controls, and the zoom-device KVO.
+  private func teardownCameraControls() {
+    guard #available(iOS 18.0, *) else { return }
+    if let slider = apertureSliderObservedObject {
+      slider.removeObserver(self, forKeyPath: "value")
+      apertureSliderObservedObject = nil
+    }
+    if let observed = zoomKvoObservedDevice {
+      observed.removeObserver(self, forKeyPath: "videoZoomFactor")
+      zoomKvoObservedDevice = nil
+    }
+    for object in cameraControlObjects {
+      if let control = object as? AVCaptureControl, session.controls.contains(control) {
+        session.removeControl(control)
+      }
+    }
+    cameraControlObjects.removeAll()
+    print("[CameraEngine][Diag] Camera Control teardown for input swap")
   }
 
   override public func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
@@ -1418,8 +1635,9 @@ public final class CameraEngineView: ExpoView {
       if let zoom = (change?[.newKey] as? NSNumber)?.doubleValue {
         Self.zoomEventSink?(zoom)
       }
-      // A zoom switchover means the ACTIVE PHYSICAL LENS changed (wide <-> tele):
-      // re-resolve aperture capability per the current lens (spec section 10).
+      // PHYSICAL ROUTING: zoom no longer changes lenses (26/35/52 are crops on the one
+      // physical wide). The re-resolve stays as a cheap safety net — it re-reads the
+      // CURRENT physical device's own format and is a no-op when nothing changed.
       refreshApertureCapabilities()
       return
     }
@@ -1475,6 +1693,7 @@ public final class CameraEngineView: ExpoView {
       return
     }
     slider.addObserver(self, forKeyPath: "value", options: [.new], context: &apertureSliderKvoContext)
+    apertureSliderObservedObject = slider
     if let control = slider as? AVCaptureControl {
       if session.canAddControl(control) {
         session.addControl(control)
@@ -1636,18 +1855,28 @@ extension CameraEngineView: AVCaptureVideoDataOutputSampleBufferDelegate {
     guard image.extent.width > 0, image.extent.height > 0 else { return }
 
     if previewView != nil {
-      previewRenderer.enqueue(image)
+      // HOLD 期间返回 false（帧被丢弃，旧画面保持）：第一个被接受的新镜头帧 = 输入切换
+      // 完成，解除 capture 的切换禁窗（spec §5）。
+      let accepted = previewRenderer.enqueue(image)
+      if accepted, lensSwitching {
+        lensSwitching = false
+      }
     } else {
       // No-Metal fallback: push a CGImage into the plain layer.
       guard let cgImage = CameraEngineGPU.ciContext.createCGImage(image, from: image.extent) else { return }
       DispatchQueue.main.async { [self] in
         renderLayer.contents = cgImage
       }
+      if lensSwitching {
+        lensSwitching = false
+      }
     }
   }
 }
 
-// MARK: - WYSIWYG Preview Display (MTKView, no custom Metal shader)
+// MARK: - Color/Tone WYSIWYG Preview Display (MTKView, no custom Metal shader)
+// Grain/halation/detail stages apply ONLY to the final photo — the preview is honest
+// about sharing the Color/Tone pipeline, not the full pixel pipeline.
 /// Core Image renders the latest filtered frame straight into the drawable texture.
 private final class PreviewRenderer: NSObject, MTKViewDelegate {
   // MTKView does not expose a command queue; the renderer owns one on the shared device.
@@ -1657,6 +1886,18 @@ private final class PreviewRenderer: NSObject, MTKViewDelegate {
   private let lock = NSLock()
   private var pendingImage: CIImage?
   private var currentExtentStorage = CGRect.zero
+  // PHYSICAL LENS CROSSFADE (spec §5): HOLD freezes the last OLD-lens frame (incoming
+  // frames are dropped, the drawable simply keeps showing the held image) while the
+  // session rewires; FADE blends the new lens's feed over that held frame across
+  // ~150ms. Preview-only cosmetics — capture bytes and the photo pipeline are untouched.
+  private enum Phase { case idle, hold, fade }
+  private var phase: Phase = .idle
+  private var heldImage: CIImage?
+  // Most recent displayed frame — draw() consumes pendingImage, so hold needs this
+  // separate copy to guarantee a real crossfade (nil held = degenerate hard cut).
+  private var latestImage: CIImage?
+  private var fadeStartStorage: CFTimeInterval?
+  private static let fadeDuration: CFTimeInterval = 0.15
 
   override init() {
     self.commandQueue = CameraEngineGPU.metalDevice?.makeCommandQueue()
@@ -1669,10 +1910,46 @@ private final class PreviewRenderer: NSObject, MTKViewDelegate {
     return currentExtentStorage
   }
 
-  func enqueue(_ image: CIImage) {
+  /// Enqueue a frame. Returns FALSE while HOLDING (frame dropped — the old-lens frame
+  /// stays on screen), TRUE when the frame will be displayed. The view uses this to
+  /// clear its lens-switch capture embargo on the first NEW-lens frame.
+  @discardableResult
+  func enqueue(_ image: CIImage) -> Bool {
     lock.lock()
+    if phase == .hold {
+      lock.unlock()
+      return false
+    }
     pendingImage = image
+    latestImage = image
     currentExtentStorage = image.extent
+    lock.unlock()
+    return true
+  }
+
+  /// Freeze on the most recent frame (call BEFORE the input reconfiguration starts).
+  func beginHold() {
+    lock.lock()
+    heldImage = pendingImage ?? latestImage
+    phase = .hold
+    fadeStartStorage = nil
+    lock.unlock()
+  }
+
+  /// The new input is live: on its first drawn frame, start the 150ms crossfade.
+  func beginFade() {
+    lock.lock()
+    phase = .fade
+    fadeStartStorage = nil
+    lock.unlock()
+  }
+
+  /// Abort any transition (input-swap failure paths) — back to the live feed.
+  func endTransition() {
+    lock.lock()
+    phase = .idle
+    heldImage = nil
+    fadeStartStorage = nil
     lock.unlock()
   }
 
@@ -1682,6 +1959,21 @@ private final class PreviewRenderer: NSObject, MTKViewDelegate {
     lock.lock()
     let image = pendingImage
     pendingImage = nil
+    let currentPhase = phase
+    if currentPhase == .fade, fadeStartStorage == nil, image != nil {
+      fadeStartStorage = CACurrentMediaTime()
+    }
+    let held = heldImage
+    var fadeT: Double = 1
+    if currentPhase == .fade {
+      let start = fadeStartStorage ?? CACurrentMediaTime()
+      fadeT = min(1, (CACurrentMediaTime() - start) / Self.fadeDuration)
+      if fadeT >= 1 {
+        phase = .idle
+        heldImage = nil
+        fadeStartStorage = nil
+      }
+    }
     lock.unlock()
 
     guard let image = image,
@@ -1691,14 +1983,17 @@ private final class PreviewRenderer: NSObject, MTKViewDelegate {
     let drawableSize = view.drawableSize
     guard drawableSize.width > 1, drawableSize.height > 1 else { return }
 
-    // Letterbox the 4:3 frame inside the drawable (aspect-fit), matching the capture.
-    let extent = image.extent
-    let scale = min(drawableSize.width / extent.width, drawableSize.height / extent.height)
-    let fitted = image
-      .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-      .transformed(by: CGAffineTransform(
-        translationX: (drawableSize.width - extent.width * scale) / 2,
-        y: (drawableSize.height - extent.height * scale) / 2))
+    // Letterbox a frame inside the drawable (aspect-fit), matching the capture.
+    func fittedFrame(_ source: CIImage) -> CIImage {
+      let extent = source.extent
+      let scale = min(drawableSize.width / extent.width, drawableSize.height / extent.height)
+      return source
+        .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        .transformed(by: CGAffineTransform(
+          translationX: (drawableSize.width - extent.width * scale) / 2,
+          y: (drawableSize.height - extent.height * scale) / 2))
+    }
+    let fitted = fittedFrame(image)
     // Repaint EVERY drawable pixel each frame: Core Image writes only where the image
     // lands, so the aspect-fit bars kept the PREVIOUS frame's pixels. After an
     // orientation switch the frame's aspect changes and the viewfinder literally showed
@@ -1707,7 +2002,17 @@ private final class PreviewRenderer: NSObject, MTKViewDelegate {
     // the bars render as honest black, like the system camera.
     let backdrop = CIImage(color: CIColor.black)
       .cropped(to: CGRect(origin: .zero, size: drawableSize))
-    let frame = fitted.composited(over: backdrop)
+    var frame = fitted.composited(over: backdrop)
+    // CROSSFADE: the new lens's feed fades in OVER the held old-lens frame (alpha
+    // modulated via CIColorMatrix's A-vector), so a physical input swap never reads
+    // as a black flash or a hard cut.
+    if currentPhase == .fade, fadeT < 1, let held {
+      let base = fittedFrame(held).composited(over: backdrop)
+      let overlay = fitted.applyingFilter("CIColorMatrix", parameters: [
+        "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(fadeT)),
+      ])
+      frame = overlay.composited(over: base)
+    }
 
     CameraEngineGPU.ciContext.render(
       frame,
@@ -1889,25 +2194,46 @@ private enum CameraControlProbe {
   }
 }
 
-// MARK: - Photo Capture Delegate (Apple Processed Photo → LUT → Tone → JPEG)
+// MARK: - Photo Capture Delegate (Apple Processed Photo → LUT → Tone → HEIF)
+/// TWO settle channels (shutter-response decoupling, spec §6):
+///  - onCaptured: fires at didFinishProcessingPhoto — Apple's capture is DONE, the full
+///    photo exists. The JS shutter promise settles HERE; Camera DNA / HEIF / PhotoKit
+///    must never gate the shutter UI.
+///  - onProcessed: fires after the background pipeline (+ PhotoKit save) finishes —
+///    delivered to JS as the `onPhotoProcessed` event (thumbnail/URI/error reporting).
+/// ORIG (compiled == nil) bypasses Camera DNA entirely: fileDataRepresentation bytes
+/// are written VERBATIM (metadata/attachments preserved) and saved as-is.
 private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
   private static let processingQueue = DispatchQueue(label: "camera-engine.photo-processing", qos: .userInitiated)
   // ponytail: static shared CIContext avoids allocating GPU command queue/shader cache per shutter press
   private static let sharedContext = CameraEngineGPU.ciContext
   private let compiled: CameraDNARenderer.CompiledCameraProfile?
-  private let completion: (Result<[String: Any], CameraEngineError>, String?) -> Void
+  private let onCaptured: (Result<Void, CameraEngineError>) -> Void
+  private let onProcessed: (Result<[String: Any], CameraEngineError>, String?) -> Void
   private let completionLock = NSLock()
   private var didComplete = false
+  private var didCaptureSettle = false
   private var generatedURLs: [URL] = []
   /// Zoom ACTUALLY applied to the device at shutter time, and its 35mm-equivalent focal
-  /// (base × zoom) — stamped into EXIF so crop-zoomed shots read correctly in Photos.
+  /// (from the JS focal ladder's current FocalStop) — stamped into EXIF so crop-zoomed
+  /// shots read correctly in Photos.
   private let appliedZoom: Double
   private let equivalentFocalMM: Int
-  init(compiled: CameraDNARenderer.CompiledCameraProfile?, appliedZoom: Double, equivalentFocalMM: Int, completion: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
+  init(compiled: CameraDNARenderer.CompiledCameraProfile?, appliedZoom: Double, equivalentFocalMM: Int, onCaptured: @escaping (Result<Void, CameraEngineError>) -> Void, onProcessed: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
     self.compiled = compiled
     self.appliedZoom = appliedZoom
     self.equivalentFocalMM = equivalentFocalMM
-    self.completion = completion
+    self.onCaptured = onCaptured
+    self.onProcessed = onProcessed
+  }
+
+  /// Settles the CAPTURE half exactly once (didFinishProcessingPhoto / error paths).
+  private func settleCaptured(_ result: Result<Void, CameraEngineError>) {
+    completionLock.lock()
+    guard !didCaptureSettle else { completionLock.unlock(); return }
+    didCaptureSettle = true
+    completionLock.unlock()
+    DispatchQueue.main.async { self.onCaptured(result) }
   }
 
   func photoOutput(_ output: AVCapturePhotoOutput, willBeginCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
@@ -1930,16 +2256,82 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     }
 
     guard error == nil, let photoData = photo.fileDataRepresentation() else {
+      settleCaptured(.failure(.captureFailed))
       finish(.failure(.captureFailed))
       return
     }
+    // Apple capture is COMPLETE — free the shutter UI; heavy work continues below.
+    settleCaptured(.success(()))
     processCapturedData(photoData, metadata: photo.metadata)
   }
 
-  /// PRODUCTION PIPELINE — one decode, one render, one encode, full resolution end to end:
-  ///   Apple processed photo (Data) → CIImage → LUT cube (LUT + fine color) → Tone → JPEG.
-  /// Runs exactly once per capture (guarded by hasCompleted inside finish).
+  /// Capture pipeline dispatch. compiled == nil (ORIG passthrough / no profile yet) →
+  /// the Apple photo bytes are written VERBATIM; any other profile → Camera DNA.
   private func processCapturedData(_ photoData: Data, metadata: [AnyHashable: Any]) {
+    guard let compiled else {
+      processPassthrough(photoData)
+      return
+    }
+    processWithCameraDNA(photoData, metadata: metadata, compiled: compiled)
+  }
+
+  /// ORIG TRUE PASSTHOUGH (spec §4): AVCapturePhoto → fileDataRepresentation → write
+  /// bytes → PhotoKit. NO CIImage decode, NO Camera DNA/tone/grain, NO second encode —
+  /// the file on disk IS Apple's processed photo bit-for-bit, with its original
+  /// metadata/attachments intact.
+  private func processPassthrough(_ photoData: Data) {
+    Self.processingQueue.async { [self] in
+      guard !hasCompleted else { return }
+      let fileURL = CameraTempFiles.makeFinalURL(pathExtension: "jpg")
+      completionLock.lock(); generatedURLs = [fileURL]; completionLock.unlock()
+      do {
+        try photoData.write(to: fileURL, options: .atomic)
+      } catch {
+        finish(.failure(.processingFailed))
+        return
+      }
+      print("[CameraEngine][Diag] passthrough export bytes=\(photoData.count) (no Camera DNA, no re-encode)")
+      // Thumbnail for the in-app chip only — decode-SMALL via ImageIO (never a full
+      // 24MP decode), transform-applied so the chip matches the upright bytes.
+      let thumbURL = CameraTempFiles.makeThumbURL()
+      var thumbOK = false
+      if let source = CGImageSourceCreateWithData(photoData as CFData, nil) {
+        let thumbOptions: [CFString: Any] = [
+          kCGImageSourceCreateThumbnailFromImageAlways: true,
+          kCGImageSourceCreateThumbnailWithTransform: true,
+          kCGImageSourceThumbnailMaxPixelSize: 512,
+        ]
+        if let thumbCG = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions as CFDictionary) {
+          let out = NSMutableData()
+          if let dest = CGImageDestinationCreateWithData(out, "public.jpeg" as CFString, 1, nil) {
+            CGImageDestinationAddImage(dest, thumbCG, [kCGImageDestinationLossyCompressionQuality: 0.8] as CFDictionary)
+            if CGImageDestinationFinalize(dest) {
+              do { try out.write(to: thumbURL, options: .atomic); thumbOK = true } catch { thumbOK = false }
+            }
+          }
+        }
+      }
+      guard thumbOK else {
+        // The chip is cosmetic — a thumbnail failure must not lose the photo.
+        print("[CameraEngine][Diag] passthrough thumbnail failed; finishing without chip")
+        finish(.success([
+          "fileUri": fileURL.absoluteString,
+          "thumbnailUri": NSNull(),
+          "assetLocalIdentifier": NSNull(),
+          "appliedZoom": appliedZoom,
+          "equivalentFocal": equivalentFocalMM,
+          "codec": "jpeg",
+        ]))
+        return
+      }
+      finishAfterPhotoKitSave(fileURL: fileURL, thumbURL: thumbURL, codec: "jpeg")
+    }
+  }
+
+  /// PRODUCTION PIPELINE — one decode, one render, one encode, full resolution end to end:
+  ///   Apple processed photo (Data) → CIImage → LUT cube (LUT + fine color) → Tone → HEIF.
+  /// Runs exactly once per capture (guarded by hasCompleted inside finish).
+  private func processWithCameraDNA(_ photoData: Data, metadata: [AnyHashable: Any], compiled: CameraDNARenderer.CompiledCameraProfile) {
     Self.processingQueue.async { [self] in
       guard !hasCompleted else { return }
 
@@ -1951,11 +2343,8 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
       print("[CameraEngine][Diag] pipeline input extent=\(Int(inputExtent.width))x\(Int(inputExtent.height))")
 
       // Compiled final pipeline (processed-photo normalizer + LUT + fine color + tone).
-      // compiled == nil → true passthrough (no profile applied yet).
       var image = source
-      if let compiled = compiled {
-        image = CameraDNARenderer.apply(compiled, to: image)
-      }
+      image = CameraDNARenderer.apply(compiled, to: image)
       print("[CameraEngine][Diag] after LUT+color extent=\(Int(image.extent.width))x\(Int(image.extent.height))")
 
       let extent = image.extent.integral
@@ -2029,56 +2418,61 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
         return
       }
 
-      guard !hasCompleted else {
-        CameraTempFiles.remove([fileURL, thumbURL])
+      finishAfterPhotoKitSave(fileURL: fileURL, thumbURL: thumbURL, codec: codec)
+    }
+  }
+
+  /// Shared tail for BOTH pipelines (Camera DNA + passthrough): add-only PhotoKit save,
+  /// then finish(success payload). The thumbnail the UI displays must survive restarts —
+  /// serve the Documents copy when persistence succeeds, fall back to the temp file.
+  private func finishAfterPhotoKitSave(fileURL: URL, thumbURL: URL, codec: String) {
+    guard !hasCompleted else {
+      CameraTempFiles.remove([fileURL, thumbURL])
+      return
+    }
+    requestPhotoLibraryAddAuthorization { granted, permissionDetail in
+      guard granted else {
+        self.finish(.failure(.photoPermissionDenied), detail: "photo saving blocked: \(permissionDetail)")
         return
       }
-
-      // 2. Add to Photos via add-only permission
-      requestPhotoLibraryAddAuthorization { granted, permissionDetail in
-        guard granted else {
-          self.finish(.failure(.photoPermissionDenied), detail: "photo saving blocked: \(permissionDetail)")
+      guard !self.hasCompleted else { return }
+      var localIdentifier: String?
+      PHPhotoLibrary.shared().performChanges({
+        let request = PHAssetCreationRequest.forAsset()
+        request.addResource(with: .photo, fileURL: fileURL, options: nil)
+        localIdentifier = request.placeholderForCreatedAsset?.localIdentifier
+      }) { success, error in
+        guard success else {
+          // Never swallow the PhotoKit reason — it is the only way to tell quota,
+          // permission, and storage failures apart from the diag log.
+          self.finish(
+            .failure(.saveFailed),
+            detail: "PhotoKit save failed: \(error?.localizedDescription ?? "unknown error (no NSError)")"
+          )
           return
         }
-        guard !self.hasCompleted else { return }
-        var localIdentifier: String?
-        PHPhotoLibrary.shared().performChanges({
-          let request = PHAssetCreationRequest.forAsset()
-          request.addResource(with: .photo, fileURL: fileURL, options: nil)
-          localIdentifier = request.placeholderForCreatedAsset?.localIdentifier
-        }) { success, error in
-          guard success else {
-            // Never swallow the PhotoKit reason — it is the only way to tell quota,
-            // permission, and storage failures apart from the diag log.
-            self.finish(
-              .failure(.saveFailed),
-              detail: "PhotoKit save failed: \(error?.localizedDescription ?? "unknown error (no NSError)")"
-            )
-            return
-          }
-          CameraTempFiles.keep([fileURL, thumbURL])
-          // The thumbnail the UI displays must survive restarts — serve the Documents
-          // copy when persistence succeeds, fall back to the temp file otherwise.
-          let thumbnailURI = CameraTempFiles.persistLatestThumbnail(from: thumbURL)?.absoluteString
-            ?? thumbURL.absoluteString
-          self.finish(.success([
-            "fileUri": fileURL.absoluteString,
-            "thumbnailUri": thumbnailURI,
-            "assetLocalIdentifier": localIdentifier ?? NSNull(),
-            "appliedZoom": appliedZoom,
-            "equivalentFocal": equivalentFocalMM,
-            "codec": codec,
-          ]))
-        }
+        CameraTempFiles.keep([fileURL, thumbURL])
+        let thumbnailURI = CameraTempFiles.persistLatestThumbnail(from: thumbURL)?.absoluteString
+          ?? thumbURL.absoluteString
+        self.finish(.success([
+          "fileUri": fileURL.absoluteString,
+          "thumbnailUri": thumbnailURI,
+          "assetLocalIdentifier": localIdentifier ?? NSNull(),
+          "appliedZoom": self.appliedZoom,
+          "equivalentFocal": self.equivalentFocalMM,
+          "codec": codec,
+        ]))
       }
     }
   }
 
   func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
-    // didFinishProcessingPhoto owns the outcome for the single processed photo (finish()
-    // is idempotent). This callback only acts as the never-arrived safety net so the JS
-    // promise cannot hang forever (shutter stuck disabled).
+    // didFinishProcessingPhoto owns both outcomes (settleCaptured for the shutter
+    // promise at capture-complete; finish → onProcessed event after the pipeline).
+    // This callback only acts as the never-arrived safety net so the JS promise
+    // cannot hang forever (shutter stuck disabled).
     if error != nil {
+      settleCaptured(.failure(.captureFailed))
       finish(.failure(.captureFailed))
     }
   }
@@ -2155,7 +2549,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     let urls = generatedURLs
     completionLock.unlock()
     if case .failure = result { CameraTempFiles.remove(urls) }
-    DispatchQueue.main.async { self.completion(result, detail) }
+    DispatchQueue.main.async { self.onProcessed(result, detail) }
   }
 }
 

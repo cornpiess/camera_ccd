@@ -31,7 +31,7 @@ export const FocalCircleRow: React.FC<FocalCircleRowProps> = ({ stops, currentFo
         const selected = currentFocalMm != null && Math.round(currentFocalMm) === Math.round(stop.mm);
         return (
           <TouchableOpacity
-            key={`${stop.mm}-${stop.lensId}`}
+            key={stop.id}
             accessibilityRole="button"
             accessibilityState={{ selected }}
             accessibilityLabel={`${Math.round(stop.mm)} millimeter`}

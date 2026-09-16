@@ -40,20 +40,33 @@ export type EngineDiagnostics = {
   testingBuild?: boolean;
 };
 
+/**
+ * Shutter-promise payload (spec §6): the promise settles when APPLE'S CAPTURE is done
+ * — BEFORE Camera DNA / HEIF / PhotoKit finish. The heavy-pipeline outcome (final
+ * fileUri/thumbnail/errors) arrives later via the onPhotoProcessed event, so almost
+ * every field is legitimately absent here.
+ */
 export type CapturedPhoto = {
-  /** Temporary processed JPEG. Copy it if it must outlive the current app cache lifecycle. */
-  fileUri: string;
-  /** Temporary preview JPEG, scaled to at most 512 px on its longest edge. */
-  thumbnailUri: string;
-  /** Photos asset identifier when supplied by PhotoKit. */
-  assetLocalIdentifier: string | null;
-  /** True when Camera DNA processing failed and the untouched Apple-processed photo was saved instead. */
+  fileUri?: string | null;
+  thumbnailUri?: string | null;
+  assetLocalIdentifier?: string | null;
   processingFallback?: boolean | null;
-  /** Final photo codec actually used: "heif" (preferred) or "jpeg" (fallback). */
   codec?: string | null;
-  /** Zoom ACTUALLY applied to the device at shutter time (diagnostics). */
   appliedZoom?: number | null;
-  /** 35mm-equivalent focal stamped into the saved EXIF (base × zoom). */
+  equivalentFocal?: number | null;
+};
+
+/** Background pipeline outcome (Camera DNA → HEIF → PhotoKit finished or failed). */
+export type PhotoProcessedEvent = {
+  ok: boolean;
+  fileUri?: string | null;
+  thumbnailUri?: string | null;
+  assetLocalIdentifier?: string | null;
+  errorCode?: string | null;
+  detail?: string | null;
+  processingFallback?: boolean | null;
+  codec?: string | null;
+  appliedZoom?: number | null;
   equivalentFocal?: number | null;
 };
 
@@ -83,7 +96,7 @@ export class CameraEngineError extends Error {
 type NativeCameraEngine = {
   startCamera(): Promise<boolean>;
   stopCamera(): Promise<void>;
-  capturePhoto(): Promise<CapturedPhoto>;
+  capturePhoto(equivalentMM: number): Promise<CapturedPhoto>;
   setAperture(fStop: number): Promise<void>;
   /** Normalized (0..1) tap position in the video frame; keeps AF/AE continuous around that point. */
   setFocusPoint(x: number, y: number): Promise<void>;
@@ -103,7 +116,7 @@ type NativeCameraEngine = {
   }>;
   setLens(lensId: string): Promise<void>;
   /** Crop zoom (videoZoomFactor) on the ACTIVE lens; ≥1, applies to preview AND capture. */
-  setZoomFactor(factor: number): Promise<void>;
+  setZoomFactor(factor: number, equivalentMM: number): Promise<void>;
   addApertureChangedListener(
     cb: (event: { readonly fNumber: number }) => void,
   ): { readonly remove: () => void };
@@ -187,8 +200,7 @@ const unavailableModule: NativeCameraEngine = {
   getCameraAuthorizationStatus: () => Promise.reject(unavailableError()),
   getAvailableLenses: () => Promise.reject(unavailableError()),
   setLens: () => Promise.reject(unavailableError()),
-  setZoomFactor: () => Promise.reject(unavailableError()),
-  setMockApertureMode: () => Promise.reject(unavailableError()),
+  setZoomFactor: () => Promise.reject(unavailableError()),  setMockApertureMode: () => Promise.reject(unavailableError()),
   addApertureChangedListener: () => ({ remove: () => {} }),
   addZoomChangedListener: () => ({ remove: () => {} }),
 };
@@ -213,7 +225,7 @@ function typed<T>(operation: Promise<T>): Promise<T> {
 
 export const startCamera = (): Promise<boolean> => typed(NativeModule.startCamera());
 export const stopCamera = (): Promise<void> => typed(NativeModule.stopCamera());
-export const capturePhoto = (): Promise<CapturedPhoto> => typed(NativeModule.capturePhoto());
+export const capturePhoto = (equivalentMM: number): Promise<CapturedPhoto> => typed(NativeModule.capturePhoto(equivalentMM));
 export const setAperture = (fStop: number): Promise<void> => typed(NativeModule.setAperture(fStop));
 export const setFocusPoint = (x: number, y: number): Promise<void> => typed(NativeModule.setFocusPoint(x, y));
 export const getCapabilities = (): Promise<CameraCapabilities> => typed(NativeModule.getCapabilities());
@@ -221,11 +233,11 @@ export const getDiagnostics = (): Promise<EngineDiagnostics> => typed(NativeModu
 export const applyProfile = (profile: CameraProfile): Promise<void> => typed(NativeModule.applyProfile(profile));
 export const getCameraAuthorizationStatus = (): Promise<CameraAuthorizationStatus> =>
   typed(NativeModule.getCameraAuthorizationStatus());
-export type LensInfo = { kind: string; deviceModel: string; ultraWide?: boolean; teleZoom?: number | null };
+export type LensInfo = { kind: string; deviceModel: string; ultraWide?: boolean; tele?: boolean; teleZoom?: number | null };
 export const getAvailableLenses = (): Promise<LensInfo> =>
   typed(NativeModule.getAvailableLenses());
 export const setLens = (lensId: string): Promise<void> => typed(NativeModule.setLens(lensId));
-export const setZoomFactor = (factor: number): Promise<void> => typed(NativeModule.setZoomFactor(factor));
+export const setZoomFactor = (factor: number, equivalentMM: number): Promise<void> => typed(NativeModule.setZoomFactor(factor, equivalentMM));
 /** TESTING BUILDS ONLY (see CameraEngineModule CAMER18_TESTING gate). */
 export const setMockApertureMode = (
   mode: 'real' | 'mock-variable' | 'mock-fixed',
@@ -243,6 +255,10 @@ export const addApertureChangedListener = (
 export const addZoomChangedListener = (
   cb: (event: ZoomChangedEvent) => void,
 ): NativeEventSubscription => requireNativeModule('CameraEngine').addListener('onZoomChanged', cb) as { readonly remove: () => void };
+/** Background pipeline outcome for a shutter press (fires AFTER the promise settled). */
+export const addPhotoProcessedListener = (
+  cb: (event: PhotoProcessedEvent) => void,
+): NativeEventSubscription => requireNativeModule('CameraEngine').addListener('onPhotoProcessed', cb) as { readonly remove: () => void };
 
 /** Functional native API; also convenient for call sites that prefer a namespace object. */
 export const CameraEngine = {
@@ -260,6 +276,7 @@ export const CameraEngine = {
   setZoomFactor,
   addApertureChangedListener,
   addZoomChangedListener,
+  addPhotoProcessedListener,
 } as const;
 
 export type CameraEngineHandle = {

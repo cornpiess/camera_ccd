@@ -1,78 +1,73 @@
 /**
- * Focal-stop model for the in-finder focal dial.
+ * Focal-stop model for the in-finder focal dial — PHYSICAL LENS ROUTING (user spec):
  *
- * Built on Apple's canonical smooth-focal architecture: the session uses a VIRTUAL
- * capture device (builtInTripleCamera / builtInDualCamera / builtInDualWideCamera) and
- * focal changes are pure videoZoomFactor moves — the system crossfades between the
- * physical cameras seamlessly (no input swaps, no preview flicker).
+ * The capture input is ALWAYS a physical camera (never the virtual triple/dual
+ * device). Each stop maps to exactly one real lens:
+ *   13mm        -> builtInUltraWideCamera  (its own fixed aperture)
+ *   26/35/52mm  -> builtInWideAngleCamera  (ONE physical main; 35/52 are crop zooms,
+ *                                          so the main's real variable iris — when
+ *                                          the hardware has one — serves all three)
+ *   tele        -> builtInTelephotoCamera  (its own fixed aperture)
  *
- * Zoom baseline (Apple docs for virtual devices): zoomFactor 1.0 renders the widest
- * constituent camera, the ultra-wide (13mm-equivalent). So on virtual bodies:
- *   zoom(mm) = mm / 13   → 13mm=1.0, 26mm=2.0, 35mm≈2.69, 52mm=4.0.
- * The ladder is EXACTLY the four stops the user confirmed (2026-09-14):
- *   13 (0.5× real ultra-wide) / 26 (1× main) / 35 (main crop) / 52 (2× main crop).
- * Single-wide bodies (no ultra-wide constituent) start at the 26mm main (zoom 1.0),
- * and their zoom baseline is the 26mm main itself.
+ * Lens switches (13 <-> wide <-> tele) swap the physical input natively
+ * (CameraEngine.setLens); 26/35/52 only move videoZoomFactor on the main
+ * (CameraEngine.setZoomFactor) — no input churn inside the trio.
  */
 
-export type DeviceKind = 'virtual-triple' | 'virtual-dual' | 'virtual-dual-wide' | 'single';
+export type PhysicalLens = 'ultrawide' | 'wide' | 'tele';
 
 export interface FocalStop {
-  /** 35mm-equivalent focal length in millimeters (displayed on the dial). */
+  /** Stable stop id (dial keys, EXIF provenance): "uw-13" / "wide-26" / "tele-77" … */
+  readonly id: string;
+  /** 35mm-equivalent focal length in millimeters (displayed on the dial; EXIF stamped). */
   readonly mm: number;
-  /** Physical lens this stop resolves to (always "wide" — the virtual device). */
-  readonly lensId: 'wide';
-  /** videoZoomFactor applied on the device; preview and capture framing stay identical. */
+  /** The PHYSICAL camera this stop resolves to. */
+  readonly lens: PhysicalLens;
+  /** videoZoomFactor applied on that physical device (1.0 for ultrawide/tele stops). */
   readonly zoom: number;
 }
 
-const VIRTUAL_BASE_MM = 13;
-const SINGLE_BASE_MM = 26;
+const WIDE_BASE_MM = 26;
+/** Tele equivalent = 13mm base * the virtual device's last switchover factor. */
+const UW_BASE_MM = 13;
 
-const isVirtual = (kind: DeviceKind): boolean => kind.startsWith('virtual');
-
-export interface BuildFocalStopsOptions {
-  /** Native switchover zoom factor of the TELEPHOTO constituent (nil = no tele). */
+export interface LensInventory {
+  /** A physical builtInUltraWideCamera exists. */
+  readonly ultraWide: boolean;
+  /** A physical builtInTelephotoCamera exists. */
+  readonly tele: boolean;
+  /** Tele's native multiplier over the 13mm base (nil = unknown / no tele). */
   readonly teleZoom?: number | null;
 }
 
 /**
- * Ladder order (user spec, capability-driven):
- *   Ultra Wide (REAL, only when the device has one) -> 26 -> 35 -> 52 -> Tele (REAL,
- *   only when the device has one, at the DEVICE'S OWN tele mm - never a fixed 3x/4x/5x).
- * 26/35/52 are identical on every iPhone (main 1x + crops). Tele mm = 13 * teleZoom
- * (the native switchover factor IS the tele's own multiplier over the 13mm base).
+ * Ladder (capability-driven — a stop without its physical lens is HIDDEN):
+ *   [13 (real UW)] 26 -> 35 -> 52 (physical main crops) [tele at its own mm].
  */
-export function buildFocalStops(kind: DeviceKind, options: BuildFocalStopsOptions = {}): FocalStop[] {
-  const base = isVirtual(kind) ? VIRTUAL_BASE_MM : SINGLE_BASE_MM;
-  const zoomFor = (mm: number): number => mm / base;
+export function buildFocalStops(inventory: LensInventory): FocalStop[] {
   const stops: FocalStop[] = [];
-  if (isVirtual(kind)) {
-    stops.push({ mm: 13, lensId: 'wide', zoom: zoomFor(13) });
+  if (inventory.ultraWide) {
+    stops.push({ id: 'uw-13', mm: 13, lens: 'ultrawide', zoom: 1.0 });
   }
-  stops.push({ mm: 26, lensId: 'wide', zoom: zoomFor(26) });
-  stops.push({ mm: 35, lensId: 'wide', zoom: zoomFor(35) });
-  stops.push({ mm: 52, lensId: 'wide', zoom: zoomFor(52) });
-  const teleZoom = options.teleZoom;
-  if (isVirtual(kind) && typeof teleZoom === 'number' && Number.isFinite(teleZoom) && teleZoom > 0) {
-    const teleMm = Math.round(VIRTUAL_BASE_MM * teleZoom);
+  stops.push({ id: 'wide-26', mm: 26, lens: 'wide', zoom: 1.0 });
+  stops.push({ id: 'wide-35', mm: 35, lens: 'wide', zoom: 35 / WIDE_BASE_MM });
+  stops.push({ id: 'wide-52', mm: 52, lens: 'wide', zoom: 2.0 });
+  const teleZoom = inventory.teleZoom;
+  if (
+    inventory.tele &&
+    typeof teleZoom === 'number' &&
+    Number.isFinite(teleZoom) &&
+    teleZoom > 0
+  ) {
+    const teleMm = Math.round(UW_BASE_MM * teleZoom);
     if (teleMm > 52 && !stops.some((stop) => stop.mm === teleMm)) {
-      stops.push({ mm: teleMm, lensId: 'wide', zoom: teleZoom });
+      stops.push({ id: `tele-${teleMm}`, mm: teleMm, lens: 'tele', zoom: 1.0 });
     }
   }
   return stops;
 }
 
-/** Default stop: the main camera (26mm) — zoom 2.0 on virtual bodies, 1.0 on single-wide. */
-export function defaultFocalStop(kind: DeviceKind): FocalStop {
-  const base = isVirtual(kind) ? VIRTUAL_BASE_MM : SINGLE_BASE_MM;
-  return { mm: 26, lensId: 'wide', zoom: 26 / base };
-}
-
-/** Convenience: tele stop for the dial when the device reports a tele zoom factor. */
-export function teleFocalStop(kind: DeviceKind, teleZoom: number): FocalStop | null {
-  if (!isVirtual(kind) || !(teleZoom > 0)) return null;
-  const teleMm = Math.round(VIRTUAL_BASE_MM * teleZoom);
-  if (teleMm <= 52) return null;
-  return { mm: teleMm, lensId: 'wide', zoom: teleZoom };
+/** Default stop: the physical main camera at 26mm (zoom 1.0). */
+export function defaultFocalStop(): FocalStop {
+  return { id: 'wide-26', mm: 26, lens: 'wide', zoom: 1.0 };
 }

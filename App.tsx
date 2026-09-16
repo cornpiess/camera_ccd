@@ -33,8 +33,13 @@ import {
 } from './src/camera/CameraEngine';
 // LoadCameraState, focal model, aperture visual linkage
 import { loadCameraState, saveCameraState, type CameraState } from './src/camera/cameraStateStore';
-import { buildFocalStops, defaultFocalStop, type FocalStop, type DeviceKind } from './src/camera/focalLadder';
-import { addApertureChangedListener, addZoomChangedListener, setMockApertureMode } from './src/camera/CameraEngine';
+import { buildFocalStops, defaultFocalStop, type FocalStop, type PhysicalLens } from './src/camera/focalLadder';
+import {
+  addApertureChangedListener,
+  addPhotoProcessedListener,
+  addZoomChangedListener,
+  setMockApertureMode,
+} from './src/camera/CameraEngine';
 import { apertureVisualFactors, applyApertureVisual } from './src/camera/apertureVisualProfile';
 import { MAX_RING_PROFILES } from './src/components/RadialProfileSelector';
 import { deriveSkin, isLightColor } from './src/theme/skin';
@@ -401,17 +406,25 @@ function CameraAppScreen(): React.JSX.Element {
         setApertureRange(null);
       }
 
-      // Device kind → derive the focal-stop ladder for the dial (virtual devices get the
-      // seamless system crossfade; zoom re-applies because sessions reset zoom on restart).
+      // PHYSICAL lens inventory → derive the focal-stop ladder for the dial (a stop
+      // without its physical lens is hidden); zoom re-applies because sessions reset
+      // zoom on restart, and a restored non-wide stop re-swaps the physical input.
       try {
         const info = await CameraEngine.getAvailableLenses();
-        const kind = (info?.kind ?? 'single') as DeviceKind;
-        const stops = buildFocalStops(kind, { teleZoom: info?.teleZoom ?? null });
+        const stops = buildFocalStops({
+          ultraWide: Boolean(info?.ultraWide),
+          tele: Boolean(info?.tele),
+          teleZoom: info?.teleZoom ?? null,
+        });
         setFocalStops(stops);
-        setCurrentFocalMm((previous) => previous ?? defaultFocalStop(kind).mm);
-        const engaged = stops.find((stop) => stop.mm === (currentFocalMmRef.current ?? defaultFocalStop(kind).mm));
+        const teleStop = stops.find((stop) => stop.lens === 'tele');
+        teleBaseRef.current = teleStop?.mm ?? null;
+        setCurrentFocalMm((previous) => previous ?? defaultFocalStop().mm);
+        const engaged = stops.find((stop) => stop.mm === (currentFocalMmRef.current ?? defaultFocalStop().mm));
         if (engaged) {
-          await CameraEngine.setZoomFactor(engaged.zoom);
+          activeLensRef.current = engaged.lens;
+          await CameraEngine.setLens(engaged.lens);
+          await CameraEngine.setZoomFactor(engaged.zoom, engaged.mm);
         }
       } catch {
         // Single-lens fallbacks stay on the previous state.
@@ -482,6 +495,11 @@ function CameraAppScreen(): React.JSX.Element {
   // -------------------------------------------------------------
   const focalStopsRef = useRef<FocalStop[]>([]);
   focalStopsRef.current = focalStops;
+  // PHYSICAL ROUTING: which physical lens the session input currently carries, and the
+  // tele stop's own mm — both feed the zoom-event → mm mapping (zoom is relative to the
+  // ACTIVE physical lens now, not to one virtual device).
+  const activeLensRef = useRef<PhysicalLens>('wide');
+  const teleBaseRef = useRef<number | null>(null);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
@@ -490,7 +508,10 @@ function CameraAppScreen(): React.JSX.Element {
         .then(() => {
           setPermissionState('authorized');
           const engaged = focalStopsRef.current.find((stop) => stop.mm === currentFocalMmRef.current);
-          if (engaged) CameraEngine.setZoomFactor(engaged.zoom).catch(() => {});
+          if (engaged) {
+            CameraEngine.setLens(engaged.lens).catch(() => {});
+            CameraEngine.setZoomFactor(engaged.zoom, engaged.mm).catch(() => {});
+          }
         })
         .catch((err: unknown) => {
           recordDiag('warn', `foreground resume failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -536,32 +557,59 @@ function CameraAppScreen(): React.JSX.Element {
   // adjusts from there. Guarded by profile id so the aperture-driven effectiveProfile
   // re-renders never re-apply it mid-drag (the effect would otherwise fight the finger).
   const preferredApertureProfileRef = useRef<string | null>(null);
+  // Which mock mode the diag menu forced (null = real hardware). The hardware-readback
+  // sync after setAperture must NOT run in mock-variable: capabilities would report the
+  // REAL lens's fixed 1.8 and snap the ring away from the chosen stop.
+  const mockApertureModeRef = useRef<'real' | 'mock-variable' | 'mock-fixed' | null>(null);
+
+  /**
+   * SIGNATURE APERTURE (spec §1): the profile's aperture.preferred is a REAL recommended
+   * aperture on a variable lens — clamp to the live hardware range, commit through the
+   * real setAperture, then sync the UI from the hardware readback (the iris may settle
+   * on the nearest physical detent). Fixed lenses never apply it; ORIG has none; in
+   * mock-variable the readback is skipped (capabilities would report the REAL lens).
+   */
+  const applySignatureAperture = useCallback(async (profile: CameraProfile) => {
+    const preferred = profile.aperture?.preferred;
+    if (typeof preferred !== 'number' || !Number.isFinite(preferred) || preferred <= 0) return;
+    if (mockApertureModeRef.current === 'mock-fixed') return;
+    // Live range first (mock-variable overwrites it with the project f/1.48–f/4 range);
+    // the startup capabilities snapshot is only a fallback.
+    const min = apertureRange?.min ?? capabilitiesRef.current?.minAperture ?? preferred;
+    const max = apertureRange?.max ?? capabilitiesRef.current?.maxAperture ?? preferred;
+    const clamped = Math.min(Math.max(preferred, min), max);
+    try {
+      await CameraEngine.setAperture(clamped);
+      confirmedApertureRef.current = clamped;
+      setCurrentAperture(clamped);
+      setActiveAperture(clamped);
+      if (mockApertureModeRef.current === null) {
+        // Real variable hardware: the iris may settle on the nearest physical stop —
+        // the UI shows the HARDWARE truth, not the request.
+        const capabilities = await CameraEngine.getCapabilities();
+        const real = capabilities.activeAperture;
+        if (typeof real === 'number' && Number.isFinite(real) && real > 0) {
+          confirmedApertureRef.current = real;
+          setCurrentAperture(real);
+          setActiveAperture(real);
+        }
+      }
+    } catch (err: unknown) {
+      // Hardware refused — leave the ring where the user had it, journal the reason.
+      recordDiag('warn', `signature aperture ${preferred} rejected: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [apertureRange]);
+
   useEffect(() => {
     if (!isCameraRunning || !activeProfile) return;
     if (preferredApertureProfileRef.current === activeProfile.id) return;
     preferredApertureProfileRef.current = activeProfile.id;
     // ORIG (passthrough) carries no signature aperture: switching to it must NOT touch
-    // the current real aperture state (user spec).
+    // the current real aperture state (user spec). A FIXED lens never applies the
+    // signature at all — the ring shows the lens's real mechanical aperture only.
     if (activeProfile.id === 'negative_film') return;
-    const preferred = activeProfile.aperture?.preferred;
-    if (typeof preferred !== 'number' || !Number.isFinite(preferred) || preferred <= 0) return;
-    if (apertureVariable) {
-      const min = capabilitiesRef.current?.minAperture ?? apertureRange?.min ?? preferred;
-      const max = capabilitiesRef.current?.maxAperture ?? apertureRange?.max ?? preferred;
-      const clamped = Math.min(Math.max(preferred, min), max);
-      CameraEngine.setAperture(clamped)
-        .then(() => {
-          confirmedApertureRef.current = clamped;
-        })
-        .catch(() => {});
-      setCurrentAperture(clamped);
-      setActiveAperture(clamped);
-    } else {
-      // Demo/fixed lenses: visual-only snap — the capture stays at the fixed aperture.
-      setCurrentAperture(preferred);
-      setActiveAperture(preferred);
-    }
-  }, [activeProfile, isCameraRunning, apertureVariable, apertureRange]);
+    if (apertureVariable) void applySignatureAperture(activeProfile);
+  }, [activeProfile, isCameraRunning, apertureVariable, apertureRange, applySignatureAperture]);
 
   // Native -> ApertureState sync: the Camera Control slider (and any native aperture
   // source) flows back here so the SCREEN RING always shows the same f-number. There is
@@ -577,8 +625,10 @@ function CameraAppScreen(): React.JSX.Element {
     const zoomSub = addZoomChangedListener((event) => {
       const zoom = Number(event?.zoom);
       if (!Number.isFinite(zoom) || zoom <= 0) return;
-      // Physical main camera: 35mm-equiv = 26mm x zoom. Snap the dial to the nearest stop.
-      const mm = 26 * zoom;
+      // Zoom is relative to the ACTIVE PHYSICAL lens: 35mm-equiv = base mm x zoom,
+      // base = 13 (ultra-wide) / 26 (wide) / the tele stop's own mm. Snap to nearest stop.
+      const base = activeLensRef.current === 'ultrawide' ? 13 : activeLensRef.current === 'tele' ? (teleBaseRef.current ?? 65) : 26;
+      const mm = base * zoom;
       const nearest = focalStops.reduce((best, stop) =>
         Math.abs(stop.mm - mm) < Math.abs(best.mm - mm) ? stop : best,
       );
@@ -589,6 +639,56 @@ function CameraAppScreen(): React.JSX.Element {
       zoomSub.remove();
     };
   }, [focalStops]);
+
+  // BACKGROUND PHOTO PIPELINE outcome (spec §6): fires AFTER the shutter promise
+  // settled — carries the final fileUri/thumbnail (Camera DNA → HEIF → PhotoKit done)
+  // or the pipeline failure. Keeping this off the shutter path is the whole point.
+  useEffect(() => {
+    const sub = addPhotoProcessedListener((event) => {
+      if (!event?.ok) {
+        const code = String(event?.errorCode ?? 'unknown');
+        recordDiag('error', `capture pipeline: FAILED (${code}): ${String(event?.detail ?? '')}`);
+        if (code === 'ERR_PHOTO_PERMISSION_DENIED') setPhotoPermDenied(true);
+        showTransientError(String(event?.detail ?? 'Photo save failed.'));
+        return;
+      }
+      if (event.processingFallback) {
+        showTransientError('Camera DNA processing failed — the original photo was saved.');
+      }
+      recordDiag('info', `capture pipeline: saved (thumb=${Boolean(event.thumbnailUri)}, codec=${event.codec ?? '?'}, eq=${event.equivalentFocal ?? '?'}mm)`);
+      if (event.fileUri) setLastCaptureFileUri(event.fileUri);
+      const thumbUri = event.thumbnailUri ?? event.fileUri ?? null;
+      if (thumbUri) {
+        // RN Image caches by URI: the native persisted thumbnail path is STABLE, so the
+        // chip would keep showing the first shot's bitmap. Copy to a per-capture display
+        // file (dropping the previous one) so every capture gets a fresh URI.
+        void (async () => {
+          let display = thumbUri;
+          try {
+            const dest = new File(Paths.document, `camera18-chip-${Date.now()}.jpg`);
+            if (dest.exists) dest.delete();
+            new File(thumbUri).copy(dest);
+            if (chipFileRef.current) {
+              try {
+                const prev = new File(chipFileRef.current);
+                if (prev.exists) prev.delete();
+              } catch {
+                // stale chip cleanup is best-effort
+              }
+            }
+            chipFileRef.current = dest.uri;
+            display = dest.uri;
+          } catch {
+            // fall back to the native stable copy
+          }
+          setLatestThumbnail(display);
+          cameraStateRef.current.lastThumbUri = display;
+          saveCameraState({ lastThumbUri: display });
+        })();
+      }
+    });
+    return () => sub.remove();
+  }, [showTransientError]);
 
   // Profile validation/import/reload errors shown as transient overlay while running
   useEffect(() => {
@@ -633,8 +733,12 @@ function CameraAppScreen(): React.JSX.Element {
   // misreported as variable (iOS 27 quirk) by demoting to fixed + DEMO for the session.
   const handleApertureSettle = (aperture: number) => {
     if (!apertureVariable) return;
-    const min = capabilitiesRef.current?.minAperture ?? apertureRange?.min ?? aperture;
-    const max = capabilitiesRef.current?.maxAperture ?? apertureRange?.max ?? aperture;
+    // apertureRange FIRST: it tracks the live capability (mock-variable overwrites it
+    // with the project f/1.48-f/4 range), while capabilitiesRef holds the STARTUP
+    // snapshot — on a fixed lens that snapshot is min=max=1.8, which clamped every
+    // mock drag straight back to the real aperture at release.
+    const min = apertureRange?.min ?? capabilitiesRef.current?.minAperture ?? aperture;
+    const max = apertureRange?.max ?? capabilitiesRef.current?.maxAperture ?? aperture;
     const clamped = Math.min(Math.max(aperture, min), max);
     CameraEngine.setAperture(clamped)
       .then(() => {
@@ -655,25 +759,53 @@ function CameraAppScreen(): React.JSX.Element {
   };
 
   /**
-   * Focal-stop selection — the Apple virtual-device path: EVERY stop (including zoom 1.0)
-   * is a videoZoomFactor move, so the system crossfades between physical cameras and no
-   * state can linger (the old "skip when zoom===1" bug left 1.35× residue, making 35→26
-   * a no-op). Journaled to the diag log; the mm display reverts on failure.
+   * Focal-stop selection — PHYSICAL LENS ROUTING: 26/35/52 stay on the physical main
+   * (zoom-only move, no input churn — the main's real variable iris serves all three);
+   * 13mm/Tele swap the physical input natively (setLens). After ANY switch the aperture
+   * capability is re-queried: 13mm/Tele are honest FIXED lenses, so the ring must drop
+   * out of variable mode when one of them is active.
    */
   const handleSelectFocal = useCallback(async (stop: FocalStop) => {
     const previousMm = currentFocalMm;
+    const previousLens = activeLensRef.current;
     try {
-      recordDiag('info', `focal: select ${stop.mm}mm (zoom=${stop.zoom}) from ${previousMm}mm`);
-      await CameraEngine.setZoomFactor(stop.zoom);
-      recordDiag('info', `focal: zoom ${stop.zoom} applied`);
+      recordDiag('info', `focal: select ${stop.mm}mm lens=${stop.lens} (zoom=${stop.zoom}) from ${previousMm}mm`);
+      await CameraEngine.setLens(stop.lens);
+      await CameraEngine.setZoomFactor(stop.zoom, stop.mm);
+      activeLensRef.current = stop.lens;
+      recordDiag('info', `focal: lens=${stop.lens} zoom ${stop.zoom} applied`);
       setCurrentFocalMm(stop.mm);
+      // Input swap changes the aperture capability — re-query and sync the ring state.
+      const capabilities = await CameraEngine.getCapabilities();
+      capabilitiesRef.current = capabilities;
+      const variableMode = capabilities.apertureMode === 'variable';
+      setApertureVariable(variableMode);
+      setSupportsVariableAperture(variableMode);
+      if (variableMode) {
+        setApertureRange({
+          min: capabilities.minAperture ?? 1.48,
+          max: capabilities.maxAperture ?? 4,
+        });
+        // FIXED → VARIABLE lens switch (13mm/Tele → Wide): the current profile's
+        // signature aperture becomes REAL again — apply it (spec §1). Wide→Wide
+        // (26/35/52) never reaches the input swap, so the user's aperture survives.
+        if (previousLens !== 'wide' && stop.lens === 'wide' && activeProfile && activeProfile.id !== 'negative_film') {
+          void applySignatureAperture(activeProfile);
+        }
+      } else {
+        setApertureRange(null);
+        const fixed = capabilities.activeAperture ?? 1.8;
+        setCurrentAperture(fixed);
+        setActiveAperture(fixed);
+        confirmedApertureRef.current = fixed;
+      }
     } catch (err: unknown) {
       recordDiag('error', `focal: select ${stop.mm}mm FAILED: ${err instanceof Error ? err.message : String(err)}`);
       // Never leave the dial claiming a focal the optics did not reach.
       if (previousMm != null) setCurrentFocalMm(previousMm);
       showTransientError(resolveErrorMessage(err));
     }
-  }, [currentFocalMm, showTransientError]);
+  }, [currentFocalMm, showTransientError, activeProfile, applySignatureAperture]);
 
   const handleCapturePhoto = async () => {
     if (capturePhase === 'capturing') return;
@@ -696,8 +828,12 @@ function CameraAppScreen(): React.JSX.Element {
 
     let timeoutId: NodeJS.Timeout | null = null;
     try {
-      const result: CapturedPhoto = await Promise.race([
-        CameraEngine.capturePhoto(),
+      // SHUTTER DECOUPLING (spec §6): the promise settles when APPLE'S CAPTURE is done.
+      // Camera DNA + HEIF + PhotoKit continue in the background on the serial native
+      // processing queue and report via onPhotoProcessed — they never hold the shutter.
+      const currentStop = focalStopsRef.current.find((stop) => stop.mm === currentFocalMmRef.current);
+      const result: CapturedPhoto | undefined = await Promise.race([
+        CameraEngine.capturePhoto(currentStop?.mm ?? 0),
         new Promise<never>((_resolve, reject) => {
           timeoutId = setTimeout(
             () => reject(new Error('Capture timed out. The photo may still reach your library.')),
@@ -706,42 +842,10 @@ function CameraAppScreen(): React.JSX.Element {
         }),
       ]);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      // Shutter unlocked HERE — the thumbnail chip arrives via onPhotoProcessed.
       setCapturePhase('idle');
       setPhotoPermDenied(false);
-      recordDiag('info', `capture: saved (fallback=${Boolean(result?.processingFallback)}, thumb=${Boolean(result?.thumbnailUri)}, zoom=${result?.appliedZoom?.toFixed(2) ?? '?'} → ${result?.equivalentFocal ?? '?'}mm eq)`);
-      const thumbUri = result?.thumbnailUri ?? result?.fileUri ?? null;
-      setLastCaptureFileUri(result?.fileUri ?? null);
-      if (thumbUri) {
-        // RN Image caches by URI: the native persisted thumbnail path is STABLE, so the
-        // chip would keep showing the first shot's bitmap. Copy to a per-capture display
-        // file (dropping the previous one) so every capture gets a fresh URI.
-        void (async () => {
-          let display = thumbUri;
-          try {
-            const dest = new File(Paths.document, `camera18-chip-${Date.now()}.jpg`);
-            if (dest.exists) dest.delete();
-            new File(thumbUri).copy(dest);
-            if (chipFileRef.current) {
-              try {
-                const prev = new File(chipFileRef.current);
-                if (prev.exists) prev.delete();
-              } catch {
-                // stale chip cleanup is best-effort
-              }
-            }
-            chipFileRef.current = dest.uri;
-            display = dest.uri;
-          } catch {
-            // fall back to the native stable copy
-          }
-          setLatestThumbnail(display);
-          cameraStateRef.current.lastThumbUri = display;
-          saveCameraState({ lastThumbUri: display });
-        })();
-      }
-      if (result?.processingFallback) {
-        showTransientError('Camera DNA processing failed — the original photo was saved.');
-      }
+      recordDiag('info', `capture: Apple capture complete (zoom=${result?.appliedZoom?.toFixed(2) ?? '?'} → ${result?.equivalentFocal ?? currentStop?.mm ?? '?'}mm eq); Camera DNA/HEIF/PhotoKit continue in background`);
     } catch (err: unknown) {
       const code = err instanceof CameraEngineError ? err.code : 'unknown';
       recordDiag('error', `capture: FAILED (${code}): ${err instanceof Error ? err.message : String(err)}`);
@@ -1102,9 +1206,14 @@ function CameraAppScreen(): React.JSX.Element {
                         accessibilityRole="button"
                         style={styles.mockApertureButton}
                         onPress={() => {
+                          mockApertureModeRef.current = value;
                           setMockApertureMode(value).catch(() => {});
                           CameraEngine.getCapabilities()
                             .then((capabilitiesSnapshot) => {
+                              // Refresh the shared snapshot too — the settle clamp and
+                              // other consumers must see the MOCK range, not the startup
+                              // fixed-lens min=max that made every drag snap back.
+                              capabilitiesRef.current = capabilitiesSnapshot;
                               const variableMode = capabilitiesSnapshot.apertureMode === 'variable';
                               setApertureVariable(variableMode);
                               setSupportsVariableAperture(variableMode);
