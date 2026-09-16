@@ -547,6 +547,11 @@ public final class CameraEngineModule: Module {
       case .notDetermined: addStatus = "notDetermined"
       @unknown default: addStatus = "unknown"
       }
+      #if DEBUG || CAMERA18_TESTING
+      let testingBuildFlag = true
+      #else
+      let testingBuildFlag = false
+      #endif
       var payload: [String: Any] = [
         "bundledLuts": bundledLuts.sorted(),
         "photoAddAuthorization": addStatus,
@@ -555,11 +560,7 @@ public final class CameraEngineModule: Module {
         "normalizers": CameraInputNormalizer.resolvedSummary(),
         "rendererVersion": CameraDNARenderer.rendererVersion,
         "identityCheck": CameraDNARenderer.identitySelfCheck(),
-        #if DEBUG || CAMERA18_TESTING
-        "testingBuild": true,
-        #else
-        "testingBuild": false,
-        #endif
+        "testingBuild": testingBuildFlag,
       ]
       let finish: (Result<[String: Any], CameraEngineError>) -> Void = { result in
         if case .success(let caps) = result { payload.merge(caps) { _, newest in newest } }
