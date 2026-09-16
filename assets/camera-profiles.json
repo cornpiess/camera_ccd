@@ -100,10 +100,10 @@
         }
       },
       "id": "ricoh_positive",
-      "name": "Ricoh Positive",
-      "displayName": "SNAP 28P",
+      "name": "GRIT P",
+      "displayName": "GRIT P",
       "ui": {
-        "shortName": "28P",
+        "shortName": "GRP",
         "accent": "#C7AFA0",
         "dialStyle": "snap",
         "personality": "crisp",
@@ -216,10 +216,10 @@
         }
       },
       "id": "ricoh_negative",
-      "name": "Ricoh Negative",
-      "displayName": "SNAP 28N",
+      "name": "GRIT N",
+      "displayName": "GRIT N",
       "ui": {
-        "shortName": "28N",
+        "shortName": "GRN",
         "accent": "#9FB4C4",
         "dialStyle": "compact",
         "personality": "soft",
@@ -332,10 +332,10 @@
         }
       },
       "id": "canon_portrait",
-      "name": "Canon Portrait",
-      "displayName": "SKIN 50",
+      "name": "SKIN C",
+      "displayName": "SKIN C",
       "ui": {
-        "shortName": "SK50",
+        "shortName": "SKC",
         "accent": "#B78BA3",
         "dialStyle": "compact",
         "personality": "soft",
@@ -448,10 +448,10 @@
         }
       },
       "id": "fuji_classic_chrome",
-      "name": "Fujifilm Classic Chrome",
-      "displayName": "CC 35",
+      "name": "CC",
+      "displayName": "CC",
       "ui": {
-        "shortName": "CC35",
+        "shortName": "CC",
         "accent": "#A8A8A0",
         "dialStyle": "knurled",
         "personality": "nostalgic",
@@ -564,10 +564,10 @@
         }
       },
       "id": "fuji_classic_negative",
-      "name": "Fujifilm Classic Negative",
-      "displayName": "NC 35",
+      "name": "NC",
+      "displayName": "NC",
       "ui": {
-        "shortName": "NC35",
+        "shortName": "NC",
         "accent": "#97A06A",
         "dialStyle": "knurled",
         "personality": "nostalgic",
@@ -680,10 +680,10 @@
         }
       },
       "id": "leica_m9",
-      "name": "Leica M9",
-      "displayName": "RF 35",
+      "name": "M-RF",
+      "displayName": "M-RF",
       "ui": {
-        "shortName": "RF35",
+        "shortName": "MRF",
         "accent": "#B4554D",
         "dialStyle": "snap",
         "personality": "crisp",
@@ -699,8 +699,8 @@
     },
     {
       "id": "mf50",
-      "name": "MF 50",
-      "displayName": "MF 50",
+      "name": "V-MF",
+      "displayName": "V-MF",
       "aperture": {
         "preferred": 2.5
       },
@@ -767,7 +767,7 @@
           "cyan": {
             "hue": -3,
             "saturation": 0.93,
-            "luminance": 1.0
+            "luminance": 1
           },
           "blue": {
             "hue": -2,
@@ -798,7 +798,7 @@
         }
       },
       "ui": {
-        "shortName": "MF50",
+        "shortName": "VMF",
         "accent": "#B8B2A6",
         "dialStyle": "snap",
         "personality": "gentle",
@@ -910,7 +910,8 @@
         "personality": "neutral",
         "labelStyle": "minimal",
         "markerStyle": "ring"
-      }
+      },
+      "passthrough": true
     }
   ]
 }

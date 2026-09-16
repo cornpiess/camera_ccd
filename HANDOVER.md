@@ -146,7 +146,7 @@ camera/
 
 ## 四、渲染与图像管线（Core Pipeline）
 
-**预览（WYSIWYG，逐帧 30fps）**：
+**预览（Color/Tone WYSIWYG，逐帧 30fps；颗粒/halation/detail 仅成片，不宣称完整像素级 WYSIWYG）**：
 ```text
 AVCaptureVideoDataOutput(BGRA, .photo preset 全分辨率)
    ↓ captureOutput: CIImage 头部降采样到 ≤1280px（videoSettings 尺寸键无效，见坑 #11）

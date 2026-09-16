@@ -85,8 +85,8 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   // 刻度与侧视图互斥（切换展示，永不同框）：默认显示刻度条（占光圈右侧），
   // 轻点条带切换到侧视图；固定光圈只有侧视图。
   const trackLeft = IRIS_LEFT + IRIS_SIZE + IRIS_GAP;
-  // 可视窗口宽度 = 屏幕宽度的一半（保底 140，防极窄屏裁没）。
-  const trackWidth = Math.max(140, screenWidth * 0.5);
+  // 可视窗口宽度 = 侧视图同宽（SIDE_WIDTH）：两种视图切换时视觉宽度一致。
+  const trackWidth = Math.max(140, SIDE_WIDTH);
   // 侧视图：条带内水平居中。
   const sideLeft = (screenWidth - SIDE_WIDTH) / 2;
   const lo = Math.min(minAperture, maxAperture);
@@ -95,8 +95,17 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   const logHi = toLog(hi);
   const span = logHi - logLo || 1;
 
-  /** 0 = stopped down (ƒ/max), 1 = wide open (ƒ/min). Feeds iris hole + scroll direction. */
+  /** 0 = stopped down (ƒ/max), 1 = wide open (ƒ/min). Feeds the scroll direction. */
   const openness = clamp(1 - (toLog(currentAperture) - logLo) / span, 0, 1);
+
+  // IRIS HOLE (and side-view cone) use an ABSOLUTE f-number mapping — the same f-stop
+  // renders the same hole size on variable AND fixed lenses. Reference span is the
+  // project's iPhone 18 Pro iris range (f/1.48–f/4); a per-range normalization would
+  // make a fixed lens (whose range is the single mechanical stop) disagree with a
+  // variable lens at the same f-number.
+  const REF_LOG_LO = toLog(1.48);
+  const REF_LOG_SPAN = toLog(4) - REF_LOG_LO;
+  const irisOpenness = clamp((toLog(4) - toLog(currentAperture)) / REF_LOG_SPAN, 0, 1);
 
   // BAND_SCALE = band length in screen widths; halved twice (3 → 1.5 → 0.75) to compress
   // the visual spacing between adjacent ticks — same tick count, tighter on-screen gap.
@@ -261,7 +270,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
           style={[styles.sideSlot, { left: sideLeft, top: (BAR_HEIGHT - (SIDE_WIDTH * 92) / 260) / 2, width: SIDE_WIDTH }]}
           pointerEvents="none"
         >
-          <ApertureSideView openness={openness} accent={accent} width={SIDE_WIDTH} />
+          <ApertureSideView openness={irisOpenness} accent={accent} width={SIDE_WIDTH} />
         </View>
       ) : null}
       {sideVisible ? (
@@ -279,7 +288,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
 
       {/* Iris: the physical diaphragm (element 1; f/1.4 → big hole; f/4 → tiny hole) */}
       <View style={[styles.iris, { left: irisLeft, top: (BAR_HEIGHT - IRIS_SIZE) / 2 }]} pointerEvents="none">
-        <IrisGlyph size={IRIS_SIZE} openness={interactive ? openness : 0.55} accent={accent} />
+        <IrisGlyph size={IRIS_SIZE} openness={irisOpenness} accent={accent} />
       </View>
 
       {/* The tick scale — variable lenses, scale view only; the band scrolls under
@@ -309,7 +318,11 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
               const x = ((sigLog - logLo) / span) * BAND_SPAN;
               return (
                 <View style={[styles.signatureMarker, { left: x }]} pointerEvents="none">
-                  <Text style={[styles.signatureLabel, accent ? { color: accent } : null]}>SIG</Text>
+                  {['S', 'I', 'G'].map((ch) => (
+                    <Text key={ch} style={[styles.signatureLabel, accent ? { color: accent } : null]}>
+                      {ch}
+                    </Text>
+                  ))}
                   <View style={[styles.signatureTick, accent ? { backgroundColor: accent } : null]} />
                 </View>
               );
@@ -407,14 +420,15 @@ const styles = StyleSheet.create({
   signatureMarker: {
     position: 'absolute',
     bottom: TICK_BASELINE,
-    width: 9,
+    width: 10,
     alignItems: 'center',
   },
+  // SIG letters stacked top-to-bottom (horizontal "SIG" read like "S-G" on the band).
   signatureLabel: {
-    marginBottom: 2,
     fontSize: 8,
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 0,
+    lineHeight: 9,
   },
   signatureTick: {
     width: 5,
