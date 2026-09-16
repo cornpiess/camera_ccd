@@ -59,6 +59,77 @@ private extension CameraEngineError {
   }
 }
 
+// MARK: - Camera 18 Aperture Spec (THE single range source)
+/// One aperture range for the WHOLE app — screen ring, Camera Control slider, simulated
+/// blur and simulated starburst all read THIS. The spec comes from a REAL physical
+/// variable-aperture device: the first time capability detection resolves .physical,
+/// the live activeFormat values are captured and persisted to Documents. Simulated
+/// devices then use exactly that range — no invented f-numbers anywhere. Fallback when
+/// no capture exists yet: the range recorded in this repo (f/1.48-f/4, see App.tsx
+/// DEMO_APERTURE_RANGE and the CineStill profile's 1.48 preferred), stops empty (they
+/// are only ever filled from REAL device reports).
+struct Camera18ApertureSpec {
+  /// Session-latest captured spec (nil until a physical device reports one).
+  static var current: Camera18ApertureSpec?
+  let min: Float
+  let max: Float
+  let stops: [Float]
+
+  /// Repo-recorded range (NOT invented): 1.48-4 appears in DEMO_APERTURE_RANGE and the
+  /// CineStill profile. Stops stay empty until a physical device reports them.
+  static let recordedFallback = Camera18ApertureSpec(min: 1.48, max: 4.0, stops: [])
+
+  static var persistenceURL: URL {
+    FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("camera18-aperture-spec.json")
+  }
+
+  /// Capture from a CONFIRMED physical device (call only when capabilityMode == .physical).
+  @discardableResult
+  static func capture(device: AVCaptureDevice) -> Camera18ApertureSpec? {
+    let format = device.activeFormat as NSObject
+    guard format.responds(to: NSSelectorFromString("minLensAperture")),
+          format.responds(to: NSSelectorFromString("maxLensAperture")),
+          let minValue = (format.value(forKey: "minLensAperture") as? NSNumber)?.floatValue,
+          let maxValue = (format.value(forKey: "maxLensAperture") as? NSNumber)?.floatValue,
+          minValue > 0, maxValue > minValue
+    else { return nil }
+    var stops: [Float] = []
+    if format.responds(to: NSSelectorFromString("recommendedLensApertureStops")),
+       let raw = format.value(forKey: "recommendedLensApertureStops") as? [NSNumber] {
+      stops = raw.map(\.floatValue).sorted()
+    }
+    let spec = Camera18ApertureSpec(min: minValue, max: maxValue, stops: stops)
+    current = spec
+    persist(spec)
+    print("[CameraEngine][Diag] Camera18ApertureSpec CAPTURED from physical device: \(minValue)-\(maxValue) stops=\(stops)")
+    return spec
+  }
+
+  /// Load order: in-memory capture of this session -> persisted capture -> repo fallback.
+  static func load() -> Camera18ApertureSpec {
+    if let current { return current }
+    if let data = try? Data(contentsOf: persistenceURL),
+       let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+       let minValue = (root["min"] as? NSNumber)?.floatValue,
+       let maxValue = (root["max"] as? NSNumber)?.floatValue,
+       minValue > 0, maxValue > minValue {
+      let stops = (root["stops"] as? [NSNumber])?.map(\.floatValue) ?? []
+      let spec = Camera18ApertureSpec(min: minValue, max: maxValue, stops: stops)
+      current = spec
+      return spec
+    }
+    return recordedFallback
+  }
+
+  static func persist(_ spec: Camera18ApertureSpec) {
+    let payload: [String: Any] = ["min": spec.min, "max": spec.max, "stops": spec.stops]
+    if let data = try? JSONSerialization.data(withJSONObject: payload) {
+      try? data.write(to: persistenceURL, options: .atomic)
+    }
+  }
+}
+
 // MARK: - Unified Aperture System (capability-driven, never model-name-driven)
 ///   physical  — current lens + activeFormat + system API expose real variable aperture
 ///   simulated — everything else; f/1.4-f/16 grid, capture-time simulation only
@@ -94,6 +165,11 @@ final class ApertureController {
   ///   aperture + auto-exposure combination is supported.
   /// No device names anywhere — a future variable-aperture iPhone needs zero code changes.
   func capabilityMode(for device: AVCaptureDevice?) -> ApertureMode {
+    // NECESSARY CONDITION: the real autoExposureDuration/autoISO sentinels must be
+    // obtainable — without them AE cannot compensate aperture changes and the frame
+    // darkens (frozen shutter/ISO). Capability = range + stops + setter + supports
+    // check + live auto sentinels. All of it, or simulated.
+    guard autoSentinels() != nil else { return .simulated }
     guard let device,
           let range = variableApertureRange(device),
           (range.stops?.count ?? 0) > 1,
@@ -108,9 +184,9 @@ final class ApertureController {
   private func supportsExposureModeCustom(_ format: NSObject, aperture: Float) -> Bool {
     if #available(iOS 27.0, *) {
       let sel = NSSelectorFromString("supportsExposureModeCustomWithLensAperture:duration:ISO:")
+      guard let auto = autoSentinels() else { return false }
       guard format.responds(to: sel), let method = format.method(for: sel) else { return false }
       typealias Check = @convention(c) (AnyObject, Selector, Float, CMTime, Float) -> ObjCBool
-      let auto = autoSentinels()
       let fn = unsafeBitCast(method, to: Check.self)
       return fn(format, sel, aperture, auto.duration, auto.iso).boolValue
     }
@@ -303,13 +379,19 @@ final class ApertureController {
       DispatchQueue.main.async { completion(.success(())) }
       return
     }
+    // NO FREEZING FALLBACK: without the system auto sentinels the physical aperture
+    // set would freeze shutter/ISO and darken the frame — fail explicitly instead.
+    guard let auto = autoSentinels() else {
+      print("[CameraEngine] physical aperture unavailable: autoExposureDuration/autoISO sentinels not present on this OS")
+      completion(.failure(.apertureUnsupported))
+      return
+    }
     let target = Float(min(max(fStop, range.min), range.max))
     let setterSel = NSSelectorFromString("setExposureModeCustomWithLensAperture:duration:ISO:completionHandler:")
     guard device.responds(to: setterSel) else {
       completion(.failure(.apertureUnsupported))
       return
     }
-    let auto = autoSentinels()
     do {
       try device.lockForConfiguration()
       defer { device.unlockForConfiguration() }
@@ -344,20 +426,26 @@ final class ApertureController {
   ///     AVCaptureDevice class properties (TestFlight run 43 compile errors → per the
   ///     compiler fixit). Semantics: shutter/ISO freeze at the momentary metered
   ///     values — an honest aperture-priority degradation, never a crash.
-  private func autoSentinels() -> (duration: CMTime, iso: Float) {
+  /// SYSTEM AUTO SENTINELS ONLY. The previous fallback to
+  /// `currentExposureDuration / currentISO` FROZE shutter+ISO at the moment of the
+  /// aperture change — stopping down then darkened the frame because AE could not
+  /// compensate (user-reported bug). There is deliberately NO fallback: without the
+  /// real auto sentinels, physical aperture control FAILS with a clear error instead
+  /// of producing dark photos. No software exposure compensation exists anywhere.
+  private func autoSentinels() -> (duration: CMTime, iso: Float)? {
     let durationSel = NSSelectorFromString("autoExposureDuration")
     let isoSel = NSSelectorFromString("autoISO")
     let deviceClass: AnyObject = AVCaptureDevice.self
-    if deviceClass.responds(to: durationSel), deviceClass.responds(to: isoSel),
-       let durationImp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), durationSel) as IMP?,
-       let isoImp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), isoSel) as IMP? {
-      typealias ClassTimeGetter = @convention(c) (AnyObject, Selector) -> CMTime
-      typealias ClassFloatGetter = @convention(c) (AnyObject, Selector) -> Float
-      let duration = unsafeBitCast(durationImp, to: ClassTimeGetter.self)(deviceClass, durationSel)
-      let iso = unsafeBitCast(isoImp, to: ClassFloatGetter.self)(deviceClass, isoSel)
-      if duration.isValid, iso.isFinite { return (duration, iso) }
-    }
-    return (AVCaptureDevice.currentExposureDuration, AVCaptureDevice.currentISO)
+    guard deviceClass.responds(to: durationSel), deviceClass.responds(to: isoSel),
+          let durationImp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), durationSel) as IMP?,
+          let isoImp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), isoSel) as IMP?
+    else { return nil }
+    typealias ClassTimeGetter = @convention(c) (AnyObject, Selector) -> CMTime
+    typealias ClassFloatGetter = @convention(c) (AnyObject, Selector) -> Float
+    let duration = unsafeBitCast(durationImp, to: ClassTimeGetter.self)(deviceClass, durationSel)
+    let iso = unsafeBitCast(isoImp, to: ClassFloatGetter.self)(deviceClass, isoSel)
+    guard duration.isValid, iso.isFinite else { return nil }
+    return (duration, iso)
   }
 }
 
@@ -1493,6 +1581,11 @@ extension CameraEngineView: AVCaptureVideoDataOutputSampleBufferDelegate {
       let downscale = previewCap / longest
       image = image.transformed(by: CGAffineTransform(scaleX: downscale, y: downscale))
     }
+    // SIMULATED APERTURE (preview): starburst only (no Vision per frame - user spec).
+    // Same StarburstProcessor as the final photo, at 1280px.
+    if apertureMode == .simulated {
+      image = StarburstProcessor.apply(image, fNumber: simulatedFNumber)
+    }
     if let compiled = compiledSnapshot(.videoFrame) {
       image = CameraDNARenderer.apply(compiled, to: image)
     }
@@ -1762,33 +1855,15 @@ private enum CameraControlProbe {
 /// blur); starburst only from THRESHOLDED specular highlights; no CoC/PSF/depth layers;
 /// no PNG star overlays; no sharpening/NR of any kind.
 enum ApertureSimulationProcessor {
-  /// RANGE: f/1.4-f/4 everywhere (the iPhone 18 Pro physical iris range) — simulated
-  /// and physical share one grid, so the ring never changes behavior across devices.
-  /// Gaussian radius (px at full res) per f-number — piecewise-linear over the anchors.
-  private static let blurAnchors: [(f: Float, v: CGFloat)] = [
-    (1.4, 28), (2.0, 20), (2.8, 13), (4.0, 6),
-  ]
-  /// Starburst intensity 0..1 per f-number, compressed into the same grid: the old
-  /// 5.6-16 knee rescales to 2.2-4 (2.2~0, 2.8~0.35, 3.4~0.7, 4.0~1.0).
-  private static let starAnchors: [(f: Float, v: CGFloat)] = [
-    (1.4, 0), (2.2, 0), (2.8, 0.35), (3.4, 0.7), (4.0, 1.0),
-  ]
-
-  private static func interpolate(_ table: [(f: Float, v: CGFloat)], _ f: Float) -> CGFloat {
-    if f <= table.first!.f { return table.first!.v }
-    if f >= table.last!.f { return table.last!.v }
-    for i in 1..<table.count where f <= table[i].f {
-      let a = table[i - 1], b = table[i]
-      let t = CGFloat((f - a.f) / (b.f - a.f))
-      return a.v + (b.v - a.v) * t
-    }
-    return table.last!.v
-  }
-
   static func apply(_ input: CIImage, fNumber: Float) -> CIImage {
     var output = input
-    // 1) BACKGROUND BLUR (small f = wide open = strong blur).
-    let radius = interpolate(blurAnchors, fNumber)
+    // 1) BACKGROUND BLUR - normalized over the single Camera18ApertureSpec range:
+    //    closedness = clamp((f - min) / (max - min), 0, 1); blur = 1 - closedness.
+    //    (Wide open -> strongest blur; smallest stop -> weakest. Max 28px.)
+    let spec = Camera18ApertureSpec.load()
+    let closedness = min(1.0, max(0.0, (fNumber - spec.min) / (spec.max - spec.min)))
+    let blurStrength = 1.0 - closedness
+    let radius = blurStrength * 28.0
     if radius >= 1.5, let mask = personMask(for: input) {
       // Blur a QUARTER-SCALE copy and upscale: the background is defocused anyway, so
       // the detail loss is invisible, and a 24MP r=24 gaussian stays cheap.
@@ -1805,11 +1880,9 @@ enum ApertureSimulationProcessor {
       output = blurred.appBlendWithMask(foreground: output, mask: fullMask)
     }
 
-    // 2) STARBURST (only strong specular highlights; intensity follows the f-number).
-    let strength = interpolate(starAnchors, fNumber)
-    if strength > 0.01 {
-      output = output.appStarburst(strength: strength)
-    }
+    // 2) STARBURST (strong specular highlights; strength AND ray length follow the
+    // same normalized closedness over the shared spec range).
+    output = StarburstProcessor.apply(output, fNumber: fNumber)
     return output.cropped(to: input.extent)
   }
 
@@ -1848,6 +1921,22 @@ enum ApertureSimulationProcessor {
   }
 }
 
+// MARK: - Starburst Processor (shared by Final photo AND live Preview)
+/// The ONLY starburst implementation. Strength and ray length are driven by the
+/// normalized closedness over Camera18ApertureSpec: wide open -> weakest, smallest
+/// stop -> strongest. Called on the full-res photo (simulated captures) AND on the
+/// 1280px preview frame (simulated mode) - same public CI filters, no new renderer.
+enum StarburstProcessor {
+  static func apply(_ input: CIImage, fNumber: Float) -> CIImage {
+    let spec = Camera18ApertureSpec.load()
+    let closedness = min(1.0, max(0.0, (fNumber - spec.min) / (spec.max - spec.min)))
+    let strength = closedness
+    let rayRadius = 10.0 + closedness * 30.0
+    guard strength > 0.01 else { return input }
+    return input.appStarburst(strength: strength, rayRadius: rayRadius)
+  }
+}
+
 // MARK: - CIImage helpers for the simulation (prefixed `app` to stay out of CI's space)
 
 extension CIImage {
@@ -1869,9 +1958,12 @@ extension CIImage {
     ])?.outputImage ?? foreground
   }
 
-  /// 8-ray starburst: threshold specular highlights, streak them horizontally /
-  /// vertically / diagonally, screen the rays back over the base at `strength`.
-  func appStarburst(strength: CGFloat) -> CIImage {
+  /// 8-ray starburst. Highlight mask = ABSOLUTE brightness x LOCAL CONTRAST (user
+  /// spec): absolute = max(0, Y - 0.78); local = max(0, Y - boxBlur5(Y) - 0.12);
+  /// highlight = clamp(absolute * local * 8, 0, 1). Flat bright areas (walls/sky)
+  /// have Y ~= localAverage -> local term ~0 -> NO starburst; small hot speculars
+  /// spike on the product term.
+  func appStarburst(strength: CGFloat, rayRadius: CGFloat) -> CIImage {
     // Luminance in all three channels.
     let lum = CIFilter(name: "CIColorMatrix", parameters: [
       kCIInputImageKey: self,
@@ -1880,25 +1972,61 @@ extension CIImage {
       "inputBVector": CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0),
       "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1),
     ])?.outputImage ?? self
-    // SOFT threshold: gain pushes the knee down so only true speculars survive; the
-    // clamp keeps it in 0..1. Ordinary bright-but-not-specular objects stay below.
-    // Knee at luminance ~0.86 with a short ramp: gray/white everyday objects (0.3-0.8)
-    // stay strictly below it; sun/lamps/speculars (>=0.9) saturate into the mask.
-    let gain: CGFloat = 14.0
-    let scaled = CIFilter(name: "CIColorMatrix", parameters: [
+    // LOCAL CONTRAST: localAverage = CIBoxBlur(Y, r=5); highPass = Y - localAverage
+    // realized as (-1)*localAverage added to Y (CIAdditionCompositing adds channels).
+    let localAverage = CIFilter(name: "CIBoxBlur", parameters: [
       kCIInputImageKey: lum,
-      "inputRVector": CIVector(x: gain, y: 0, z: 0, w: 0),
-      "inputGVector": CIVector(x: 0, y: gain, z: 0, w: 0),
-      "inputBVector": CIVector(x: 0, y: 0, z: gain, w: 0),
-      "inputBiasVector": CIVector(x: -12.0, y: -12.0, z: -12.0, w: 0),
-    ])?.outputImage ?? self
+      kCIInputRadiusKey: CGFloat(5),
+    ])?.outputImage ?? lum
+    let negLocal = CIFilter(name: "CIColorMatrix", parameters: [
+      kCIInputImageKey: localAverage,
+      "inputRVector": CIVector(x: -1, y: 0, z: 0, w: 0),
+      "inputGVector": CIVector(x: 0, y: -1, z: 0, w: 0),
+      "inputBVector": CIVector(x: 0, y: 0, z: -1, w: 0),
+      "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+    ])?.outputImage ?? localAverage
+    let highPass = CIFilter(name: "CIAdditionCompositing", parameters: [
+      kCIInputImageKey: lum,
+      "inputBackgroundImage": negLocal,
+    ])?.outputImage ?? lum
+
+    // absolute = clamp(Y - 0.78); local = clamp(highPass - 0.12)
+    func clampedOffset(_ image: CIImage, _ offset: CGFloat) -> CIImage {
+      let biased = CIFilter(name: "CIColorMatrix", parameters: [
+        kCIInputImageKey: image,
+        "inputRVector": CIVector(x: 1, y: 0, z: 0, w: 0),
+        "inputGVector": CIVector(x: 0, y: 1, z: 0, w: 0),
+        "inputBVector": CIVector(x: 0, y: 0, z: 1, w: 0),
+        "inputBiasVector": CIVector(x: 0 - offset, y: 0 - offset, z: 0 - offset, w: 1),
+      ])?.outputImage ?? image
+      return CIFilter(name: "CIColorClamp", parameters: [
+        kCIInputImageKey: biased,
+        "inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 0),
+        "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1),
+      ])?.outputImage ?? biased
+    }
+    let absolute = clampedOffset(lum, 0.78)
+    let localTerm = clampedOffset(highPass, 0.12)
+    // product = absolute * local (per-channel multiply), then gain x8 and clamp.
+    let multiplied = CIFilter(name: "CIMultiplyCompositing", parameters: [
+      kCIInputImageKey: absolute,
+      "inputBackgroundImage": localTerm,
+    ])?.outputImage ?? absolute
+    let gained = CIFilter(name: "CIColorMatrix", parameters: [
+      kCIInputImageKey: multiplied,
+      "inputRVector": CIVector(x: 8, y: 0, z: 0, w: 0),
+      "inputGVector": CIVector(x: 0, y: 8, z: 0, w: 0),
+      "inputBVector": CIVector(x: 0, y: 0, z: 8, w: 0),
+      "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+    ])?.outputImage ?? multiplied
     let highlights = CIFilter(name: "CIColorClamp", parameters: [
-      kCIInputImageKey: scaled,
+      kCIInputImageKey: gained,
       "inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 0),
       "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1),
-    ])?.outputImage ?? self
+    ])?.outputImage ?? gained
 
     // 8 rays: H, V, and the two diagonals (diagonals shorter — classic star look).
+    // Ray length follows the SAME closedness driving the strength: r = 10 + c * 30.
     func ray(_ angle: CGFloat, _ radius: CGFloat) -> CIImage? {
       CIFilter(name: "CIMotionBlur", parameters: [
         kCIInputImageKey: highlights,
@@ -1907,10 +2035,10 @@ extension CIImage {
       ])?.outputImage
     }
     var rays: [CIImage] = []
-    if let h = ray(0, 40) { rays.append(h) }
-    if let v = ray(90, 40) { rays.append(v) }
-    if let d1 = ray(45, 22) { rays.append(d1) }
-    if let d2 = ray(135, 22) { rays.append(d2) }
+    if let h = ray(0, rayRadius) { rays.append(h) }
+    if let v = ray(90, rayRadius) { rays.append(v) }
+    if let d1 = ray(45, rayRadius * 0.55) { rays.append(d1) }
+    if let d2 = ray(135, rayRadius * 0.55) { rays.append(d2) }
     guard !rays.isEmpty else { return self }
 
     // Accumulate rays (additive), tint them to warm white, scale by strength.
