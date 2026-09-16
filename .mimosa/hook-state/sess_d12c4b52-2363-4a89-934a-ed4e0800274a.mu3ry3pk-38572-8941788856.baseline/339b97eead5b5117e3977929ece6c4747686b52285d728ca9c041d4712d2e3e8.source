@@ -36,8 +36,6 @@ export type EngineDiagnostics = {
   deviceModel?: string;
   /** Camera Control side button: method names the installed OS actually exposes (runtime enumeration). */
   cameraControlSurface?: string[];
-  /** TRUE on local-dev / TestFlight Beta builds: the mock aperture developer menu is available. */
-  testingBuild?: boolean;
 };
 
 export type CapturedPhoto = {
@@ -107,8 +105,6 @@ type NativeCameraEngine = {
   addApertureChangedListener(
     cb: (event: { readonly fNumber: number }) => void,
   ): { readonly remove: () => void };
-  /** TESTING BUILDS ONLY: force aperture capability ("real" | "mock-variable" | "mock-fixed"). */
-  setMockApertureMode(mode: 'real' | 'mock-variable' | 'mock-fixed'): Promise<void>;
   addZoomChangedListener(
     cb: (event: { readonly zoom: number }) => void,
   ): { readonly remove: () => void };
@@ -188,7 +184,6 @@ const unavailableModule: NativeCameraEngine = {
   getAvailableLenses: () => Promise.reject(unavailableError()),
   setLens: () => Promise.reject(unavailableError()),
   setZoomFactor: () => Promise.reject(unavailableError()),
-  setMockApertureMode: () => Promise.reject(unavailableError()),
   addApertureChangedListener: () => ({ remove: () => {} }),
   addZoomChangedListener: () => ({ remove: () => {} }),
 };
@@ -226,10 +221,6 @@ export const getAvailableLenses = (): Promise<LensInfo> =>
   typed(NativeModule.getAvailableLenses());
 export const setLens = (lensId: string): Promise<void> => typed(NativeModule.setLens(lensId));
 export const setZoomFactor = (factor: number): Promise<void> => typed(NativeModule.setZoomFactor(factor));
-/** TESTING BUILDS ONLY (see CameraEngineModule CAMER18_TESTING gate). */
-export const setMockApertureMode = (
-  mode: 'real' | 'mock-variable' | 'mock-fixed',
-): Promise<void> => typed(NativeModule.setMockApertureMode(mode));
 
 /** Native aperture change (Camera Control slider / any native source) -> ApertureState sync. */
 export type ApertureChangedEvent = { readonly fNumber: number };
@@ -275,7 +266,6 @@ export type CameraEngineHandle = {
   getAvailableLenses: typeof getAvailableLenses;
   setLens: typeof setLens;
   setZoomFactor: typeof setZoomFactor;
-  setMockApertureMode: typeof setMockApertureMode;
   addApertureChangedListener: typeof addApertureChangedListener;
   addZoomChangedListener: typeof addZoomChangedListener;
 };
@@ -311,7 +301,6 @@ export const CameraEngineView = forwardRef<CameraEngineHandle, CameraEngineViewP
     getAvailableLenses,
     setLens,
     setZoomFactor,
-    setMockApertureMode,
     addApertureChangedListener,
     addZoomChangedListener,
     }), []);

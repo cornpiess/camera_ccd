@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, PanResponder, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Animated, PanResponder, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { hexToRgba } from '../theme/skin';
 import { IrisGlyph } from './IrisGlyph';
@@ -13,11 +13,6 @@ export interface ApertureBarProps {
   /** Displayed f-stop (hardware-confirmed or optimistic). Continuous. */
   readonly currentAperture: number;
   readonly isVariableAperture: boolean;
-  /**
-   * The CURRENT profile's signature (recommended) aperture — variable lenses only.
-   * Rendered as a special marker tick on the scale; never shown on fixed lenses.
-   */
-  readonly signatureAperture?: number | null;
   /** Fired continuously while dragging with the exact f-stop under the finger. */
   readonly onApertureChange: (fStop: number) => void;
   /**
@@ -27,31 +22,37 @@ export interface ApertureBarProps {
    */
   readonly onApertureSettle?: (fStop: number) => void;
   /**
-   * TRUE (fixed lens): display-only — iris + real f-value + side view; no tick scale,
-   * no drag, no signature marker. FALSE (variable lens): all four elements live.
+   * TRUE (fixed lens): the ring is not draggable and shows the lens's real mechanical
+   * aperture ("固定光圈"). FALSE: real variable iris ("真实光圈"). Caption only —
+   * the ring mechanics are identical either way.
    */
   readonly fixedMode?: boolean;
   /** Camera identity accent — pointer line, value and iris rim wear the camera skin. */
   readonly accent?: string;
+  /**
+   * Developer-mode extra: show the side-view lens cross-section above the tick scale.
+   * OFF by default — the tick scale alone is the control.
+   */
+  readonly sideViewEnabled?: boolean;
+  /** Switch between the tick scale and the side view (the strip's top-right button). */
+  readonly onToggleSideView?: () => void;
 }
 
 const BAR_HEIGHT = 96;
+const TRACK_WIDTH = 252;
 /** Drag distance spanning the whole range — short enough that ƒ/1.5→ƒ/4 is one quick flick. */
 const FULL_DRAG_PX = 400;
-/** Detent grid: one click per 0.1 f-number (ƒ/1.5 → ƒ/1.6 → …), like a tight lens ring. */
+/** Scale band: 3× the visible width so the scroll has travel on both sides. */
+const BAND_SPAN = TRACK_WIDTH * 3;
+/** Detent grid: one click per 0.1 f-number (ƒ/1.5 → ƒ/1.6 → … ƒ/4.0), like a tight lens ring. */
 const FSTEPS_PER_TENTH = 10;
-/** Ruler-style scale: 48 ticks per stop — previous count halved for controllability,
+/** Ruler-style scale: 48 ticks per stop - previous count halved for controllability,
   * while the minimum tick width stays 1px so spacing reads looser, not denser. */
 const TICKS_PER_STOP = 48;
-/** Iris glyph size (the aperture hole, far left of the strip). */
-const IRIS_SIZE = 44;
-const IRIS_LEFT = 8;
-const IRIS_GAP = 10;
-/** Side-view cross-section width (always visible between the iris and the scale). */
-const SIDE_WIDTH = 118;
-const SIDE_LEFT = IRIS_LEFT + IRIS_SIZE + IRIS_GAP;
 /** The tick BASELINE: horizontally level with the iris glyph's center (the aperture hole). */
 const TICK_BASELINE = BAR_HEIGHT / 2 - 8; // in trackClip coords (clip starts at top: 8)
+/** Iris sits to the LEFT of the track so the pointer line stays exactly on the shutter axis. */
+const IRIS_GAP = 14;
 
 const clamp = (x: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, x));
 const toLog = (f: number): number => Math.log2(f);
@@ -59,36 +60,36 @@ const toF = (log: number): number => Math.pow(2, log);
 const formatF = (f: number): string => `ƒ/${f.toFixed(1).replace(/\.0$/, '')}`;
 
 /**
- * The aperture strip — the product's hero control. FOUR elements, all bound to the ONE
- * ApertureState and all acting as adjustment entries (the whole strip is a drag surface):
+ * The aperture ring — the product's hero control, modeled on a real lens ring:
  *
- *   [ iris hole ]  [ side view ]   ····|·|····
- *    real aperture   cross-section   tick scale (scrolls under the fixed pointer)
+ *   [ iris SVG ]   ····|·|····
+ *    hole tracks        ▲ thin accent pointer, EXACTLY on the shutter axis
+ *    the ring      (the scale BAND scrolls under the fixed pointer, like a real dial)
  *
- * - Variable lens: all four live; the scale additionally marks the current profile's
- *   signature (recommended) aperture with an accent diamond.
- * - Fixed lens: display-only — iris + real mechanical f-value + side view; no ticks,
- *   no marker, no drag. The lens has one mechanical aperture; nothing is simulated.
- * - CONTINUOUS (无极): detents are a FEEL only (haptic per 0.1 f-number crossing) —
- *   the value itself never snaps.
+ * - CONTINUOUS (无极): the API takes an arbitrary f-number, so the ring is stepless.
+ *   Detents are a FEEL only: a haptic tick per crossing (light per detent, rigid per
+ *   full stop) without ever snapping the value.
+ * - The scale scrolls horizontally under the fixed center pointer (scrolls LEFT when
+ *   stopping down, RIGHT when opening) — the mechanical ring read the user asked for.
+ * - f/1.4 (wide open) → big hole, ring scrolled fully right; f/4 → tiny hole, scrolled
+ *   left. Iris SVG blades open/close with the value (direction verified: smaller
+ *   f-number = LARGER hole).
  */
 export const ApertureBar: React.FC<ApertureBarProps> = ({
   minAperture,
   maxAperture,
   currentAperture,
   isVariableAperture,
-  signatureAperture,
   onApertureChange,
   onApertureSettle,
   fixedMode = false,
   accent,
+  sideViewEnabled = false,
+  onToggleSideView,
 }) => {
   const { width: screenWidth } = useWindowDimensions();
   const topInset = 8;
   const scaleH = BAR_HEIGHT - topInset;
-  // The tick scale occupies everything right of the side view.
-  const trackLeft = SIDE_LEFT + SIDE_WIDTH + 8;
-  const trackWidth = Math.max(140, screenWidth - trackLeft - 10);
   const lo = Math.min(minAperture, maxAperture);
   const hi = Math.max(minAperture, maxAperture);
   const logLo = toLog(lo);
@@ -98,7 +99,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   /** 0 = stopped down (ƒ/max), 1 = wide open (ƒ/min). Feeds iris hole + scroll direction. */
   const openness = clamp(1 - (toLog(currentAperture) - logLo) / span, 0, 1);
 
-  // Ruler-style tick scale: three sizes per stop —
+  // Ruler-style tick scale, dense like a straight ruler: three sizes per stop —
   //   full stop  (k % 48 === 0): tallest, labeled
   //   half stop  (k % 24 === 0): medium
   //   1/48 stop  (everything else): small
@@ -114,19 +115,17 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
       const half = k % (TICKS_PER_STOP / 2) === 0;
       list.push({
         key: `${k}`,
-        x: t * trackWidth * 3,
+        x: t * BAND_SPAN,
         major,
         half,
         label: major ? String(Number(toF(log).toFixed(1))) : undefined,
       });
     }
     return list;
-  }, [logLo, logHi, span, lo, hi, trackWidth]);
-
-  const BAND_SPAN = trackWidth * 3;
+  }, [logLo, logHi, span, lo, hi]);
 
   // The band scrolls under the fixed pointer: engaged value always sits at band-x = t*BAND_SPAN,
-  // rendered at screen-center via translateX = trackWidth/2 - t*BAND_SPAN.
+  // rendered at screen-center via translateX = TRACK_WIDTH/2 - t*BAND_SPAN.
   const translateX = useRef(new Animated.Value(0)).current;
 
   /**
@@ -136,7 +135,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
    */
   const animateBandTo = useCallback(
     (t: number) => {
-      const target = trackWidth / 2 - t * BAND_SPAN;
+      const target = TRACK_WIDTH / 2 - t * BAND_SPAN;
       Animated.spring(translateX, {
         toValue: target,
         // Snappy chase: high tension = tight response, high friction = no bounce.
@@ -148,7 +147,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
         useNativeDriver: false,
       }).start();
     },
-    [translateX, trackWidth, BAND_SPAN],
+    [translateX],
   );
   const tRef = useRef(0);
   useEffect(() => {
@@ -175,7 +174,15 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   };
 
   const interactive = isVariableAperture && hi > lo;
-  const irisLeft = IRIS_LEFT;
+  const trackLeft = screenWidth / 2 - TRACK_WIDTH / 2;
+  const irisLeft = trackLeft - 44 - IRIS_GAP;
+  // Side mode (sideViewEnabled): the cross-section replaces the scale, centered on the
+  // strip's middle line (level with the iris glyph). Width caps so it never reaches the
+  // iris (left) or the mode button (right).
+  const sideMode = interactive && sideViewEnabled;
+  const sideWidth = Math.min(204, screenWidth - 170);
+  const sideViewHeight = (sideWidth * 92) / 260;
+  const sideLeft = (screenWidth - sideWidth) / 2;
 
   // Live values via refs: the PanResponder must be created ONCE per aperture range. It
   // used to rebuild on EVERY currentAperture/openness change (i.e. every drag update),
@@ -191,6 +198,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
     const t = clamp(tRef.current, 0, 1);
     v.onApertureSettle?.(Number(toF(v.logLo + (1 - t) * v.span).toFixed(2)));
   };
+
 
   const panResponder = useMemo(
     () =>
@@ -240,26 +248,31 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   );
 
   return (
-    // Whole-strip drag surface: iris hole, side view, tick scale and f-value are all
-    // bound to the ONE ApertureState — dragging anywhere adjusts the aperture.
+    // Whole-bar drag surface (pointerEvents auto): the strip BETWEEN the finder and the
+    // shutter is the aperture control. Two visuals, switched by the mode button at the
+    // top-right: the tick scale (default) or the side-view cross-section, which sits
+    // VERTICALLY LEVEL with the iris glyph (both centered on the strip's middle line).
+    // Children that must not grab touches are pointerEvents="none".
     <View style={styles.bar} pointerEvents="auto" {...(interactive ? panResponder.panHandlers : {})}>
-      {/* Side-view cross-section: ALWAYS visible (element 3), level with the iris center */}
-      <View
-        style={[styles.sideSlot, { left: SIDE_LEFT, top: (BAR_HEIGHT - (SIDE_WIDTH * 92) / 260) / 2, width: SIDE_WIDTH }]}
-        pointerEvents="none"
-      >
-        <ApertureSideView openness={openness} accent={accent} label={formatF(currentAperture)} width={SIDE_WIDTH} />
+      {/* Side-view cross-section (side mode): level with the iris glyph's center line */}
+      {sideMode ? (
+        <View
+          style={[styles.sideSlot, { left: sideLeft, top: (BAR_HEIGHT - sideViewHeight) / 2, width: sideWidth }]}
+          pointerEvents="none"
+        >
+          <ApertureSideView openness={openness} accent={accent} label={formatF(currentAperture)} width={sideWidth} />
+        </View>
+      ) : null}
+
+      {/* Iris: the physical diaphragm (f/1.4 → big hole; f/4 → tiny hole) */}
+      <View style={[styles.iris, { left: irisLeft, top: (BAR_HEIGHT - 44) / 2 }]} pointerEvents="none">
+        <IrisGlyph size={44} openness={interactive ? openness : 0.55} accent={accent} />
       </View>
 
-      {/* Iris: the physical diaphragm (element 1; f/1.4 → big hole; f/4 → tiny hole) */}
-      <View style={[styles.iris, { left: irisLeft, top: (BAR_HEIGHT - IRIS_SIZE) / 2 }]} pointerEvents="none">
-        <IrisGlyph size={IRIS_SIZE} openness={interactive ? openness : 0.55} accent={accent} />
-      </View>
-
-      {/* The tick scale (element 4; variable lenses only) — ruler ticks sit on a baseline
-          LEVEL with the iris center; the band scrolls under the fixed pointer. */}
-      {interactive ? (
-        <View style={[styles.trackClip, { left: trackLeft, top: topInset, height: scaleH, width: trackWidth }]}>
+      {/* The tick scale (scale mode) — ruler ticks sit on a baseline LEVEL with the
+          iris glyph's center; the band scrolls under the fixed pointer (shutter axis). */}
+      {!sideMode ? (
+        <View style={[styles.trackClip, { left: trackLeft, top: topInset, height: scaleH }]}>
           <Animated.View style={[styles.band, { height: scaleH, transform: [{ translateX }] }]} pointerEvents="none">
             {ticks.map((tick) => (
               <View key={tick.key} style={[styles.tickSlot, { left: tick.x }]}>
@@ -274,46 +287,42 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
                 />
               </View>
             ))}
-            {/* Signature (recommended) aperture marker for the CURRENT profile */}
-            {(() => {
-              const sig = signatureAperture;
-              if (typeof sig !== 'number' || !Number.isFinite(sig) || !(hi > lo)) return null;
-              const sigLog = toLog(sig);
-              if (sigLog < logLo - 1e-6 || sigLog > logHi + 1e-6) return null;
-              const x = ((sigLog - logLo) / span) * BAND_SPAN;
-              return (
-                <View style={[styles.signatureMarker, { left: x }]} pointerEvents="none">
-                  <Text style={[styles.signatureLabel, accent ? { color: accent } : null]}>SIG</Text>
-                  <View style={[styles.signatureTick, accent ? { backgroundColor: accent } : null]} />
-                </View>
-              );
-            })()}
           </Animated.View>
-          {/* engaged value rides above the pointer (element 2) */}
+          {/* engaged value rides above the pointer */}
           <Text style={[styles.valueText, { top: 3 }, accent ? { color: accent } : null]} numberOfLines={1}>
             {formatF(currentAperture)}
           </Text>
           {/* THE pointer: thin, centered on the tick baseline (= the aperture-hole axis) */}
           <View
             pointerEvents="none"
-            style={[styles.pointer, { left: trackWidth / 2 - 0.75 }, accent ? { backgroundColor: accent } : null]}
+            style={[styles.pointer, accent ? { backgroundColor: accent } : null]}
           />
         </View>
-      ) : (
-        // FIXED lens: no ticks, no marker — the real mechanical f-value beside the iris.
-        <Text style={[styles.fixedValueText, accent ? { color: accent } : null]} numberOfLines={1}>
-          {formatF(currentAperture)}
-        </Text>
-      )}
+      ) : null}
+
+      {/* Mode switch: tap to swap between tick scale and side view */}
+      {onToggleSideView ? (
+        <TouchableOpacity
+          accessibilityLabel={sideMode ? 'Switch to aperture scale' : 'Switch to aperture side view'}
+          accessibilityRole="button"
+          hitSlop={6}
+          onPress={onToggleSideView}
+          style={styles.modeButton}
+        >
+          <Text style={[styles.modeButtonText, accent ? { color: accent, borderColor: hexToRgba(accent, 0.55) } : null]}>
+            {sideMode ? 'Scale' : 'Side'}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
 
       {
-        // Small mode caption: 真实光圈 = variable iris; 固定光圈 = single mechanical aperture.
+        // Small mode caption: 真实光圈 = real hardware iris; 模拟光圈 = simulated.
         <View
-          style={[styles.demoBadge, { right: 10 }, accent ? { borderColor: hexToRgba(accent, 0.55) } : null]}
+          style={[styles.demoBadge, { left: irisLeft }, accent ? { borderColor: hexToRgba(accent, 0.55) } : null]}
           pointerEvents="none"
         >
           <Text style={[styles.demoBadgeText, accent ? { color: accent } : null]}>
-            {fixedMode ? '固定光圈' : '真实光圈'}
+            {fixedMode ? 'Fixed aperture' : 'Real aperture'}
           </Text>
         </View>
       }
@@ -332,15 +341,17 @@ const styles = StyleSheet.create({
   },
   trackClip: {
     position: 'absolute',
-    // WIDTH IS LOAD-BEARING (passed inline as trackWidth): an absolute container with
-    // only absolute children and no explicit width sizes to ZERO, and overflow:hidden
-    // then clips the entire scale out of existence.
+    // WIDTH IS LOAD-BEARING: an absolute container with only absolute children and no
+    // explicit width sizes to ZERO, and overflow:hidden then clips the entire scale
+    // (ticks/value/pointer) out of existence.
+    width: TRACK_WIDTH,
     overflow: 'hidden',
   },
   band: {
     position: 'absolute',
     top: 0,
     left: 0,
+    width: TRACK_WIDTH * 3,
   },
   tickSlot: {
     position: 'absolute',
@@ -383,24 +394,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },
-  signatureMarker: {
-    position: 'absolute',
-    bottom: TICK_BASELINE,
-    width: 9,
-    alignItems: 'center',
-  },
-  signatureLabel: {
-    marginBottom: 2,
-    fontSize: 8,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  signatureTick: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: '#FFFFFF',
-  },
   valueText: {
     position: 'absolute',
     left: 0,
@@ -411,20 +404,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontVariant: ['tabular-nums'],
   },
-  fixedValueText: {
-    position: 'absolute',
-    left: SIDE_LEFT + SIDE_WIDTH + 12,
-    top: (BAR_HEIGHT - 17) / 2 - 8,
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    fontVariant: ['tabular-nums'],
-  },
   pointer: {
     position: 'absolute',
     // Centered on the tick baseline = the horizontal axis through the aperture hole.
-    // (left comes inline: trackWidth / 2 - 0.75)
     top: TICK_BASELINE - 15,
+    left: TRACK_WIDTH / 2 - 0.75,
     width: 1.5,
     height: 30,
     borderRadius: 0.75,
@@ -432,14 +416,30 @@ const styles = StyleSheet.create({
   },
   iris: {
     position: 'absolute',
-    width: IRIS_SIZE,
-    height: IRIS_SIZE,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  demoBadge: {
+  modeButton: {
     position: 'absolute',
     top: 4,
+    right: 10,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.22)',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  modeButtonText: {
+    color: 'rgba(255, 255, 255, 0.75)',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  demoBadge: {
+    position: 'absolute',
     borderRadius: 6,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.22)',
@@ -451,7 +451,7 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.65)',
     fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 1,
+    letterSpacing: 1.5,
   },
 });
 

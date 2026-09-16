@@ -1,21 +1,21 @@
 {
   "schemaVersion": "mimosa-hook-status/v1",
-  "recordedAt": "2026-09-16T06:17:57.416Z",
+  "recordedAt": "2026-09-16T07:44:06.723Z",
   "sessionId": "sess_d12c4b52-2363-4a89-934a-ed4e0800274a",
   "event": "PreToolUse",
-  "toolName": "Edit",
-  "file": "modules/camera-engine/ios/CameraEngineModule.swift",
-  "outcome": "clear",
+  "toolName": "Write",
+  "file": ".tmp-json.py",
+  "outcome": "blocked",
   "coverage": "complete",
-  "findingCount": 0,
-  "durationMs": 7,
+  "findingCount": 1,
+  "durationMs": 1012,
   "telemetry": {
     "schemaVersion": "mimosa-gate-telemetry/v1",
     "profile": "gate",
     "operation": "PreToolUse",
     "outcome": "complete",
-    "latencyMs": 7,
-    "peakMemoryBytes": 110866432,
+    "latencyMs": 1012,
+    "peakMemoryBytes": 135495680,
     "memoryMeasurement": "max-observed-process-rss",
     "scannedFiles": 1,
     "cache": {
@@ -23,7 +23,7 @@
       "misses": 1,
       "measurement": "not-applicable"
     },
-    "denyCount": 0,
+    "denyCount": 1,
     "tokens": {
       "input": 0,
       "output": 0,

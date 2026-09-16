@@ -101,9 +101,9 @@
       },
       "id": "ricoh_positive",
       "name": "Ricoh Positive",
-      "displayName": "Ricoh Positive",
+      "displayName": "SNAP 28P",
       "ui": {
-        "shortName": "RIC",
+        "shortName": "28P",
         "accent": "#C7AFA0",
         "dialStyle": "snap",
         "personality": "crisp",
@@ -217,9 +217,9 @@
       },
       "id": "ricoh_negative",
       "name": "Ricoh Negative",
-      "displayName": "Ricoh Negative",
+      "displayName": "SNAP 28N",
       "ui": {
-        "shortName": "NEG",
+        "shortName": "28N",
         "accent": "#9FB4C4",
         "dialStyle": "compact",
         "personality": "soft",
@@ -333,9 +333,9 @@
       },
       "id": "canon_portrait",
       "name": "Canon Portrait",
-      "displayName": "Canon Portrait",
+      "displayName": "SKIN 50",
       "ui": {
-        "shortName": "POR",
+        "shortName": "SK50",
         "accent": "#B78BA3",
         "dialStyle": "compact",
         "personality": "soft",
@@ -449,9 +449,9 @@
       },
       "id": "fuji_classic_chrome",
       "name": "Fujifilm Classic Chrome",
-      "displayName": "Fujifilm Classic Chrome",
+      "displayName": "CC 35",
       "ui": {
-        "shortName": "FCC",
+        "shortName": "CC35",
         "accent": "#A8A8A0",
         "dialStyle": "knurled",
         "personality": "nostalgic",
@@ -565,9 +565,9 @@
       },
       "id": "fuji_classic_negative",
       "name": "Fujifilm Classic Negative",
-      "displayName": "Fujifilm Classic Negative",
+      "displayName": "NC 35",
       "ui": {
-        "shortName": "FCN",
+        "shortName": "NC35",
         "accent": "#97A06A",
         "dialStyle": "knurled",
         "personality": "nostalgic",
@@ -681,9 +681,9 @@
       },
       "id": "leica_m9",
       "name": "Leica M9",
-      "displayName": "Leica M9",
+      "displayName": "RF 35",
       "ui": {
-        "shortName": "M9",
+        "shortName": "RF35",
         "accent": "#B4554D",
         "dialStyle": "snap",
         "personality": "crisp",
@@ -698,12 +698,118 @@
       }
     },
     {
-      "id": "negative_film",
-      "name": "Film Negative",
-      "displayName": "底片 Negative",
+      "id": "mf50",
+      "name": "MF 50",
+      "displayName": "MF 50",
       "aperture": {
-        "preferred": 1.8
+        "preferred": 2.5
       },
+      "raw": {
+        "sharpness": 0,
+        "detail": 0,
+        "localToneMap": 0,
+        "luminanceNoiseReduction": 0,
+        "colorNoiseReduction": 0
+      },
+      "tone": {
+        "exposure": 0.05,
+        "contrast": 0.96,
+        "blackPoint": 0.005,
+        "exposureBias": 0,
+        "curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.18,
+            0.2
+          ],
+          [
+            0.5,
+            0.51
+          ],
+          [
+            0.78,
+            0.8
+          ],
+          [
+            1,
+            0.985
+          ]
+        ]
+      },
+      "color": {
+        "saturation": 0.95,
+        "temperature": 0,
+        "tint": 0,
+        "hueBands": {
+          "red": {
+            "hue": 2,
+            "saturation": 0.97,
+            "luminance": 1.01
+          },
+          "orange": {
+            "hue": 1,
+            "saturation": 0.95,
+            "luminance": 1.04
+          },
+          "yellow": {
+            "hue": -2,
+            "saturation": 0.92,
+            "luminance": 1.02
+          },
+          "green": {
+            "hue": -4,
+            "saturation": 0.9,
+            "luminance": 1.01
+          },
+          "cyan": {
+            "hue": -3,
+            "saturation": 0.93,
+            "luminance": 1.0
+          },
+          "blue": {
+            "hue": -2,
+            "saturation": 0.92,
+            "luminance": 0.99
+          },
+          "magenta": {
+            "hue": 1,
+            "saturation": 0.94,
+            "luminance": 1.01
+          }
+        },
+        "lut": null,
+        "lutIntensity": 1
+      },
+      "texture": {
+        "grain": {
+          "amount": 0,
+          "size": 0.3
+        },
+        "vignette": {
+          "amount": 0,
+          "radius": 0.85
+        },
+        "halation": {
+          "amount": 0,
+          "radius": 0.2
+        }
+      },
+      "ui": {
+        "shortName": "MF50",
+        "accent": "#B8B2A6",
+        "dialStyle": "snap",
+        "personality": "gentle",
+        "labelStyle": "minimal",
+        "markerStyle": "ring"
+      }
+    },
+    {
+      "id": "negative_film",
+      "name": "ORIG",
+      "displayName": "ORIG",
       "raw": {
         "sharpness": 0,
         "detail": 0,
@@ -798,7 +904,7 @@
         }
       },
       "ui": {
-        "shortName": "NEG",
+        "shortName": "ORIG",
         "accent": "#E8E8E8",
         "dialStyle": "snap",
         "personality": "neutral",

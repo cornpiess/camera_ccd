@@ -1,0 +1,99 @@
+// 一次性脚本：转换 fujilab 的富士胶片模拟 .3dl → .cube 并生成 LUT-only Profile。
+// 来源: github.com/MatthewGreenberg/fujilab public/luts/*.3dl（解析生成的富士 X-Trans III 模拟）。
+// 注意: 该仓库无许可证，仅限内部测试使用（与松下官方批次同立场），勿对外分发。
+// 用法: node scripts/add-fuji-sim-luts.js
+const fs = require("fs");
+const path = require("path");
+const { execFileSync } = require("child_process");
+
+const ROOT = path.join(__dirname, "..");
+const REPO = "MatthewGreenberg/fujilab";
+
+const PICKS = [
+  { file: "Fuji XTrans III - Classic Chrome.3dl", id: "fuji_lut_classic_chrome", name: "Classic Chrome (LUT)", short: "CC", accent: "#97A06A" },
+  { file: "Fuji XTrans III - Velvia.3dl", id: "fuji_lut_velvia", name: "Velvia (LUT)", short: "VLV", accent: "#C75B5B" },
+  { file: "Fuji XTrans III - Provia.3dl", id: "fuji_lut_provia", name: "Provia (LUT)", short: "PRO", accent: "#8FA8C7" },
+  { file: "Fuji XTrans III - Astia.3dl", id: "fuji_lut_astia", name: "Astia (LUT)", short: "AST", accent: "#C7A68F" },
+  { file: "Fuji XTrans III - Acros.3dl", id: "fuji_lut_acros", name: "Acros (LUT)", short: "ACR", accent: "#9A9A9F" },
+  { file: "Fuji XTrans III - Pro Neg Std.3dl", id: "fuji_lut_pro_neg_std", name: "Pro Neg Std (LUT)", short: "PNS", accent: "#B49A8F" },
+];
+
+// 安全加固（Mimosa）：参数数组式调用，不经 shell，杜绝命令注入。
+const fetch3dl = (file) =>
+  execFileSync("curl", ["-sf", "--max-time", "60", `https://cdn.jsdelivr.net/gh/${REPO}@main/public/luts/${encodeURIComponent(file)}`], { maxBuffer: 16 * 1024 * 1024 });
+
+function convert3dlToCube(text) {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+  // line 0 = comment; line 1 = lattice points; rest = RGB triples (0..1023, red fastest)
+  const lattice = lines[1].trim().split(/\s+/).map(Number);
+  const dim = lattice.length;
+  const dataLines = lines.slice(2);
+  if (dataLines.length !== dim * dim * dim) throw new Error(`数据行数 ${dataLines.length} ≠ ${dim}³`);
+  let out = `# Converted from ${REPO} .3dl (values 0..1023 → 0..1)\nLUT_3D_SIZE ${dim}\n\n`;
+  for (const line of dataLines) {
+    const [r, g, b] = line.trim().split(/\s+/).map((n) => Number(n) / 1023);
+    out += `${r.toFixed(6)} ${g.toFixed(6)} ${b.toFixed(6)} 1\n`;
+  }
+  return { dim, cube: out };
+}
+
+function neutralProfile(lutName, name, short, accent) {
+  const band = { hue: 0, saturation: 1, luminance: 1 };
+  const hueBands = {};
+  for (const k of ["red", "orange", "yellow", "green", "cyan", "blue", "magenta"]) hueBands[k] = { ...band };
+  return {
+    aperture: { preferred: 4, starZone: 4 },
+    ui: { shortName: short, accent, dialStyle: "compact", personality: "soft", markerStyle: "line", labelStyle: "minimal", glassTintStrength: 0.06 },
+    raw: { sharpness: 0, detail: 0, localToneMap: 0, luminanceNoiseReduction: 0, colorNoiseReduction: 0 },
+    tone: { exposure: 0, contrast: 1, blackPoint: 0, curve: [[0, 0], [0.25, 0.25], [0.5, 0.5], [0.75, 0.75], [1, 1]], exposureBias: 0 },
+    color: { saturation: 1, temperature: 0, tint: 0, hueBands, lut: lutName, lutIntensity: 1 },
+    texture: { grain: { amount: 0, size: 0.25 }, vignette: { amount: 0, radius: 0.75 }, halation: { amount: 0, radius: 0.2 } },
+  };
+}
+
+const profilesPath = path.join(ROOT, "assets/camera-profiles.json");
+const mapPath = path.join(ROOT, "Camera18_LUT_V0/profiles-lut-map.json");
+const doc = JSON.parse(fs.readFileSync(profilesPath, "utf8"));
+const map = JSON.parse(fs.readFileSync(mapPath, "utf8"));
+
+for (const pick of PICKS) {
+  const lutName = pick.id.replace(/^fuji_lut_/, "fuji-sim-");
+  if (doc.profiles.some((p) => p.id === pick.id)) { console.log("跳过(已存在):", pick.id); continue; }
+
+  const converted = convert3dlToCube(fetch3dl(pick.file).toString("utf8"));
+  for (const dest of [
+    path.join(ROOT, "modules/camera-engine/ios/LUTs", lutName + ".cube"),
+    path.join(ROOT, "Camera18_LUT_V0/luts", lutName + ".cube"),
+  ]) {
+    if (!fs.existsSync(dest)) fs.writeFileSync(dest, converted.cube);
+  }
+
+  const p = neutralProfile(lutName, pick.name, pick.short, pick.accent);
+  p.id = pick.id;
+  p.name = pick.name;
+  p.displayName = pick.name;
+  p.developmentReference = {
+    target: `LUT-only profile（其余全中性）。富士胶片模拟「${pick.name.replace(" (LUT)", "")}」${converted.dim}pt，解析生成的 X-Trans III 模拟，标准照片输入。来源: github.com/${REPO}（无许可证，仅限内部测试）`,
+    lutSource: `https://github.com/${REPO}`,
+    internalTestOnly: true,
+  };
+  doc.profiles.push(p);
+  map.profiles.push({
+    id: pick.id,
+    displayName: pick.name,
+    lut: `luts/${lutName}.cube`,
+    notes: `LUT-only profile。富士 ${pick.name} 模拟 ${converted.dim}pt（.3dl 转换）。无许可证，仅内部测试。`,
+  });
+  console.log("Profile:", pick.id, "→", pick.name, `(${converted.dim}pt)`);
+}
+
+fs.writeFileSync(profilesPath, JSON.stringify(doc, null, 2) + "\n");
+fs.writeFileSync(mapPath, JSON.stringify(map, null, 2) + "\n");
+const checkPath = path.join(ROOT, "scripts/prepackage-check.js");
+const check = fs.readFileSync(checkPath, "utf8");
+const m = check.match(/doc\.profiles\.length === (\d+)/);
+if (m && Number(m[1]) !== doc.profiles.length) {
+  fs.writeFileSync(checkPath, check.replace(`doc.profiles.length === ${m[1]}`, `doc.profiles.length === ${doc.profiles.length}`));
+  console.log(`prepackage 数量断言: ${m[1]} → ${doc.profiles.length}`);
+}
+console.log(`完成: 共 ${doc.profiles.length} 个 Profile`);

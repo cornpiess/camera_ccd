@@ -80,6 +80,13 @@ final class ApertureController {
   /// Resolved from CAPABILITY (device + activeFormat + API presence), refreshed on every
   /// getCapabilities/setAperture. Defaults to .fixed — the honest default.
   var mode: ApertureMode = .fixed
+#if DEBUG || CAMERA18_TESTING
+  /// TestFlight Beta / local-dev ONLY: force the aperture mode so the variable/fixed UI
+  /// can be tested on any device (e.g. iPhone 14 Plus). When set, capabilityMode returns
+  /// it VERBATIM — no real aperture API is called, no exposure is touched, photos are
+  /// completely unaffected. Production builds compile this property out entirely.
+  var mockOverride: ApertureMode?
+#endif
 
   /// Capability detection: physical iff the CURRENT device + activeFormat satisfy ALL of
   /// - non-degenerate variable-aperture range (min < max),
@@ -93,6 +100,9 @@ final class ApertureController {
     // obtainable — without them AE cannot compensate aperture changes and the frame
     // darkens (frozen shutter/ISO). Capability = range + stops + setter + supports
     // check + live auto sentinels. All of it, or simulated.
+    #if DEBUG || CAMERA18_TESTING
+    if let mock = mockOverride { return mock }
+    #endif
     guard autoSentinels() != nil else { return .fixed }
     guard let device,
           let range = variableApertureRange(device),
@@ -502,6 +512,17 @@ public final class CameraEngineModule: Module {
     /// the old build's resources — presents as "the LUT has no effect"), the add-only photo
     /// permission state (the top cause of "photos never reach the library"), and the
     /// hardware aperture report as the session currently sees it.
+    #if DEBUG || CAMERA18_TESTING
+    /// TestFlight Beta only: force aperture capability for UI testing.
+    /// "real" | "mock-variable" | "mock-fixed". No hardware APIs are invoked in mock
+    /// modes; photos are completely unaffected.
+    AsyncFunction("setMockApertureMode") { (mode: String, promise: Promise) in
+      guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
+      view.setMockApertureMode(mode, controller: self.apertureController)
+      self.settle(.success(()), promise)
+    }
+    #endif
+
     AsyncFunction("getDiagnostics") { (promise: Promise) in
       var bundledLuts: Set<String> = []
       for container in [Bundle(for: CameraEngineView.self), Bundle.main] {
@@ -534,6 +555,11 @@ public final class CameraEngineModule: Module {
         "normalizers": CameraInputNormalizer.resolvedSummary(),
         "rendererVersion": CameraDNARenderer.rendererVersion,
         "identityCheck": CameraDNARenderer.identitySelfCheck(),
+        #if DEBUG || CAMERA18_TESTING
+        "testingBuild": true,
+        #else
+        "testingBuild": false,
+        #endif
       ]
       let finish: (Result<[String: Any], CameraEngineError>) -> Void = { result in
         if case .success(let caps) = result { payload.merge(caps) { _, newest in newest } }
@@ -1206,8 +1232,43 @@ public final class CameraEngineView: ExpoView {
   private var zoomKvoContext = 0
   private weak var zoomKvoObservedDevice: AVCaptureDevice?
 
+  /// TEST BUILDS ONLY: force the aperture capability for UI testing.
+  /// "mock-variable" / "mock-fixed" / "real". Mock modes touch STATE ONLY — the real
+  /// lens aperture API is never called and photos are completely unaffected.
+  #if DEBUG || CAMERA18_TESTING
+  fileprivate func setMockApertureMode(_ mode: String, controller: ApertureController) {
+    sessionQueue.async {
+      switch mode {
+      case "mock-variable":
+        controller.mockOverride = .variable
+        controller.mode = .variable
+        self.apertureMode = .variable
+      case "mock-fixed":
+        controller.mockOverride = .fixed
+        controller.mode = .fixed
+        self.apertureMode = .fixed
+      default: // "real"
+        controller.mockOverride = nil
+        controller.mode = controller.capabilityMode(for: self.camera)
+        self.apertureMode = controller.mode
+      }
+      print("[CameraEngine][Diag] mock aperture mode set: \(mode)")
+    }
+  }
+  #endif
+
   fileprivate func setAperture(_ fStop: Double, controller: ApertureController, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
     sessionQueue.async {
+      // MOCK VARIABLE (testing builds): state + event fan-out ONLY — the real lens
+      // aperture API is never invoked, exposure is never touched, photos are unchanged.
+      #if DEBUG || CAMERA18_TESTING
+      if controller.mockOverride == .variable {
+        self.apertureMode = .variable
+        Self.apertureEventSink?(Double(fStop))
+        DispatchQueue.main.async { completion(.success(())) }
+        return
+      }
+      #endif
       guard let device = self.camera ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
         completion(.failure(.cameraUnavailable))
         return
@@ -1501,6 +1562,16 @@ public final class CameraEngineView: ExpoView {
         caps["maxAperture"] = Double(fixedAperture)
         caps["supportedApertures"] = NSNull()
       }
+      #if DEBUG || CAMERA18_TESTING
+      if controller.mockOverride == .variable {
+        // Mock Variable uses the PROJECT-DEFINED iPhone 18 Pro range (recorded in this
+        // repo: f/1.48-f/4). No hardware APIs are called.
+        caps["minAperture"] = 1.48
+        caps["maxAperture"] = 4.0
+        caps["supportedApertures"] = NSNull()
+        print("[CameraEngine][Diag] MOCK variable aperture active: range f/1.48-f/4")
+      }
+      #endif
 
       caps["supportsRAW"] = rawSupported
       caps["supportsProRAW"] = proRaw
