@@ -209,6 +209,19 @@ function CameraAppScreen(): React.JSX.Element {
   const capabilitiesRef = useRef<CameraCapabilities | null>(null);
   // Last hardware-confirmed f-stop; the ring reverts here when setAperture rejects.
   const confirmedApertureRef = useRef<number>(1.8);
+  // FINGER OWNERSHIP (回弹 fix): TRUE while the user's finger owns the ring. Every
+  // NON-finger aperture writer (stale settle callbacks, native echoes incl. the 3s
+  // watchdog, signature re-applies) must check this and stay silent — during
+  // continuous sliding the previous gesture's callbacks land MID-gesture and snap
+  // the value to a stale f-number (user: 滑到 ƒ/4 突然跳回 ƒ/1.5，反之亦然).
+  const apertureDraggingRef = useRef<boolean>(false);
+  // Stable setter for the ApertureBar's onDragStateChange callback prop.
+  const setApertureDraggingRef = useCallback((dragging: boolean) => {
+    apertureDraggingRef.current = dragging;
+  }, []);
+  // Settle sequence guard: only the LATEST settle's callbacks may write state — a
+  // slower earlier settle resolving out of order must not overwrite a newer result.
+  const apertureSettleSeqRef = useRef<number>(0);
 
   // Rear lens inventory → derived focal stops for the dial (13/26/35/52 on virtual dual,
   // +78/156 on triple; single-wide bodies get 26/35/52).
@@ -591,6 +604,7 @@ function CameraAppScreen(): React.JSX.Element {
     try {
       await CameraEngine.setAperture(clamped);
       confirmedApertureRef.current = clamped;
+      if (apertureDraggingRef.current) return;
       setCurrentAperture(clamped);
       setActiveAperture(clamped);
       if (mockApertureModeRef.current === null) {
@@ -600,8 +614,10 @@ function CameraAppScreen(): React.JSX.Element {
         const real = capabilities.activeAperture;
         if (typeof real === 'number' && Number.isFinite(real) && real > 0) {
           confirmedApertureRef.current = real;
-          setCurrentAperture(real);
-          setActiveAperture(real);
+          if (!apertureDraggingRef.current) {
+            setCurrentAperture(real);
+            setActiveAperture(real);
+          }
         }
       }
     } catch (err: unknown) {
@@ -628,7 +644,12 @@ function CameraAppScreen(): React.JSX.Element {
     const apertureSub = addApertureChangedListener((event) => {
       const f = Number(event?.fNumber);
       if (!Number.isFinite(f) || f <= 0) return;
+      // FINGER-OWNERSHIP gate: echoes of OUR OWN settle (incl. the native 3s watchdog's
+      // late success) arriving while the finger is sliding must not touch the ring —
+      // they carry the PREVIOUS gesture's f-number (the mid-drag 回弹). Bookkeeping
+      // still records it as confirmed.
       confirmedApertureRef.current = f;
+      if (apertureDraggingRef.current) return;
       setCurrentAperture(f);
       setActiveAperture(f);
     });
@@ -741,6 +762,11 @@ function CameraAppScreen(): React.JSX.Element {
   // Gesture end → ONE hardware commit (aperture-priority: shutter/ISO stay automatic).
   // Reverts to the last confirmed stop when the hardware rejects, and self-heals a lens
   // misreported as variable (iOS 27 quirk) by demoting to fixed + DEMO for the session.
+  // FINGER-OWNERSHIP + SEQUENCE guards: in continuous sliding the finger often starts
+  // the NEXT gesture before this settle's promise resolves — its callbacks then land
+  // mid-drag and snapped the value to a stale f-number (the 回弹 bug). Bookkeeping
+  // (confirmed/ref/demote) always runs; the RING's visible value is only written when
+  // no newer settle superseded this one AND no finger owns the ring.
   const handleApertureSettle = (aperture: number) => {
     if (!apertureVariable) return;
     // apertureRange FIRST: it tracks the live capability (mock-variable overwrites it
@@ -750,13 +776,21 @@ function CameraAppScreen(): React.JSX.Element {
     const min = apertureRange?.min ?? capabilitiesRef.current?.minAperture ?? aperture;
     const max = apertureRange?.max ?? capabilitiesRef.current?.maxAperture ?? aperture;
     const clamped = Math.min(Math.max(aperture, min), max);
+    const seq = ++apertureSettleSeqRef.current;
     CameraEngine.setAperture(clamped)
       .then(() => {
         confirmedApertureRef.current = clamped;
+        if (seq !== apertureSettleSeqRef.current || apertureDraggingRef.current) return;
         setCurrentAperture(clamped);
         setActiveAperture(clamped);
       })
       .catch((err: unknown) => {
+        if (seq !== apertureSettleSeqRef.current) return;
+        if (apertureDraggingRef.current) {
+          // Finger owns the ring — do NOT yank it back mid-gesture; the CURRENT
+          // gesture's own settle will re-commit from the finger's position.
+          return;
+        }
         setCurrentAperture(confirmedApertureRef.current);
         setActiveAperture(confirmedApertureRef.current);
         if (err instanceof CameraEngineError && err.code === 'ERR_APERTURE_UNSUPPORTED') {
@@ -1292,6 +1326,7 @@ function CameraAppScreen(): React.JSX.Element {
                 isVariableAperture={apertureVariable}
                 onApertureChange={handleApertureChange}
                 onApertureSettle={handleApertureSettle}
+                onDragStateChange={setApertureDraggingRef}
                 fixedMode={!apertureVariable}
                 signatureAperture={activeProfile?.aperture?.preferred ?? null}
                 accent={skin.accent}

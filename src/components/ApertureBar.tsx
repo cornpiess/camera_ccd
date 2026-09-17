@@ -27,6 +27,13 @@ export interface ApertureBarProps {
    */
   readonly onApertureSettle?: (fStop: number) => void;
   /**
+   * Finger-ownership signal: TRUE from gesture grant until release/terminate. While
+   * TRUE the app layer must suppress every NON-finger aperture writer (stale settle
+   * callbacks, native echoes, signature re-applies) — they land mid-gesture during
+   * continuous sliding and snap the value to a stale f-number ("回弹").
+   */
+  readonly onDragStateChange?: (dragging: boolean) => void;
+  /**
    * TRUE (fixed lens): display-only — iris + real f-value + side view; no tick scale,
    * no drag, no signature marker. FALSE (variable lens): all four elements live.
    */
@@ -75,6 +82,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   signatureAperture,
   onApertureChange,
   onApertureSettle,
+  onDragStateChange,
   fixedMode = false,
   accent,
 }) => {
@@ -186,6 +194,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   const setDraggingState = (value: boolean) => {
     draggingRef.current = value;
     setDragging(value);
+    onDragStateChange?.(value);
   };
 
   const interactive = isVariableAperture && hi > lo;
