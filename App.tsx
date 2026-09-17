@@ -304,12 +304,15 @@ function CameraAppScreen(): React.JSX.Element {
   const [apertureVariable, setApertureVariable] = useState<boolean>(false);
   // Developer-mode extra: side-view lens cross-section above the tick scale (default off).
   const [apertureSideView, setApertureSideView] = useState<boolean>(false);
-  // TESTING BUILDS ONLY (local dev / TestFlight Beta): mock aperture developer menu.
-  // Hidden by default; revealed ONLY by the 7-taps-on-the-version-label gesture below,
+  // TESTING BUILDS ONLY (local dev / TestFlight Beta): the test settings gate.
+  // Hidden by default; unlocked ONLY by the 7-taps-on-the-version-label gesture below,
   // and only when the NATIVE compile-time testingBuild flag allows it — a production
   // App Store build compiles the flag out, so the gesture is a no-op there and an
-  // App Store reviewer can never reach the row even by accident.
-  const [mockApertureMenuVisible, setMockApertureMenuVisible] = useState<boolean>(false);
+  // App Store reviewer can never reach the ⚙ settings entries even by accident.
+  const [testSettingsUnlocked, setTestSettingsUnlocked] = useState<boolean>(false);
+  // Active mock aperture mode as STATE (the ⚙ settings sheet renders the selection);
+  // mockApertureModeRef mirrors it for sync reads inside async aperture callbacks.
+  const [mockApertureMode, setMockApertureModeState] = useState<'real' | 'mock-variable' | 'mock-fixed' | null>(null);
   const testingBuildRef = useRef<boolean>(false);
   const versionTapCountRef = useRef<number>(0);
   const versionTapLastAtRef = useRef<number>(0);
@@ -584,6 +587,38 @@ function CameraAppScreen(): React.JSX.Element {
   // sync after setAperture must NOT run in mock-variable: capabilities would report the
   // REAL lens's fixed 1.8 and snap the ring away from the chosen stop.
   const mockApertureModeRef = useRef<'real' | 'mock-variable' | 'mock-fixed' | null>(null);
+
+  /**
+   * SINGLE mock-aperture entry point (the ⚙ settings sheet's Mock Aperture section —
+   * test-gated). Sets the native mock mode, then re-queries capabilities so every
+   * consumer (settle clamp, selector rows, signature apply) sees the MOCK range instead
+   * of the startup fixed-lens min=max snapshot that made every drag snap back.
+   */
+  const applyMockApertureMode = useCallback((value: 'real' | 'mock-variable' | 'mock-fixed') => {
+    mockApertureModeRef.current = value;
+    setMockApertureModeState(value);
+    setMockApertureMode(value).catch(() => {});
+    CameraEngine.getCapabilities()
+      .then((capabilitiesSnapshot) => {
+        capabilitiesRef.current = capabilitiesSnapshot;
+        const variableMode = capabilitiesSnapshot.apertureMode === 'variable';
+        setApertureVariable(variableMode);
+        setSupportsVariableAperture(variableMode);
+        if (variableMode) {
+          setApertureRange({
+            min: capabilitiesSnapshot.minAperture ?? 1.48,
+            max: capabilitiesSnapshot.maxAperture ?? 4,
+          });
+        } else {
+          setApertureRange(null);
+          const fixed = capabilitiesSnapshot.activeAperture ?? 1.8;
+          setCurrentAperture(fixed);
+          setActiveAperture(fixed);
+          confirmedApertureRef.current = fixed;
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   /**
    * SIGNATURE APERTURE (spec §1): the profile's aperture.preferred is a REAL recommended
@@ -909,9 +944,10 @@ function CameraAppScreen(): React.JSX.Element {
   // 9. Viewfinder Long-Press & Radial Gesture Responder
   // -------------------------------------------------------------
   // SECRET TEST GATE: 7 taps on the version label (CameraSelector footer), each within
-  // 2s of the previous, reveals the mock aperture row. Session-only — restarting the
-  // app re-hides it. In a production build the native testingBuild flag is compiled
-  // out, so this gesture is a no-op and the row is unreachable (App Store safe).
+  // 2s of the previous, unlock the per-camera ⚙ settings entries (CameraSelector rows).
+  // Session-only — restarting the app re-hides them. In a production build the native
+  // testingBuild flag is compiled out, so this gesture is a no-op and the settings
+  // surface is unreachable (App Store safe).
   const handleVersionSecretTap = () => {
     if (!testingBuildRef.current) return;
     const now = Date.now();
@@ -919,7 +955,7 @@ function CameraAppScreen(): React.JSX.Element {
     versionTapLastAtRef.current = now;
     if (versionTapCountRef.current >= 7) {
       versionTapCountRef.current = 0;
-      setMockApertureMenuVisible(true);
+      setTestSettingsUnlocked(true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     }
   };
@@ -1265,49 +1301,6 @@ function CameraAppScreen(): React.JSX.Element {
           {/* Bottom control stack: the hero aperture ring + shutter row. */}
           {isCameraRunning && !permissionOverlayVisible && (
             <View style={[styles.bottomControlsContainer, { backgroundColor: skin.chrome }]} pointerEvents="box-none">
-              {mockApertureMenuVisible ? (
-                // TESTING BUILDS ONLY: mock aperture developer menu (CAMERA18_TESTING).
-                <View style={styles.mockApertureRow} pointerEvents="box-none">
-                  {([['real', 'Real Device'], ['mock-variable', 'Mock Variable'], ['mock-fixed', 'Mock Fixed']] as const).map(
-                    ([value, label]) => (
-                      <TouchableOpacity
-                        key={value}
-                        accessibilityRole="button"
-                        style={styles.mockApertureButton}
-                        onPress={() => {
-                          mockApertureModeRef.current = value;
-                          setMockApertureMode(value).catch(() => {});
-                          CameraEngine.getCapabilities()
-                            .then((capabilitiesSnapshot) => {
-                              // Refresh the shared snapshot too — the settle clamp and
-                              // other consumers must see the MOCK range, not the startup
-                              // fixed-lens min=max that made every drag snap back.
-                              capabilitiesRef.current = capabilitiesSnapshot;
-                              const variableMode = capabilitiesSnapshot.apertureMode === 'variable';
-                              setApertureVariable(variableMode);
-                              setSupportsVariableAperture(variableMode);
-                              if (variableMode) {
-                                setApertureRange({
-                                  min: capabilitiesSnapshot.minAperture ?? 1.48,
-                                  max: capabilitiesSnapshot.maxAperture ?? 4,
-                                });
-                              } else {
-                                setApertureRange(null);
-                                const fixed = capabilitiesSnapshot.activeAperture ?? 1.8;
-                                setCurrentAperture(fixed);
-                                setActiveAperture(fixed);
-                                confirmedApertureRef.current = fixed;
-                              }
-                            })
-                            .catch(() => {});
-                        }}
-                      >
-                        <Text style={styles.mockApertureButtonText}>{label}</Text>
-                      </TouchableOpacity>
-                    ),
-                  )}
-                </View>
-              ) : null}
               {
                 // Aperture ring: draggable ONLY on a variable-iris lens; a fixed
                 // lens shows its real mechanical aperture (no drag, no simulation).
@@ -1404,6 +1397,11 @@ function CameraAppScreen(): React.JSX.Element {
             onClose={() => setIsSelectorOpen(false)}
             versionLabel={`v${appConfigJson.expo.version}`}
             onVersionPress={handleVersionSecretTap}
+            settingsVisible={testSettingsUnlocked}
+            apertureMode={apertureVariable ? 'variable' : 'fixed'}
+            fixedAperture={currentAperture}
+            mockApertureMode={mockApertureMode}
+            onSelectMockApertureMode={applyMockApertureMode}
           />
 
           {/* 8. Hardware & Lens Calibration Modal (Triggered by 3-finger ~2s hold) */}
@@ -1607,28 +1605,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
-  },
-  mockApertureRow: {
-    position: 'absolute',
-    top: -34,
-    left: 8,
-    right: 8,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    pointerEvents: 'box-none',
-  },
-  mockApertureButton: {
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.30)',
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  mockApertureButtonText: {
-    color: 'rgba(255, 255, 255, 0.85)',
-    fontSize: 10,
-    fontWeight: '700',
   },
   ultraWideNote: {
     height: 96,

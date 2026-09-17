@@ -20,7 +20,24 @@ export interface ProfileConfigModalProps {
   readonly visible: boolean;
   readonly profileId: string | null;
   readonly onClose: () => void;
+  /**
+   * TEST MODE ONLY: when the selector callback is provided the sheet shows the mock
+   * aperture mode section (Real Device / Mock Variable / Mock Fixed). App owns the
+   * native call and the capability re-query; this sheet only renders the choice.
+   * The sheet itself is reachable solely through the test-gated ⚙ buttons, so in a
+   * normal session this section never exists on screen.
+   */
+  readonly mockApertureMode?: 'real' | 'mock-variable' | 'mock-fixed' | null;
+  readonly onSelectMockApertureMode?: (mode: 'real' | 'mock-variable' | 'mock-fixed') => void;
 }
+
+type MockApertureMode = 'real' | 'mock-variable' | 'mock-fixed';
+
+const MOCK_MODES: readonly { readonly value: MockApertureMode; readonly label: string }[] = [
+  { value: 'real', label: 'Real Device' },
+  { value: 'mock-variable', label: 'Mock Variable' },
+  { value: 'mock-fixed', label: 'Mock Fixed' },
+];
 
 interface ActionButtonProps {
   readonly label: string;
@@ -48,7 +65,7 @@ function ActionButton({ label, onPress, disabled = false, destructive = false }:
  * The sheet accepts either a single profile object or a complete profile document —
  * the provider merges single profiles into the active override document.
  */
-export function ProfileConfigModal({ visible, profileId, onClose }: ProfileConfigModalProps): React.JSX.Element {
+export function ProfileConfigModal({ visible, profileId, onClose, mockApertureMode, onSelectMockApertureMode }: ProfileConfigModalProps): React.JSX.Element {
   const { applyProfileText, clearErrors, errors, exportProfileJson, importProfileFile, loading, profiles, resetProfile } = useProfiles();
   const [text, setText] = useState('');
   const [working, setWorking] = useState(false);
@@ -126,6 +143,37 @@ export function ProfileConfigModal({ visible, profileId, onClose }: ProfileConfi
               </View>
             ) : null}
 
+            {onSelectMockApertureMode ? (
+              // TESTING ONLY: the mock aperture mode used to be a floating row above the
+              // aperture bar; it now lives here so test tooling has ONE entry point (⚙).
+              <View style={styles.mockSection}>
+                <Text style={styles.mockTitle}>Mock Aperture · Testing</Text>
+                <View style={styles.mockRow}>
+                  {MOCK_MODES.map(({ value, label }) => {
+                    const active = (mockApertureMode ?? 'real') === value;
+                    return (
+                      <Pressable
+                        key={value}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}
+                        accessibilityLabel={`Mock aperture mode ${label}`}
+                        onPress={() => onSelectMockApertureMode(value)}
+                        style={({ pressed }) => [
+                          styles.mockButton,
+                          active && styles.mockButtonActive,
+                          pressed && styles.mockButtonPressed,
+                        ]}
+                      >
+                        <Text style={[styles.mockButtonText, active && styles.mockButtonTextActive]}>
+                          {label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
+
             <Text style={styles.help}>
               Paste this camera&apos;s JSON (a single object) or a complete profile document, then Apply. Valid
               changes are saved and take effect immediately — tweak, look at the preview, repeat.
@@ -200,6 +248,23 @@ const styles = StyleSheet.create({
   subtitle: { color: '#8e939e', fontSize: 12.5 },
   close: { color: '#8db8ff', fontSize: 16, fontWeight: '600' },
   content: { padding: 20, gap: 12, paddingBottom: 28 },
+  mockSection: { gap: 8 },
+  mockTitle: { color: '#e8e9ed', fontSize: 15, fontWeight: '600' },
+  mockRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  mockButton: {
+    minHeight: 36,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: '#3b3e45',
+    backgroundColor: '#17191d',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  mockButtonActive: { borderColor: '#4776bd', backgroundColor: '#182840' },
+  mockButtonPressed: { opacity: 0.6 },
+  mockButtonText: { color: '#b8bbc3', fontSize: 13.5, fontWeight: '600' },
+  mockButtonTextActive: { color: '#dbe9ff', fontWeight: '700' },
   lutRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   lutLabel: { color: '#e8e9ed', fontSize: 15, fontWeight: '600' },
   lutSlider: { flex: 1, height: 40 },

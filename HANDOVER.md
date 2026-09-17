@@ -222,7 +222,7 @@ AVCaptureVideoDataOutput(BGRA, .photo preset 全分辨率)
 
 14. **快门 promise = Apple capture 完成，不含后处理**：`didFinishProcessingPhoto` 即 resolve（`onCaptured`），Camera DNA/HEIF/PhotoKit 走串行 `processingQueue`，结果经 `onPhotoProcessed` 事件回 JS（缩略图 chip/报错都挂在那里）。**不要把后处理拉回 promise 路径**；`captureReadiness != .ready` 的 busy 门控是 Apple 官方 readiness，别用自研状态替代。
 
-15. **Mock aperture 只存在于测试构建**：`setMockApertureMode`（real/mock-variable/mock-fixed）整个 `#if DEBUG || CAMERA18_TESTING`，只改 UI 状态机、永不碰硬件/成片。App 侧 `mockApertureModeRef` 负责：mock-variable 下**跳过** setAperture 后的真实硬件回读（否则 capabilities 会报真实镜头的 1.8 把环弹回去）。正式包这段代码不编译。**入口也有第二道门**：mock 光圈行与三指校准台默认隐藏，版本号 7 连点（≤2s 间隔）解锁、会话内有效（`testingBuildRef`）——新增任何开发面板都走同一扇门，且**不要**把入口做成生产包可达（App Store 2.3.1）。
+15. **Mock aperture 只存在于测试构建**：`setMockApertureMode`（real/mock-variable/mock-fixed）整个 `#if DEBUG || CAMERA18_TESTING`，只改 UI 状态机、永不碰硬件/成片。App 侧 `mockApertureModeRef` 负责：mock-variable 下**跳过** setAperture 后的真实硬件回读（否则 capabilities 会报真实镜头的 1.8 把环弹回去）。正式包这段代码不编译。**入口也有两道门**：⚙ 相机设置按钮与三指校准台默认隐藏，版本号 7 连点（≤2s 间隔）解锁、会话内有效（`testSettingsUnlocked`）；mock 光圈模式选择区在 ⚙ 打开的 ProfileConfigModal 内（2026-09-18 起不再有取景器底部的浮动 mock 行），App 侧唯一写入点是 `applyMockApertureMode`。全部依赖原生 `testingBuild` 编译期标志，生产包静默 no-op——**新增任何开发面板都走同一扇门，且不要把入口做成生产包可达（App Store 2.3.1）**。
 
 16. **光圈环的手指所有权总闸（连续滑动回弹，2026-09-17 修复）**：连续滑动时，上一手势的异步回调（settle promise 成败回写、原生 `onApertureChanged` 回显含 **3s 看门狗迟到成功**、签名光圈硬件回读）会落在新手势中间，把 `currentAperture` 拽回旧值（用户报：滑到 ƒ/4 跳回 ƒ/1.5，反之亦然）。现约定：**任何非手指来源的光圈写入者必须先查 `apertureDraggingRef`，拖动中只允许簿记（confirmedApertureRef）不许写 UI**；settle 侧还有 `apertureSettleSeqRef` 序号，出序解析的旧 settle 不得覆盖新结果。新增异步光圈写入点时**必须**接同一总闸。ApertureBar 内部的 "JUMP FIX"（拖动中抑制 effect 重定位）只挡刻度带动画，挡不住值——别误以为有它就够了。
 

@@ -14,11 +14,25 @@ export interface CameraSelectorProps {
   readonly onClose: () => void;
   /**
    * Dim version label at the footer-left (e.g. "v1.0.0"). Also the SECRET TEST-GATE
-   * tap target: 7 quick taps reveal the mock aperture menu (App.tsx owns the gesture
-   * and the compile-time gating). Absent = no label, no gesture target.
+   * tap target: 7 quick taps reveal the per-camera settings entries (App.tsx owns the
+   * gesture and the compile-time gating). Absent = no label, no gesture target.
    */
   readonly versionLabel?: string;
   readonly onVersionPress?: () => void;
+  /**
+   * TEST MODE ONLY: shows the per-camera ⚙ settings buttons. Hidden entirely in
+   * normal sessions — the settings surface (and the mock aperture section inside it)
+   * is a developer tool that must not exist for production users.
+   */
+  readonly settingsVisible?: boolean;
+  /** 'variable' rows show each profile's signature aperture in its own accent;
+    * 'fixed' rows show THE lens's single mechanical aperture in the default color. */
+  readonly apertureMode?: 'variable' | 'fixed';
+  /** The real fixed lens aperture (fixed mode only). */
+  readonly fixedAperture?: number | null;
+  /** TEST MODE ONLY: active mock aperture mode, forwarded to the settings sheet. */
+  readonly mockApertureMode?: 'real' | 'mock-variable' | 'mock-fixed' | null;
+  readonly onSelectMockApertureMode?: (mode: 'real' | 'mock-variable' | 'mock-fixed') => void;
 }
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -69,6 +83,11 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   onClose,
   versionLabel,
   onVersionPress,
+  settingsVisible = false,
+  apertureMode = 'variable',
+  fixedAperture,
+  mockApertureMode,
+  onSelectMockApertureMode,
 }: CameraSelectorProps) => {
   // `mounted` keeps the tree alive while the close animation pours the panel back.
   const [mounted, setMounted] = useState(visible);
@@ -212,63 +231,70 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                 const accent = profile.ui?.accent || '#FFFFFF';
                 const displayName = profileDisplayName(profile);
                 const preferred = profile.aperture?.preferred;
+                // Row aperture reflects the SESSION's iris mode: variable → the profile's
+                // signature stop (the ring snaps there on selection), wearing the camera's
+                // own accent; fixed → the ONE mechanical aperture, default color for every
+                // row (the lens cannot differ per camera). ORIG has no signature → no text.
+                const fixedValue =
+                  apertureMode === 'fixed' && typeof fixedAperture === 'number' && Number.isFinite(fixedAperture) && fixedAperture > 0
+                    ? fixedAperture
+                    : null;
+                const signatureValue =
+                  apertureMode !== 'fixed' && typeof preferred === 'number' && Number.isFinite(preferred)
+                    ? preferred
+                    : null;
+                const rowAperture = fixedValue ?? signatureValue;
                 return (
                   <Pressable
                     key={profile.id}
                     accessibilityRole="button"
                     accessibilityState={{ selected: isActive }}
                     accessibilityLabel={`${displayName}${isActive ? ', selected' : ''}${
-                      typeof preferred === 'number' ? `, recommended ƒ/${preferred}` : ''
+                      rowAperture != null
+                        ? `, ${fixedValue != null ? 'aperture' : 'recommended'} ƒ/${rowAperture}`
+                        : ''
                     }`}
                     onPress={() => handleSelect(profile)}
                     style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                   >
-                    <Text
-                      style={[
-                        styles.rowGlyph,
-                        { color: isActive ? accent : 'rgba(255, 255, 255, 0.55)' },
-                      ]}
-                    >
+                    <Text style={[styles.rowGlyph, { color: accent }]}>
                       {markerGlyph(profile.ui?.markerStyle)}
                     </Text>
                     <Text style={[styles.rowName, isActive && styles.rowNameActive]} numberOfLines={1}>
                       {displayName}
                     </Text>
-                    {typeof preferred === 'number' && Number.isFinite(preferred) ? (
-                      // Recommended aperture, snapped-to on selection (Ricoh GR → ƒ/2.8).
+                    {rowAperture != null ? (
                       <Text
-                        style={[
-                          styles.rowAperture,
-                          isActive && { color: accent },
-                        ]}
+                        style={[styles.rowAperture, fixedValue == null && { color: accent }]}
                         numberOfLines={1}
                       >
-                        {`ƒ/${preferred.toFixed(1).replace(/\.0$/, '')}`}
+                        {`ƒ/${rowAperture.toFixed(1).replace(/\.0$/, '')}`}
                       </Text>
                     ) : null}
                     {isActive ? (
                       <View style={[styles.activeDot, { backgroundColor: accent }]} />
                     ) : null}
-                    <Pressable
-                      accessibilityLabel={`Configure ${displayName}`}
-                      accessibilityRole="button"
-                      hitSlop={8}
-                      onPress={() => {
-                        Haptics.selectionAsync().catch(() => {});
-                        setConfigProfileId(profile.id);
-                      }}
-                      style={({ pressed }) => [styles.configButton, pressed && styles.configButtonPressed]}
-                    >
-                      <Text style={[styles.configGlyph, { color: accent }]}>⚙</Text>
-                    </Pressable>
+                    {settingsVisible ? (
+                      <Pressable
+                        accessibilityLabel={`Configure ${displayName}`}
+                        accessibilityRole="button"
+                        hitSlop={8}
+                        onPress={() => {
+                          Haptics.selectionAsync().catch(() => {});
+                          setConfigProfileId(profile.id);
+                        }}
+                        style={({ pressed }) => [styles.configButton, pressed && styles.configButtonPressed]}
+                      >
+                        <Text style={[styles.configGlyph, { color: accent }]}>⚙</Text>
+                      </Pressable>
+                    ) : null}
                   </Pressable>
                 );
               })}
               </ScrollView>
               {/* 法务入口（固定底栏，不随列表滚动）：用户协议 / 隐私政策 / 支持。
                   全 app 没有独立设置页 —— 相机胶囊 → 本面板是唯一菜单表面。 */}
-              <View style={styles.footer}>
-                {versionLabel ? (
+              <View style={styles.footer}>                {versionLabel ? (
                   <>
                     <Pressable
                       accessibilityLabel={`Version ${versionLabel}`}
@@ -317,11 +343,14 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
         </Animated.View>
       </View>
 
-      {/* Per-camera JSON import / tune sheet */}
+      {/* Per-camera JSON import / tune sheet (⚙ reached only in TEST MODE). The mock
+          aperture section inside it is App-owned state passed through. */}
       <ProfileConfigModal
         visible={configProfileId !== null}
         profileId={configProfileId}
         onClose={() => setConfigProfileId(null)}
+        mockApertureMode={mockApertureMode}
+        onSelectMockApertureMode={onSelectMockApertureMode}
       />
     </View>
   );
@@ -420,11 +449,18 @@ const styles = StyleSheet.create({
     fontSize: 17,
   },
   footer: {
-    height: FOOTER_HEIGHT,
+    // ADAPTIVE: the version label + three legal links overflow the panel on narrow
+    // screens (panel width = 72% of screen) and at large Dynamic Type — wrap to a
+    // second centered line instead of clipping through the glass border.
+    minHeight: FOOTER_HEIGHT,
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 14,
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255, 255, 255, 0.14)',
   },
