@@ -46,7 +46,6 @@ const TICKS_PER_STOP = 48;
 /** Iris glyph size (the aperture hole, far left of the strip). */
 const IRIS_SIZE = 44;
 const IRIS_LEFT = 8;
-const IRIS_GAP = 10;
 /** Side-view cross-section width (shown centered; toggles with the tick scale). */
 const SIDE_WIDTH = 170;
 /** The tick BASELINE: horizontally level with the iris glyph's center (the aperture hole). */
@@ -82,12 +81,12 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   const { width: screenWidth } = useWindowDimensions();
   const topInset = 8;
   const scaleH = BAR_HEIGHT - topInset;
-  // 刻度与侧视图互斥（切换展示，永不同框）：默认显示刻度条（占光圈右侧），
-  // 轻点条带切换到侧视图；固定光圈只有侧视图。
-  const trackLeft = IRIS_LEFT + IRIS_SIZE + IRIS_GAP;
-  // 可视窗口宽度 = 侧视图同宽（SIDE_WIDTH）：两种视图切换时视觉宽度一致。
+  // 刻度与侧视图互斥（切换展示，永不同框）：默认显示刻度条，轻点条带切换到侧视图；
+  // 固定光圈只有侧视图。
   const trackWidth = Math.max(140, SIDE_WIDTH);
-  // 侧视图：条带内水平居中。
+  // 刻度窗口与侧视图共用同一个水平居中槽位（宽度和位置都一致）：切换时槽位纹丝
+  // 不动，只换内容。左对齐排光圈洞右侧是旧布局，用户已要求居中。
+  const trackLeft = (screenWidth - trackWidth) / 2;
   const sideLeft = (screenWidth - SIDE_WIDTH) / 2;
   const lo = Math.min(minAperture, maxAperture);
   const hi = Math.max(minAperture, maxAperture);
@@ -107,9 +106,13 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   const REF_LOG_SPAN = toLog(4) - REF_LOG_LO;
   const irisOpenness = clamp((toLog(4) - toLog(currentAperture)) / REF_LOG_SPAN, 0, 1);
 
-  // BAND_SCALE = band length in screen widths; halved twice (3 → 1.5 → 0.75) to compress
-  // the visual spacing between adjacent ticks — same tick count, tighter on-screen gap.
-  const BAND_SCALE = 0.75;
+  // BAND_SCALE = band length in screen widths. History: 3 → 1.5 → 0.75 (twice halved to
+  // compress tick spacing), then 1.5 by user decision: at 0.75 the ruler (127.5px) was
+  // SHORTER than the 170px window and slid within it — visible tick extent swung between
+  // 85–127.5px and never matched the side view's full slot. At 1.5 the ruler (255px)
+  // overflows both window edges, so the visible scale fills the slot at EVERY value
+  // (real lens-ring-through-a-window look) and tick spacing doubles to ~3.7px/tick.
+  const BAND_SCALE = 1.5;
   // Ruler-style tick scale: three sizes per stop —
   //   full stop  (k % 48 === 0): tallest, labeled
   //   half stop  (k % 24 === 0): medium

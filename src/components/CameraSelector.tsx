@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Animated, Dimensions, Linking, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import type { CameraProfile } from '../profiles/types';
 import { markerGlyph, profileDisplayName } from './types';
@@ -12,6 +12,13 @@ export interface CameraSelectorProps {
   readonly activeProfileId?: string;
   readonly onSelectProfile: (profile: CameraProfile) => void;
   readonly onClose: () => void;
+  /**
+   * Dim version label at the footer-left (e.g. "v1.0.0"). Also the SECRET TEST-GATE
+   * tap target: 7 quick taps reveal the mock aperture menu (App.tsx owns the gesture
+   * and the compile-time gating). Absent = no label, no gesture target.
+   */
+  readonly versionLabel?: string;
+  readonly onVersionPress?: () => void;
 }
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -23,6 +30,24 @@ const CAPSULE_WIDTH = 210;
 const CAPSULE_HEIGHT = 44;
 const CAPSULE_TOP = 55;
 const PANEL_TOP = 92;
+// Legal footer pinned under the profile list (用户协议 / 隐私政策 / 支持).
+const FOOTER_HEIGHT = 44;
+
+// 协议页面固定挂在 GitHub Pages。open 前按 https + 精确 host/路径形态校验，只放行
+// 本项目自己的三个页面 —— 拼接结果不符合就直接丢弃，绝不交给系统打开。
+const LEGAL_PAGES = {
+  terms: 'terms.html',
+  privacy: 'privacy.html',
+  support: 'support.html',
+} as const;
+const LEGAL_URL_PATTERN = /^https:\/\/cornpiess\.github\.io\/camera18\/[a-z]+\.html$/;
+
+const openLegalPage = (page: string) => {
+  const url = `https://cornpiess.github.io/camera18/${page}`;
+  if (!LEGAL_URL_PATTERN.test(url)) return;
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  Linking.openURL(url).catch(() => {});
+};
 
 /**
  * Liquid-glass camera selector, following Apple's Liquid Glass morph semantics
@@ -42,6 +67,8 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   activeProfileId,
   onSelectProfile,
   onClose,
+  versionLabel,
+  onVersionPress,
 }: CameraSelectorProps) => {
   // `mounted` keeps the tree alive while the close animation pours the panel back.
   const [mounted, setMounted] = useState(visible);
@@ -54,8 +81,9 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   const scrollRef = useRef<ScrollView>(null);
   // 24+ profiles overflow the screen: cap the panel and scroll the rows. The morph math
   // uses the CAPPED height so the glass still lands exactly on the capsule at progress 0.
+  // The legal footer is part of the panel — its height counts toward the morph math.
   const maxPanelHeight = Math.round(screenHeight * 0.62);
-  const panelHeight = Math.min(profiles.length * ROW_HEIGHT, maxPanelHeight);
+  const panelHeight = Math.min(profiles.length * ROW_HEIGHT, maxPanelHeight) + FOOTER_HEIGHT;
 
   useEffect(() => {
     animRef.current?.stop();
@@ -237,6 +265,53 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                 );
               })}
               </ScrollView>
+              {/* 法务入口（固定底栏，不随列表滚动）：用户协议 / 隐私政策 / 支持。
+                  全 app 没有独立设置页 —— 相机胶囊 → 本面板是唯一菜单表面。 */}
+              <View style={styles.footer}>
+                {versionLabel ? (
+                  <>
+                    <Pressable
+                      accessibilityLabel={`Version ${versionLabel}`}
+                      accessibilityRole="text"
+                      hitSlop={6}
+                      style={({ pressed }) => [styles.footerLink, pressed && styles.footerLinkPressed]}
+                      onPress={onVersionPress}
+                    >
+                      <Text style={styles.versionText}>{versionLabel}</Text>
+                    </Pressable>
+                    <Text style={styles.footerDot}>·</Text>
+                  </>
+                ) : null}
+                <Pressable
+                  accessibilityRole="link"
+                  accessibilityLabel="用户协议"
+                  hitSlop={6}
+                  style={({ pressed }) => [styles.footerLink, pressed && styles.footerLinkPressed]}
+                  onPress={() => openLegalPage(LEGAL_PAGES.terms)}
+                >
+                  <Text style={styles.footerText}>用户协议</Text>
+                </Pressable>
+                <Text style={styles.footerDot}>·</Text>
+                <Pressable
+                  accessibilityRole="link"
+                  accessibilityLabel="隐私政策"
+                  hitSlop={6}
+                  style={({ pressed }) => [styles.footerLink, pressed && styles.footerLinkPressed]}
+                  onPress={() => openLegalPage(LEGAL_PAGES.privacy)}
+                >
+                  <Text style={styles.footerText}>隐私政策</Text>
+                </Pressable>
+                <Text style={styles.footerDot}>·</Text>
+                <Pressable
+                  accessibilityRole="link"
+                  accessibilityLabel="支持页面"
+                  hitSlop={6}
+                  style={({ pressed }) => [styles.footerLink, pressed && styles.footerLinkPressed]}
+                  onPress={() => openLegalPage(LEGAL_PAGES.support)}
+                >
+                  <Text style={styles.footerText}>支持</Text>
+                </Pressable>
+              </View>
             </Animated.View>
           </View>
         </Animated.View>
@@ -343,5 +418,36 @@ const styles = StyleSheet.create({
   },
   configGlyph: {
     fontSize: 17,
+  },
+  footer: {
+    height: FOOTER_HEIGHT,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255, 255, 255, 0.14)',
+  },
+  footerLink: {
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+  },
+  footerLinkPressed: {
+    opacity: 0.6,
+  },
+  footerText: {
+    color: 'rgba(255, 255, 255, 0.72)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  footerDot: {
+    color: 'rgba(255, 255, 255, 0.35)',
+    fontSize: 12,
+  },
+  versionText: {
+    color: 'rgba(255, 255, 255, 0.40)',
+    fontSize: 10,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
   },
 });

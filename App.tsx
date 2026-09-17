@@ -71,6 +71,8 @@ import {
   computeRadialSector,
   type Point,
 } from './src/components';
+// App display version for the CameraSelector footer (the secret test-gate tap target).
+import appConfigJson from './app.json';
 
 const SCREEN_WIDTH_FALLBACK = Dimensions.get('window').width;
 const SCREEN_HEIGHT_FALLBACK = Dimensions.get('window').height;
@@ -290,7 +292,14 @@ function CameraAppScreen(): React.JSX.Element {
   // Developer-mode extra: side-view lens cross-section above the tick scale (default off).
   const [apertureSideView, setApertureSideView] = useState<boolean>(false);
   // TESTING BUILDS ONLY (local dev / TestFlight Beta): mock aperture developer menu.
+  // Hidden by default; revealed ONLY by the 7-taps-on-the-version-label gesture below,
+  // and only when the NATIVE compile-time testingBuild flag allows it — a production
+  // App Store build compiles the flag out, so the gesture is a no-op there and an
+  // App Store reviewer can never reach the row even by accident.
   const [mockApertureMenuVisible, setMockApertureMenuVisible] = useState<boolean>(false);
+  const testingBuildRef = useRef<boolean>(false);
+  const versionTapCountRef = useRef<number>(0);
+  const versionTapLastAtRef = useRef<number>(0);
   // (The old ultra-wide fixed-aperture note is retired: simulated aperture keeps the
   // ring live on every lens, so no lens disables the control anymore.)
 
@@ -430,12 +439,13 @@ function CameraAppScreen(): React.JSX.Element {
         // Single-lens fallbacks stay on the previous state.
       }
 
-      // TESTING BUILDS ONLY: reveal the mock aperture developer menu.
+      // TESTING BUILDS ONLY: arm the mock aperture menu CAPABILITY (compile-time native
+      // flag). Revealing the row is the secret version gesture — never automatic.
       try {
         const diag = await CameraEngine.getDiagnostics();
-        setMockApertureMenuVisible(Boolean(diag.testingBuild));
+        testingBuildRef.current = Boolean(diag.testingBuild);
       } catch {
-        setMockApertureMenuVisible(false);
+        testingBuildRef.current = false;
       }
     } catch (err: unknown) {
       cameraRunningRef.current = false;
@@ -864,6 +874,22 @@ function CameraAppScreen(): React.JSX.Element {
   // -------------------------------------------------------------
   // 9. Viewfinder Long-Press & Radial Gesture Responder
   // -------------------------------------------------------------
+  // SECRET TEST GATE: 7 taps on the version label (CameraSelector footer), each within
+  // 2s of the previous, reveals the mock aperture row. Session-only — restarting the
+  // app re-hides it. In a production build the native testingBuild flag is compiled
+  // out, so this gesture is a no-op and the row is unreachable (App Store safe).
+  const handleVersionSecretTap = () => {
+    if (!testingBuildRef.current) return;
+    const now = Date.now();
+    versionTapCountRef.current = now - versionTapLastAtRef.current > 2000 ? 1 : versionTapCountRef.current + 1;
+    versionTapLastAtRef.current = now;
+    if (versionTapCountRef.current >= 7) {
+      versionTapCountRef.current = 0;
+      setMockApertureMenuVisible(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    }
+  };
+
   const cancelLongPressTimer = () => {
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current);
@@ -1062,7 +1088,16 @@ function CameraAppScreen(): React.JSX.Element {
         profile={(effectiveProfile ?? activeProfile) as unknown as Record<string, unknown>}
       />
 
-      <ThreeFingerGestureDetector onTriggerCalibration={() => setIsCalibrationOpen(true)}>
+      <ThreeFingerGestureDetector
+        onTriggerCalibration={() => {
+          // SECRET TEST GATE (App Store 2.3.1): the calibration console (profile JSON
+          // import/export, engine diagnostics, DEMO toggles, log export) must never be
+          // reachable in a review build. Same session unlock as the mock aperture row —
+          // 7 taps on the version label; production builds compile the native flag out,
+          // so this stays a silent no-op there.
+          if (testingBuildRef.current) setIsCalibrationOpen(true);
+        }}
+      >
         <View style={styles.fullScreen}>
           {/* Viewfinder card edge: a hairline ring matching the native rounded clip,
               giving the finder the "card" read (Dazz-style) without blocking touches. */}
@@ -1332,6 +1367,8 @@ function CameraAppScreen(): React.JSX.Element {
             activeProfileId={activeProfile?.id}
             onSelectProfile={handleSelectProfile}
             onClose={() => setIsSelectorOpen(false)}
+            versionLabel={`v${appConfigJson.expo.version}`}
+            onVersionPress={handleVersionSecretTap}
           />
 
           {/* 8. Hardware & Lens Calibration Modal (Triggered by 3-finger ~2s hold) */}
