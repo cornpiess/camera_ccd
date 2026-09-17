@@ -6,13 +6,21 @@
 
 ---
 
-## 快照：交接时的当前状态（2026-09-17）
+## 快照：交接时的当前状态（2026-09-17，commit `cea290f`）
 
-- **最新成功构建：TestFlight build 78**（run number 78，commit `fb3076b`，一次通过）。**本轮架构 = 物理镜头路由**（详见下）：capture input 永远是物理镜头，26/35/52 共用物理主摄只动 `videoZoomFactor`，13mm/Tele 才换 input；光圈语义是 **Aperture Manual / Shutter AUTO / ISO AUTO / AF·AWB AUTO**；快门 promise 在 Apple capture 完成即返回，Camera DNA/HEIF/PhotoKit 走后台串行队列并经 `onPhotoProcessed` 事件回传；ORIG 是零渲染直通。**改 Swift 前先读 `AGENTS.md` 坑表（#10–#14），CI 是唯一编译器。**
-- **待真机验证（build 78）**：① 13mm/Tele 切换的 150ms 预览 crossfade 无黑闪、切换后拍照禁窗手感（2.5s watchdog 兜底）；② Tele 档 EXIF 显示真实等效焦距（ladder 真值，不再是 13mm）；③ ORIG 出片为 Apple 原图直存（无二次编码）；④ Profile 切换在可变光圈硬件上真实联动 signatureAperture；⑤ 快门连拍响应（balanced + ZSL/Responsive/Fast Capture 三件套）。
-- **待 iPhone 18 Pro 真机验证**：物理可变光圈全链路（capabilityMode 五条件 + auto 哨兵 + 3s ack 看门狗）——所有 iOS 27 符号都是动态调用，任何 Xcode 26+ 可编译。**新增加档量程探针**：capability 曾只验 ƒ/1.48 一点，真机大光圈端 supportsExposureModeCustom 为 false 时 UI 能拖过去、松手被拒回弹到上次确认值（用户报：拖过 ƒ/3.8 弹回 ƒ/1.7）。现 `acceptedApertureRange` 按 0.1 档网格全量程探查（format 级查询，按设备 uniqueID 缓存），getCapabilities 上报**实测可接受子区间**为 min/max（刻度尺端点即硬止挡、Camera Control 滑条同源），settle 越界值夹到端点（机械止挡语义）不再拒绝；探针只判 accepts 与否、从不写硬件。
-- **多机协作网络**：`api.github.com` 直连通常可用；`github.com` 时好时坏，push/pull 失败走 Clash 代理 `127.0.0.1:7890`（完整手法见 `AGENTS.md` 0.1，**必须在沙箱外执行**）。gh CLI 在 `C:\Program Files\GitHub CLI\gh.exe`（同样要挂 `HTTPS_PROXY`）。
-- 出包 = 用户明确要求后触发 `ios-testflight.yml`（`workflow_dispatch`），`gh run watch <id> --exit-status` 监督；CI 连败先读 `AGENTS.md` 1.5。
+- **最新成功构建：TestFlight build 78**（run number 78，commit `fb3076b`）。**build 78 之后代码又前进了一轮（`f513925`→`cea290f`，5 个 feature/fix + 1 个 CI），尚未出包**——下一轮出包（TestFlight 或 App Store）都会覆盖这批改动，**必须真机回归「七」的清单**。本轮改动一览：
+  1. **V-MF 正式管线**：`VMF_HN_33_v2.cube`（color.lut, intensity 1.0）+ **仅成片 deharsh 阶段**（新 schema 字段 `texture.deharsh`，高亮去饱和掩罩、luma 不变、Core Image 官方滤镜）；profile 其余参数按用户规格重校（tone 全中性、微调 hueBands、accent #7F756D）。
+  2. **光圈量程探针**：capability 曾只验 ƒ/1.48 一点，真机大光圈端 supportsExposureModeCustom 为 false 时松手被拒回弹。现 `acceptedApertureRange` 按 0.1 档网格全量程探查（format 级查询、按设备 uniqueID 缓存），getCapabilities 上报**实测可接受子区间**为 min/max（UI 刻度端点=硬止挡、Camera Control 滑条同源），settle 越界夹到端点。
+  3. **连续滑动回弹修复**：手指所有权总闸（`apertureDraggingRef`）+ settle 序号（`apertureSettleSeqRef`）——拖动期间所有非手指写入者（旧 settle 回调/原生回显含 3s 看门狗/签名光圈回读）静默；只挡 UI 写入，簿记照常。
+  4. **测试门**：mock 光圈行 + 三指校准台默认隐藏，版本号 7 连点（≤2s 间隔）解锁、会话内有效；全部依赖原生 `testingBuild` 编译期标志，生产包静默 no-op。版本号在相机选择面板底栏。
+  5. **法务入口**：相机选择面板底栏 用户协议·隐私政策·支持（cornpiess.github.io/camera18/，open 前 https+host 白名单校验）。
+  6. **UI**：刻度窗口与侧视图共用居中槽位；`BAND_SCALE 1.5`（尺带超出窗口两侧，间距 ~3.7px/根）。
+  7. **LUT bundle 收敛**：58→7 款（仅被引用的，48MB→6.6MB）；源库 `Camera18_LUT_V0/luts/` 全量保留，做新相机从那里拷。
+  8. **生产编译修复**：`setMockApertureMode` 入口补 `#if`——生产配置（无 CAMERA18_TESTING）此前必编译失败。
+  9. **CI**：新增 `ios-appstore.yml`（无测试标志的上架流水线，build number = run number + 10000 防撞号）。**生产配置从未被编译过，它的首跑就是生产代码路径的首次真编译验证。**
+- 架构不变量仍是：**物理镜头路由**（26/35/52 共用物理主摄只动 zoom，13mm/Tele 才换 input）、**Aperture Manual / Shutter AUTO / ISO AUTO**、快门 promise 与后处理解耦（`onPhotoProcessed`）、ORIG 零渲染直通。**改 Swift 前先读 `AGENTS.md` 坑表（#10–#18）与本文档「四」的坑指南，CI 是唯一编译器。**
+- **多机协作网络**：`api.github.com` 直连通常可用；`github.com` 时好时坏，push/pull 失败走 Clash 代理 `127.0.0.1:7890`（完整手法见 `AGENTS.md` 0.1，**必须在沙箱外执行**）。gh CLI 在 `C:\Program Files\GitHub CLI\gh.exe`（同样要挂 `HTTPS_PROXY`）。**⚠️ 推 `.github/workflows/` 的改动必须直推 github.com（挂代理），gh-proxy 镜像服务端用它自己的凭据转发，永远过不了 workflow scope 校验**（坑 #17）。
+- 出包 = 用户明确要求后触发 workflow（`workflow_dispatch`），`gh run watch <id> --exit-status` 监督；CI 连败先读 `AGENTS.md` 1.5。上架提审一律用 `ios-appstore.yml` 的构建（build number = run+10000，好认），**不要拿 TestFlight 构建提审**。
 
 ---
 
@@ -214,7 +222,13 @@ AVCaptureVideoDataOutput(BGRA, .photo preset 全分辨率)
 
 14. **快门 promise = Apple capture 完成，不含后处理**：`didFinishProcessingPhoto` 即 resolve（`onCaptured`），Camera DNA/HEIF/PhotoKit 走串行 `processingQueue`，结果经 `onPhotoProcessed` 事件回 JS（缩略图 chip/报错都挂在那里）。**不要把后处理拉回 promise 路径**；`captureReadiness != .ready` 的 busy 门控是 Apple 官方 readiness，别用自研状态替代。
 
-15. **Mock aperture 只存在于测试构建**：`setMockApertureMode`（real/mock-variable/mock-fixed）整个 `#if DEBUG || CAMERA18_TESTING`，只改 UI 状态机、永不碰硬件/成片。App 侧 `mockApertureModeRef` 负责：mock-variable 下**跳过** setAperture 后的真实硬件回读（否则 capabilities 会报真实镜头的 1.8 把环弹回去）。正式包这段代码不编译。
+15. **Mock aperture 只存在于测试构建**：`setMockApertureMode`（real/mock-variable/mock-fixed）整个 `#if DEBUG || CAMERA18_TESTING`，只改 UI 状态机、永不碰硬件/成片。App 侧 `mockApertureModeRef` 负责：mock-variable 下**跳过** setAperture 后的真实硬件回读（否则 capabilities 会报真实镜头的 1.8 把环弹回去）。正式包这段代码不编译。**入口也有第二道门**：mock 光圈行与三指校准台默认隐藏，版本号 7 连点（≤2s 间隔）解锁、会话内有效（`testingBuildRef`）——新增任何开发面板都走同一扇门，且**不要**把入口做成生产包可达（App Store 2.3.1）。
+
+16. **光圈环的手指所有权总闸（连续滑动回弹，2026-09-17 修复）**：连续滑动时，上一手势的异步回调（settle promise 成败回写、原生 `onApertureChanged` 回显含 **3s 看门狗迟到成功**、签名光圈硬件回读）会落在新手势中间，把 `currentAperture` 拽回旧值（用户报：滑到 ƒ/4 跳回 ƒ/1.5，反之亦然）。现约定：**任何非手指来源的光圈写入者必须先查 `apertureDraggingRef`，拖动中只允许簿记（confirmedApertureRef）不许写 UI**；settle 侧还有 `apertureSettleSeqRef` 序号，出序解析的旧 settle 不得覆盖新结果。新增异步光圈写入点时**必须**接同一总闸。ApertureBar 内部的 "JUMP FIX"（拖动中抑制 effect 重定位）只挡刻度带动画，挡不住值——别误以为有它就够了。
+
+17. **gh-proxy 镜像推不了 `.github/workflows/` 的改动**：镜像（`gh-proxy.com`）在服务端用它自己的凭据向 GitHub 转发，GitHub 按镜像的 OAuth 权限校验 workflow 文件，本地 token 加了 `workflow` scope 也没用——报错形如 "refusing to allow an OAuth App to create or update workflow"。**推 workflow 改动必须挂 Clash 直推 `https://github.com/...`**（`HTTPS_PROXY=http://127.0.0.1:7890 git push https://github.com/cornpiess/camera_ccd.git main`）。凭据注意：这台机器的 git 走 GCM 存的旧凭据，`gh auth refresh` 刷新的是 gh 钥匙串——已配置 github.com 与 gh-proxy.com 的 credential helper 指向 `gh auth git-credential`（见 `git config --global --get-regexp credential`）；换新机器要先 `gh auth login` + `gh auth setup-git`，并确保 token 带 `workflow` scope。
+
+18. **生产配置（无 CAMERA18_TESTING）从未被编译过，直到 `ios-appstore.yml` 首跑**：TestFlight 流水线固定注入测试标志，正式包路径（如 `setMockApertureMode` 入口的 `#if` 缺口）只有不带标志才暴露。**上架提审一律用 `ios-appstore.yml` 的构建（build number = run number + 10000）**，不要拿 TestFlight 构建提审；该流水线首跑若报编译错误，按日志修源码，**禁止把测试标志加回去**。
 
 ---
 
@@ -291,13 +305,19 @@ npx expo export --platform ios --output-dir dist-check; if (Test-Path dist-check
 ## 七、后续待验证项分级（接手 AI 请按此汇报）
 
 - **待 CI 构建验证**：
-  - 本地 Swift 代码通过 GitHub Actions 的 Xcode 编译（workflow：`ios-testflight.yml`）。build 78（commit `fb3076b`）已闭环**当前架构**的编译；之后每轮 Swift 改动仍需重新过 CI。
-- **待普通 iPhone 真机验证（build 78 清单，2026-09-17）**：
+  - Swift 改动（光圈探针、deharsh、生产编译修复）已过 `npm run verify` 与括号配平，但**尚未出包**——下一轮 TestFlight 即验证。
+  - **`ios-appstore.yml` 从未运行过**：生产配置的首次真编译。首跑报错按日志修源码，禁止把 `-DCAMERA18_TESTING` 加回去。
+- **待普通 iPhone 真机验证（build 78 之后合并清单）**：
   - 切焦：13mm/Tele 换 input 的 150ms crossfade 无黑闪；切后短暂禁拍的手感；26/35/52 三档互切不闪、不清用户光圈。
-  - 快门：连拍响应（balanced + ZSL/Responsive/Fast Capture）；后台保存时快门可再按（`ERR_CAPTURE_BUSY` 的提示是否可接受）；缩略图 chip 经 `onPhotoProcessed` 正常刷新。
-  - EXIF：Tele 档拍摄后相册显示真实等效焦距；13/26/35/52 各档对质。
-  - ORIG：出片与系统相机原图观感一致（无二次压缩痕迹）、非 ORIG 七档 Camera DNA 正常。
-  - 回归哨兵：授权 → 预览首帧；三指长按校准面板；PhotoKit add-only 弹窗；前台恢复后焦段/预览正常。
-- **待 iPhone 18 Pro 真机验证**：
-  - 物理可变光圈全链路：Profile 切换真实应用 signatureAperture（含 Fixed→Wide 切回时的联动）；拧环 → `setExposureModeCustom(lensAperture:)` 光圈优先（shutter/ISO 保持 AUTO）；光圈范围/档位读取；SIG 标记与硬件回读一致。
+  - 快门：连拍响应（balanced + ZSL/Responsive/Fast Capture）；后台保存时快门可再按；缩略图 chip 经 `onPhotoProcessed` 正常刷新。
+  - EXIF：Tele 档相册显示真实等效焦距；13/26/35/52 各档对质。
+  - ORIG：出片与系统相机原图观感一致（无二次压缩痕迹）。
+  - 回归哨兵：授权 → 预览首帧；PhotoKit add-only 弹窗；前台恢复后焦段/预览正常。
+- **待 iPhone 18 Pro 真机验证（本轮重点）**：
+  - **光圈量程探针**：启动/切镜后 getCapabilities 无可感延迟（首跑多 27 次 format 级查询）；刻度尺端点 = 实测可接受边界；拖到端点不回弹、原生夹取生效。
+  - **连续滑动回弹**：松手立刻再拖、反复来回扫——值不得中途跳到旧 f-number（修复前：滑到 ƒ/4 跳回 ƒ/1.5，反之亦然）。
+  - **V-MF 管线**：VMF_HN_33_v2 LUT 成片色彩正确（intensity 1.0）；deharsh 0.04 高光无生硬色偏且不压亮度；与预览的差异仅限纹理级（deharsh 仅成片，属预期）。
+  - 物理可变光圈全链路：Profile 切换真实应用 signatureAperture（Fixed→Wide 切回联动）；`setExposureModeCustom(lensAperture:)` 光圈优先（shutter/ISO 保持 AUTO）；SIG 标记与硬件回读一致。
+  - 测试门：版本号 7 连点解锁 mock 行与校准台；重启 app 后重新隐藏；TestFlight 构建可用、生产构建（ios-appstore.yml）里手势无效。
   - Wide 上的 26/35/52 共享同一真实光圈语义（不因 crop 重置）。
+- **上架前（App Store Connect 侧，用户操作）**：名称查重、类别 Photo & Video、4+ 分级、截图（6.9 吋）；隐私标签「不收集数据」，Privacy Policy / Support URL 填 cornpiess.github.io/camera18/ 对应页；描述文案不得出现第三方相机品牌名。
