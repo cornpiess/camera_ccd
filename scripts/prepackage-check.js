@@ -53,19 +53,24 @@ function must(cond, message) {
 step('npm run verify（typecheck + lint + doctor）', () => {
   const r = run('npm', ['run', 'verify'], { timeout: 600000 });
   must(r.code === 0, `verify 失败:\n${r.stdout}\n${r.stderr}`);
-  must(r.stdout.includes('20/20 checks passed'), 'doctor 未达到 20/20');
+  // 正则而非硬编码 "20/20"：doctor 增删检查项时不会误报。
+  must(/\d+\/\d+ checks passed/.test(r.stdout), 'doctor 检查未全部通过');
 });
 
 // 2. iOS 离线导出 + 模块数基线
 step('expo export（bundle 完整性 + 模块数基线）', () => {
-  const r = run('npx', ['expo', 'export', '--platform', 'ios', '--output-dir', 'dist-check'], { timeout: 600000 });
-  must(r.code === 0, `export 失败:\n${r.stdout}\n${r.stderr}`);
-  const match = (r.stdout + r.stderr).match(/\((\d+) modules\)/);
-  must(match, '未解析到模块数');
-  const modules = Number(match[1]);
-  must(modules >= 619, `模块数 ${modules} 低于基线 619（有文件被误删或未进 bundle）`);
-  console.log(`   modules = ${modules}`);
-  fs.rmSync(path.join(ROOT, 'dist-check'), { recursive: true, force: true });
+  try {
+    const r = run('npx', ['expo', 'export', '--platform', 'ios', '--output-dir', 'dist-check'], { timeout: 600000 });
+    must(r.code === 0, `export 失败:\n${r.stdout}\n${r.stderr}`);
+    const match = (r.stdout + r.stderr).match(/\((\d+) modules\)/);
+    must(match, '未解析到模块数');
+    const modules = Number(match[1]);
+    must(modules >= 619, `模块数 ${modules} 低于基线 619（有文件被误删或未进 bundle）`);
+    console.log(`   modules = ${modules}`);
+  } finally {
+    // 失败也要清理，否则残留的 dist-check 会污染后续检查与 git status。
+    fs.rmSync(path.join(ROOT, 'dist-check'), { recursive: true, force: true });
+  }
 });
 
 // 3. Swift 括号/字符串配平（本机无 swiftc 的替代静态检查）

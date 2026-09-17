@@ -12,7 +12,10 @@ const doc = JSON.parse(fs.readFileSync(path.join(ROOT, "assets/camera-profiles.j
 const LUT_DIR = path.join(ROOT, "modules/camera-engine/ios/LUTs");
 
 function loadLUT(name) {
-  const file = path.join(LUT_DIR, `${name}.cube`);
+  // profile JSON 的 lut 值可能自带 .cube 后缀（如 "VMF_HN_33_v2.cube"）——
+  // 与原生 LUTLoader.bundleResourceURL 同款剥后缀，否则找不到文件整体跑崩。
+  const base = name.endsWith(".cube") ? name.slice(0, -5) : name;
+  const file = path.join(LUT_DIR, `${base}.cube`);
   if (!fs.existsSync(file)) return null;
   let dim = 0, v = [];
   for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
@@ -65,7 +68,10 @@ const satOf = ([r, g, b]) => { const mx = Math.max(r, g, b), mn = Math.min(r, g,
 
 function applyPipeline(profile, rgb) {
   const c = profile.color;
-  let [r, g, b] = sampleLUT(lutCache(c.lut), ...rgb);
+  // LUT 缺失（如 ORIG 的 null）或加载失败：原生管线会跳过 cube 阶段直通——
+  // 审计同样按直通处理，而不是解构 null 崩掉整个审计。
+  const lut = c.lut ? lutCache(c.lut) : null;
+  let [r, g, b] = lut ? sampleLUT(lut, ...rgb) : rgb;
   const i = c.lutIntensity ?? 1;
   if (i < 0.999) { r = i * r + (1 - i) * rgb[0]; g = i * g + (1 - i) * rgb[1]; b = i * b + (1 - i) * rgb[2]; }
   // temperature/tint (mirror native gains)

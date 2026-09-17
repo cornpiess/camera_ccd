@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import Svg, { Line, Polygon, Rect, Text as SvgText } from 'react-native-svg';
+import { hexToRgba } from '../theme/skin';
 
 export interface ApertureSideViewProps {
   /** 0 = fully stopped down (tiny slit), 1 = wide open (full cone). Continuous. */
@@ -47,8 +48,10 @@ export const ApertureSideView: React.FC<ApertureSideViewProps> = ({ openness, ac
   const scale = width / VIEW_W;
 
   const bladeFill = '#26262b';
-  const accentSoft = `${accent}26`; // ~15% alpha
-  const accentLine = `${accent}66`; // ~40% alpha
+  // hexToRgba instead of 8-digit-hex concat: survives accents that are not 6-digit hex
+  // (validation only enforces a non-empty string). Same alphas as before (0x26/0x66).
+  const accentSoft = hexToRgba(accent, 0.15); // ~15% alpha
+  const accentLine = hexToRgba(accent, 0.4); // ~40% alpha
 
   // Incoming ray bundle (left) tapers into the slit; outgoing cone diverges to the sensor.
   const incomingTop = useMemo(() => `0,${MID - 34} ${PLATE_X},${gapTop} ${PLATE_X},${gapBottom} 0,${MID + 34}`, [gapTop, gapBottom]);

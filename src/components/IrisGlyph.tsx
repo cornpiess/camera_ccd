@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import Svg, { Circle, Path } from 'react-native-svg';
+import { hexToRgba } from '../theme/skin';
 
 export interface IrisGlyphProps {
   /** Rendered size in points (square). */
@@ -63,7 +64,7 @@ export const IrisGlyph: React.FC<IrisGlyphProps> = ({ size, openness, accent }) 
           key={i}
           d={d}
           fill="rgba(46, 46, 52, 0.96)"
-          stroke={accent ? `${accent}55` : 'rgba(255, 255, 255, 0.14)'}
+          stroke={accent ? hexToRgba(accent, 0.33) : 'rgba(255, 255, 255, 0.14)'}
           strokeWidth={0.8}
         />
       ))}

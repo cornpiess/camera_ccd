@@ -86,7 +86,7 @@ export function CalibrationModal({ visible, onClose, apertureDemoMode = false, o
       const d = await CameraEngine.getDiagnostics();
       const expected = Array.from(
         new Set(
-          ((document?.profiles ?? []) as unknown as { color?: { lut?: string | null } }[])
+          (document?.profiles ?? [])
             .map((p) => p.color?.lut ?? '')
             .filter((lut) => lut !== ''),
         ),

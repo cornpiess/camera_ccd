@@ -1,6 +1,6 @@
 // diagLog must be imported first: it self-installs on import so that any module-evaluation
 // error from the imports below (native module resolution included) is already captured.
-import { installDiagLog, recordDiag } from './src/utils/diagLog';
+import { recordDiag } from './src/utils/diagLog';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
@@ -19,7 +19,8 @@ import {
   useWindowDimensions,
   type GestureResponderEvent,
   type PanResponderGestureState,
-} from 'react-native';import * as Haptics from 'expo-haptics';
+} from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { File, Paths } from 'expo-file-system';
 
 // Native camera module wrapper & native APIs
@@ -76,8 +77,6 @@ import appConfigJson from './app.json';
 
 const SCREEN_WIDTH_FALLBACK = Dimensions.get('window').width;
 const SCREEN_HEIGHT_FALLBACK = Dimensions.get('window').height;
-
-installDiagLog();
 
 /**
  * Viewfinder layout — the interface is PORTRAIT-LOCKED (the canonical camera-app choice:

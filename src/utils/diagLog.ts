@@ -172,7 +172,3 @@ function install(): void {
 
 // Self-install on first import so later module-evaluation errors are captured.
 install();
-
-export function installDiagLog(): void {
-  // Kept for explicitness; installation already happened at import time.
-}

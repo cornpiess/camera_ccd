@@ -18,6 +18,7 @@
   7. **LUT bundle 收敛**：58→7 款（仅被引用的，48MB→6.6MB）；源库 `Camera18_LUT_V0/luts/` 全量保留，做新相机从那里拷。
   8. **生产编译修复**：`setMockApertureMode` 入口补 `#if`——生产配置（无 CAMERA18_TESTING）此前必编译失败。
   9. **CI**：新增 `ios-appstore.yml`（无测试标志的上架流水线，build number = run number + 10000 防撞号）。**生产配置从未被编译过，它的首跑就是生产代码路径的首次真编译验证。**
+  10. **回弹真根因 + 全量 review 加固轮（`24586ab` 起，均未出包）**：松手回弹真根因是 settle 坐标系镜像反转（坑 #19）；选择面板改版——行内签名/固定光圈（主题色/默认色）、几何图案常显主题色、⚙ 设置按钮仅测试模式（7 连点 `testSettingsUnlocked`）、mock 选择区移入 ProfileConfigModal（坑 #15 已更新）；review 加固——tone-audit.js 修复（剥 .cube 后缀 + null LUT 直通，8 台全跑通）、CameraEngine 三个事件监听改走守卫解析（native 缺失降级 no-op 不再同步 throw）、**Swift `setMockApertureMode` 剥掉外层 `#if` 使生产"诚实拒绝"分支真正可达（待 CI 构建验证）**、GlassCard ReduceTransparency 全 app 单订阅、三指手势卸载清理定时器、cameraStateStore 保存串行化、Swift 双 hue-band 中心表加注释禁合并（数值差异是刻意的，合并=改渲染）。
 - 架构不变量仍是：**物理镜头路由**（26/35/52 共用物理主摄只动 zoom，13mm/Tele 才换 input）、**Aperture Manual / Shutter AUTO / ISO AUTO**、快门 promise 与后处理解耦（`onPhotoProcessed`）、ORIG 零渲染直通。**改 Swift 前先读 `AGENTS.md` 坑表（#10–#18）与本文档「四」的坑指南，CI 是唯一编译器。**
 - **多机协作网络**：`api.github.com` 直连通常可用；`github.com` 时好时坏，push/pull 失败走 Clash 代理 `127.0.0.1:7890`（完整手法见 `AGENTS.md` 0.1，**必须在沙箱外执行**）。gh CLI 在 `C:\Program Files\GitHub CLI\gh.exe`（同样要挂 `HTTPS_PROXY`）。**⚠️ 推 `.github/workflows/` 的改动必须直推 github.com（挂代理），gh-proxy 镜像服务端用它自己的凭据转发，永远过不了 workflow scope 校验**（坑 #17）。
 - 出包 = 用户明确要求后触发 workflow（`workflow_dispatch`），`gh run watch <id> --exit-status` 监督；CI 连败先读 `AGENTS.md` 1.5。上架提审一律用 `ios-appstore.yml` 的构建（build number = run+10000，好认），**不要拿 TestFlight 构建提审**。

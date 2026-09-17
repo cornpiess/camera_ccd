@@ -28,7 +28,7 @@ export interface FocalStop {
 }
 
 const WIDE_BASE_MM = 26;
-/** Tele equivalent = 13mm base * the virtual device's last switchover factor. */
+/** Ultra-wide base; the tele stop's mm = UW_BASE_MM × inventory.teleZoom. */
 const UW_BASE_MM = 13;
 
 export interface LensInventory {
@@ -51,7 +51,7 @@ export function buildFocalStops(inventory: LensInventory): FocalStop[] {
   }
   stops.push({ id: 'wide-26', mm: 26, lens: 'wide', zoom: 1.0 });
   stops.push({ id: 'wide-35', mm: 35, lens: 'wide', zoom: 35 / WIDE_BASE_MM });
-  stops.push({ id: 'wide-52', mm: 52, lens: 'wide', zoom: 2.0 });
+  stops.push({ id: 'wide-52', mm: 52, lens: 'wide', zoom: 52 / WIDE_BASE_MM });
   const teleZoom = inventory.teleZoom;
   if (
     inventory.tele &&

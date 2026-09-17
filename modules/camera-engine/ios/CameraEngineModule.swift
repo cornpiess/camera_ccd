@@ -601,14 +601,12 @@ public final class CameraEngineModule: Module {
     /// the old build's resources — presents as "the LUT has no effect"), the add-only photo
     /// permission state (the top cause of "photos never reach the library"), and the
     /// hardware aperture report as the session currently sees it.
-    #if DEBUG || CAMERA18_TESTING
-    /// TestFlight Beta only: force aperture capability for UI testing.
+    /// TEST BUILDS ONLY: force the aperture capability for UI testing.
     /// "real" | "mock-variable" | "mock-fixed". No hardware APIs are invoked in mock
-    /// modes; photos are completely unaffected.
-    // TEST BUILDS ONLY. The view's mock machinery only exists under DEBUG/CAMERA18_TESTING
-    // — referencing it unconditionally broke the PRODUCTION build (never compiled until
-    // now). Production: honest no-op rejection; the JS menu can never be revealed there
-    // anyway (testingBuild reports false, the version-gesture gate stays inert).
+    /// modes; photos are completely unaffected. ONE `#if` pair only: the production
+    /// `#else` branch must stay REACHABLE so a production build registers an honest
+    /// rejection instead of no function at all (a nested outer `#if` here used to
+    /// compile the `#else` out entirely).
     #if DEBUG || CAMERA18_TESTING
     AsyncFunction("setMockApertureMode") { (mode: String, promise: Promise) in
       guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
@@ -619,7 +617,6 @@ public final class CameraEngineModule: Module {
     AsyncFunction("setMockApertureMode") { (_ mode: String, promise: Promise) in
       promise.reject("ERR_APERTURE_UNSUPPORTED", "Mock aperture is compiled out of production builds.")
     }
-    #endif
     #endif
 
     AsyncFunction("getDiagnostics") { (promise: Promise) in
@@ -2772,6 +2769,13 @@ private enum CameraDNARenderer {
     let isIdentity: Bool
   }
 
+  // ⚠️ TWO hue-band center tables exist DELIBERATELY — do NOT "unify" them:
+  //  - bandCenters below (nominal 0/30/60/120/180/240/300): used ONLY by hueBandCube,
+  //    the no-LUT fallback cube.
+  //  - buildEffectiveCube's local REFINED centers (0/30/57/117/182/230/302): the
+  //    LUT-fusion path every shipped profile actually renders through.
+  // The values drifted apart during calibration. Merging either into the other CHANGES
+  // that path's rendered color — only do it alongside a fresh tone-audit round.
   private static let bandNames = ["red", "orange", "yellow", "green", "cyan", "blue", "magenta"]
   private static let bandCenters: [Double] = [0, 30, 60, 120, 180, 240, 300]
 
@@ -2988,9 +2992,6 @@ private enum CameraDNARenderer {
     // Identity correction (the only wired type today) is a mathematical no-op here:
     // the compiled cube must be bit-identical to the pre-normalizer architecture, so
     // the six cameras' current visuals are untouched.
-    // Identity correction (the only wired type today) is a mathematical no-op here:
-    // the compiled cube must be bit-identical to the pre-normalizer architecture, so
-    // the six cameras' current visuals are untouched.
     assert(normalizer.correctionType == "identity", "non-identity normalizer corrections need cube-fusion support first")
 
     // 1. lutIntensity: blend each entry toward its own grid coordinate (the identity
@@ -3033,7 +3034,8 @@ private enum CameraDNARenderer {
     let needsTemp = abs(kelvin - 6_500.0) > 0.5 || abs(tint) > 0.01
     // 3. Saturation (luma-preserving, same Rec.709 weights as CIColorControls).
     let sat = Float(number(color, "saturation", 1, 0...4))
-    // 4. 7-band HSL fine trim.
+    // 4. 7-band HSL fine trim. REFINED centers — differs from hueBandCube's nominal
+    // bandCenters on purpose (see the ⚠️ note there before touching either table).
     let bandNames = ["red", "orange", "yellow", "green", "cyan", "blue", "magenta"]
     let bandCenters: [Double] = [0, 30, 57, 117, 182, 230, 302]
     let adjustments = zip(bandNames, bandCenters).map { name, center -> (Double, Double, Double, Double) in

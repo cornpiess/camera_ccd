@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -35,6 +35,11 @@ export const ThreeFingerGestureDetector: React.FC<ThreeFingerGestureDetectorProp
     setIsActive(false);
   };
 
+  // UNMOUNT SAFETY: a gesture caught mid-hold must not leave its timer alive — it would
+  // still fire onTriggerCalibration() 2s later against the unmounted tree.
+  useEffect(() => () => cancelGesture(), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   const handleTouchStart = (e: GestureResponderEvent) => {
     const touches = e.nativeEvent.touches;
     if (touches.length === 3) {
@@ -57,7 +62,7 @@ export const ThreeFingerGestureDetector: React.FC<ThreeFingerGestureDetectorProp
         cancelGesture();
         onTriggerCalibration();
       }, durationMs);
-    } else if (touches.length > 3 || touches.length < 3) {
+    } else if (touches.length !== 3) {
       if (isActive) {
         cancelGesture();
       }

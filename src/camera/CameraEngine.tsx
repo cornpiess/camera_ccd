@@ -200,7 +200,8 @@ const unavailableModule: NativeCameraEngine = {
   getCameraAuthorizationStatus: () => Promise.reject(unavailableError()),
   getAvailableLenses: () => Promise.reject(unavailableError()),
   setLens: () => Promise.reject(unavailableError()),
-  setZoomFactor: () => Promise.reject(unavailableError()),  setMockApertureMode: () => Promise.reject(unavailableError()),
+  setZoomFactor: () => Promise.reject(unavailableError()),
+  setMockApertureMode: () => Promise.reject(unavailableError()),
   addApertureChangedListener: () => ({ remove: () => {} }),
   addZoomChangedListener: () => ({ remove: () => {} }),
 };
@@ -249,16 +250,27 @@ export type ApertureChangedEvent = { readonly fNumber: number };
 export type ZoomChangedEvent = { readonly zoom: number };
 export type NativeEventSubscription = { readonly remove: () => void };
 
+/**
+ * Event subscription through the SAME guarded resolution as the functions above: a
+ * missing native side must degrade to a no-op subscription, never a synchronous throw
+ * inside a caller's useEffect (which would crash the launch the guarded require above
+ * just worked to protect).
+ */
+function addEngineListener<T>(event: string, cb: (event: T) => void): NativeEventSubscription {
+  if (!nativeResolution.ok) return { remove: () => {} };
+  return requireNativeModule('CameraEngine').addListener(event, cb) as { readonly remove: () => void };
+}
+
 export const addApertureChangedListener = (
   cb: (event: ApertureChangedEvent) => void,
-): NativeEventSubscription => requireNativeModule('CameraEngine').addListener('onApertureChanged', cb) as { readonly remove: () => void };
+): NativeEventSubscription => addEngineListener('onApertureChanged', cb);
 export const addZoomChangedListener = (
   cb: (event: ZoomChangedEvent) => void,
-): NativeEventSubscription => requireNativeModule('CameraEngine').addListener('onZoomChanged', cb) as { readonly remove: () => void };
+): NativeEventSubscription => addEngineListener('onZoomChanged', cb);
 /** Background pipeline outcome for a shutter press (fires AFTER the promise settled). */
 export const addPhotoProcessedListener = (
   cb: (event: PhotoProcessedEvent) => void,
-): NativeEventSubscription => requireNativeModule('CameraEngine').addListener('onPhotoProcessed', cb) as { readonly remove: () => void };
+): NativeEventSubscription => addEngineListener('onPhotoProcessed', cb);
 
 /** Functional native API; also convenient for call sites that prefer a namespace object. */
 export const CameraEngine = {

@@ -69,7 +69,7 @@ export function computeRadialSector(
   shifted = ((shifted % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
 
   const index = Math.floor(shifted / sectorStep) % profileCount;
-  return index < profileCount ? index : null;
+  return index;
 }
 
 export interface RadialProfileSelectorProps {
@@ -78,8 +78,10 @@ export interface RadialProfileSelectorProps {
   readonly currentTouch?: Point | null;
   readonly profiles: readonly CameraProfile[];
   readonly activeProfileId?: string;
-  readonly onSelectProfile?: (profile: CameraProfile) => void;
-  readonly onCancel?: () => void;
+  // NOTE: selection does NOT flow through this component — the PARENT resolves the
+  // sector (computeRadialSector on release, App.tsx) and calls onSelectProfile there.
+  // Deliberately no onSelectProfile/onCancel props: adding them back would suggest a
+  // second selection path that does not exist.
 }
 
 export const RadialProfileSelector: React.FC<RadialProfileSelectorProps> = ({

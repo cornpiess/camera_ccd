@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AccessibilityInfo, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 // Guarded require: expo-glass-effect resolves its native view manager at MODULE LOAD time,
@@ -46,21 +46,38 @@ export function isGlassAvailable(): boolean {
 /**
  * Track the system Reduce Transparency setting: when enabled, glass controls must fall back to
  * a much more solid material instead of holding the effect for the sake of looks.
+ *
+ * ONE app-wide native query + ONE event subscription behind a module-level store: a
+ * screen like the radial menu renders ~15 GlassCards, and a per-instance hook would
+ * multiply the async query and listener that many times. The exported hook semantics
+ * are unchanged (initial false until the query resolves, then live updates).
  */
+let sharedReduceTransparency = false;
+let sharedSourceConnected = false;
+const transparencyListeners = new Set<() => void>();
+
+function connectSharedSource(): void {
+  if (sharedSourceConnected) return;
+  sharedSourceConnected = true;
+  const apply = (enabled: boolean): void => {
+    if (enabled === sharedReduceTransparency) return;
+    sharedReduceTransparency = enabled;
+    transparencyListeners.forEach((listener) => listener());
+  };
+  AccessibilityInfo.isReduceTransparencyEnabled().then(apply).catch(() => {});
+  AccessibilityInfo.addEventListener('reduceTransparencyChanged', apply);
+}
+
 export function useReduceTransparency(): boolean {
-  const [reduceTransparency, setReduceTransparency] = useState(false);
+  const [reduceTransparency, setReduceTransparency] = useState(sharedReduceTransparency);
   useEffect(() => {
-    let active = true;
-    AccessibilityInfo.isReduceTransparencyEnabled().then((enabled) => {
-      if (active) setReduceTransparency(enabled);
-    }).catch(() => {});
-    const subscription = AccessibilityInfo.addEventListener(
-      'reduceTransparencyChanged',
-      (enabled) => setReduceTransparency(enabled),
-    );
+    connectSharedSource();
+    // Re-sync first: the async initial query may have resolved between render and effect.
+    setReduceTransparency(sharedReduceTransparency);
+    const listener = () => setReduceTransparency(sharedReduceTransparency);
+    transparencyListeners.add(listener);
     return () => {
-      active = false;
-      subscription.remove();
+      transparencyListeners.delete(listener);
     };
   }, []);
   return reduceTransparency;
@@ -96,14 +113,12 @@ export const GlassCard: React.FC<GlassCardProps> = ({
     availabilityHelpers.isLiquidGlassAvailable() &&
     !reduceTransparency;
 
-  const tint = useMemo(() => tintColor ?? undefined, [tintColor]);
-
   if (glassOK && GlassViewImpl) {
     return (
       <View style={[styles.clip, { borderRadius }, style]}>
         <GlassViewImpl
           glassEffectStyle="regular"
-          tintColor={tint}
+          tintColor={tintColor ?? undefined}
           isInteractive={isInteractive}
           colorScheme="dark"
           style={[StyleSheet.absoluteFillObject, { borderRadius }]}
