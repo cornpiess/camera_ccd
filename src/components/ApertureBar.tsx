@@ -208,15 +208,24 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   // used to rebuild on EVERY currentAperture/openness change (i.e. every drag update),
   // and a fresh PanResponder resets its internal gestureState.dx accumulation — the
   // computed f-stop snapped back to the grab point each frame ("the ring won't drag").
-  const dragValuesRef = useRef({ openness, currentAperture, onApertureChange, onApertureSettle, interactive, lo, hi, logLo, span });
-  dragValuesRef.current = { openness, currentAperture, onApertureChange, onApertureSettle, interactive, lo, hi, logLo, span };
+  const dragValuesRef = useRef({ openness, currentAperture, onApertureChange, onApertureSettle, interactive, lo, hi, logLo, span, setDraggingState });
+  // setDraggingState rides the mirror too: the PanResponder is created ONCE (rebuilding
+  // it resets gestureState.dx = "the ring won't drag"), so every per-render callable it
+  // needs must be reached through this ref, never through the useMemo deps.
+  dragValuesRef.current = { openness, currentAperture, onApertureChange, onApertureSettle, interactive, lo, hi, logLo, span, setDraggingState };
 
-  /** One hardware commit per gesture: re-derive the f-stop from the band's last position. */
+  /** One hardware commit per gesture: re-derive the f-stop from the band's last position.
+    * tRef holds the BAND coordinate (0 = ƒ/lo wide-open end, 1 = ƒ/hi stopped-down end) —
+    * the SAME axis the move handler writes and the [openness] effect reads (t = 1 −
+    * openness converts, it does NOT invert the f mapping). The f-stop is therefore
+    * toF(logLo + t·span); the historic `(1 − t)` here mirrored every release to the
+    * opposite end of the scale (drag to ƒ/1.5 → settle ƒ/3.9≈ƒ/4, the "回弹") and survived
+    * three async-race fix rounds because it is deterministic, not a race. */
   const settleAtLastPosition = () => {
     const v = dragValuesRef.current;
     if (!v.interactive || v.hi <= v.lo) return;
     const t = clamp(tRef.current, 0, 1);
-    v.onApertureSettle?.(Number(toF(v.logLo + (1 - t) * v.span).toFixed(2)));
+    v.onApertureSettle?.(Number(toF(v.logLo + t * v.span).toFixed(2)));
   };
 
   const panResponder = useMemo(
@@ -226,7 +235,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
         onMoveShouldSetPanResponder: () => dragValuesRef.current.interactive,
         onPanResponderGrant: () => {
           dragState.current = { startOpenness: dragValuesRef.current.openness, active: true };
-          setDraggingState(true);
+          dragValuesRef.current.setDraggingState(true);
           lastDetentRef.current = detentIndexFor(dragValuesRef.current.currentAperture);
         },
         onPanResponderMove: (_evt, gestureState) => {
@@ -254,7 +263,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
         },
         onPanResponderRelease: (_evt, gestureState) => {
           dragState.current.active = false;
-          setDraggingState(false);
+          dragValuesRef.current.setDraggingState(false);
           // 轻点（几乎没移动）= 刻度⇄侧视图切换；拖动才调光圈。
           if (dragValuesRef.current.interactive && Math.abs(gestureState.dx) < 4 && Math.abs(gestureState.dy) < 4) {
             setViewMode((m) => (m === 'scale' ? 'side' : 'scale'));
@@ -264,7 +273,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
         },
         onPanResponderTerminate: () => {
           dragState.current.active = false;
-          setDraggingState(false);
+          dragValuesRef.current.setDraggingState(false);
           settleAtLastPosition();
         },
       }),

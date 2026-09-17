@@ -230,6 +230,8 @@ AVCaptureVideoDataOutput(BGRA, .photo preset 全分辨率)
 
 18. **生产配置（无 CAMERA18_TESTING）从未被编译过，直到 `ios-appstore.yml` 首跑**：TestFlight 流水线固定注入测试标志，正式包路径（如 `setMockApertureMode` 入口的 `#if` 缺口）只有不带标志才暴露。**上架提审一律用 `ios-appstore.yml` 的构建（build number = run number + 10000）**，不要拿 TestFlight 构建提审；该流水线首跑若报编译错误，按日志修源码，**禁止把测试标志加回去**。
 
+19. **松手回弹的真根因是 settle 坐标系镜像反转（2026-09-18 定案），不是竞态**：`tRef` 存的是**刻度带坐标**（0=ƒ/lo 大光圈端，1=ƒ/hi 小光圈端），而 `settleAtLastPosition` 一直写成 `toF(logLo + (1 - t) * span)`——把 t 当 openness 用，**每次松手提交的都是手指位置关于刻度尺中点的镜像值**（拖到 ƒ/1.5 松手 → 提交 ƒ/3.95≈ƒ/4；拖到 ƒ/1.6~1.7 → ƒ/3.5~ƒ/3.7）。拖动过程中的数值是对的（move 公式正确），只在松手/terminate 瞬间跳到镜像端点；轻点条带切侧视图也会顺带提交镜像光圈。它自 `settleAtLastPosition` 诞生（20dcee6）就是反的，**与设备无关、与 mock 无关**——#16 的手指总闸/序号修的是真实但次要的异步竞态，量程探针修的是真实但独立的端止挡问题，都治不了这个确定性数学错误；18 Pro 真机上它曾被「accepted range 端止挡 ƒ/3.8」掩盖成硬件拒绝假象。正确公式：`toF(logLo + t * span)`。**改 settle/带坐标换算前先推导一遍方向**（move 写 `t=(log f−logLo)/span`，effect 读 `t=1−openness`，settle 用 `f=toF(logLo+t·span)`，三方必须同轴）。附带修复：`setDraggingState` 改走 `dragValuesRef` 镜像（PanResponder 只许创建一次，缺依赖警告不许用「加进 useMemo deps」来修——那会复活 build 42 前的 dx 重置拖不动 bug）。
+
 ---
 
 ## 五、当前支持的 8 个公开相机模式
