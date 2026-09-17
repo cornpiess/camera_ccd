@@ -72,6 +72,13 @@ export interface TextureSettings {
   readonly grain: GrainSettings;
   readonly vignette: VignetteSettings;
   readonly halation: HalationSettings;
+  /**
+   * 0..1 — FINAL-PHOTO-ONLY highlight chroma relief: as luma approaches clipping the
+   * pixel is pulled toward its own luma (channel-clipping color shifts soften), luma
+   * itself untouched. The preview never runs it (仅成片 stage), so it must stay subtle
+   * enough not to break Color/Tone WYSIWYG (0.04 ≈ barely visible).
+   */
+  readonly deharsh?: number;
   readonly starburst?: StarburstSettings;
 }
 export interface CameraProfile {

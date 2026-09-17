@@ -712,76 +712,76 @@
         "colorNoiseReduction": 0
       },
       "tone": {
-        "exposure": 0.05,
-        "contrast": 0.96,
-        "blackPoint": 0.005,
+        "exposure": 0.0,
+        "contrast": 1.0,
+        "blackPoint": 0.0,
         "exposureBias": 0,
         "curve": [
           [
-            0,
-            0
+            0.0,
+            0.0
           ],
           [
             0.18,
-            0.2
+            0.175
           ],
           [
             0.5,
-            0.51
+            0.505
           ],
           [
             0.78,
-            0.8
+            0.795
           ],
           [
-            1,
+            1.0,
             0.985
           ]
         ]
       },
       "color": {
-        "saturation": 0.95,
+        "saturation": 1.0,
         "temperature": 0,
         "tint": 0,
         "hueBands": {
           "red": {
-            "hue": 2,
-            "saturation": 0.97,
-            "luminance": 1.01
+            "hue": 0.5,
+            "saturation": 0.99,
+            "luminance": 1.0
           },
           "orange": {
-            "hue": 1,
-            "saturation": 0.95,
-            "luminance": 1.04
+            "hue": -1.0,
+            "saturation": 0.99,
+            "luminance": 1.01
           },
           "yellow": {
-            "hue": -2,
-            "saturation": 0.92,
-            "luminance": 1.02
+            "hue": -0.5,
+            "saturation": 0.98,
+            "luminance": 1.0
           },
           "green": {
-            "hue": -4,
-            "saturation": 0.9,
-            "luminance": 1.01
+            "hue": 1.0,
+            "saturation": 0.98,
+            "luminance": 1.0
           },
           "cyan": {
-            "hue": -3,
-            "saturation": 0.93,
-            "luminance": 1
+            "hue": 0.0,
+            "saturation": 0.99,
+            "luminance": 1.0
           },
           "blue": {
-            "hue": -2,
-            "saturation": 0.92,
-            "luminance": 0.99
+            "hue": -0.5,
+            "saturation": 0.98,
+            "luminance": 1.0
           },
           "magenta": {
-            "hue": 1,
-            "saturation": 0.94,
-            "luminance": 1.01
+            "hue": 0.5,
+            "saturation": 0.99,
+            "luminance": 1.0
           }
         },
-        "lut": null,
-        "lutIntensity": 1
+        "lut": "VMF_HN_33_v2.cube",
+        "lutIntensity": 1.0
       },
       "texture": {
         "grain": {
@@ -795,11 +795,12 @@
         "halation": {
           "amount": 0,
           "radius": 0.2
-        }
+        },
+        "deharsh": 0.04
       },
       "ui": {
         "shortName": "VMF",
-        "accent": "#B8B2A6",
+        "accent": "#7F756D",
         "dialStyle": "snap",
         "personality": "gentle",
         "labelStyle": "minimal",

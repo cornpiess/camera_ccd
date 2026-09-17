@@ -92,14 +92,16 @@ final class ApertureController {
   /// - non-degenerate variable-aperture range (min < max),
   /// - recommendedLensApertureStops.count > 1 (the system publishes real detents),
   /// - the exposure setter exists on this OS,
-  /// - `supportsExposureModeCustom(lensAperture:duration:iso:)` VERIFIES a target
-  ///   aperture + auto-exposure combination is supported.
+  /// - the AE-probed ACCEPTED aperture subrange (see acceptedApertureRange) spans
+  ///   ≥ 0.3 f-number — the probe walks the WHOLE range once per device, not just the
+  ///   wide-open end, so formats whose iris+AE support stops short of nominal max
+  ///   report fixed-capable only where the hardware can actually commit.
   /// No device names anywhere — a future variable-aperture iPhone needs zero code changes.
   func capabilityMode(for device: AVCaptureDevice?) -> ApertureMode {
     // NECESSARY CONDITION: the real autoExposureDuration/autoISO sentinels must be
     // obtainable — without them AE cannot compensate aperture changes and the frame
-    // darkens (frozen shutter/ISO). Capability = range + stops + setter + supports
-    // check + live auto sentinels. All of it, or simulated.
+    // darkens (frozen shutter/ISO). Capability = range + stops + setter + probed
+    // accepted subrange + live auto sentinels. All of it, or simulated.
     #if DEBUG || CAMERA18_TESTING
     if let mock = mockOverride { return mock }
     #endif
@@ -108,7 +110,8 @@ final class ApertureController {
           let range = variableApertureRange(device),
           (range.stops?.count ?? 0) > 1,
           device.responds(to: NSSelectorFromString("setExposureModeCustomWithLensAperture:duration:ISO:completionHandler:")),
-          supportsExposureModeCustom(device.activeFormat, aperture: Float(range.min))
+          let accepted = acceptedApertureRange(device),
+          accepted.max - accepted.min >= 0.3
     else { return .fixed }
     return .variable
   }
@@ -210,6 +213,52 @@ final class ApertureController {
     return nil
   }
 
+  // ACCEPTED-RANGE PROBE: capability used to verify only the wide-open end
+  // (range.min), so hardware whose iris+AE combination stops being supported near the
+  // stopped-down end passed the capability gate yet REJECTED settles there — the screen
+  // ring dragged to ƒ/3.8+ fine, then bounced back to the last confirmed stop on
+  // release (user-reported). The probe walks the whole nominal range once per device on
+  // the same 0.1 f-number grid the UI uses for detents and caches the result.
+  private let probeLock = NSLock()
+  private var probeCacheDeviceID: String?
+  private var probeCacheRange: (min: Double, max: Double)?
+
+  /// The subrange of the nominal iris range the CURRENT format actually accepts for
+  /// aperture-priority (AE-compensated) exposure. Acceptance is assumed contiguous from
+  /// the wide-open end — a physical diaphragm cannot hold ƒ/2.0 but refuse ƒ/2.1 — so
+  /// the scan stops at the first rejection. Format-level query only, never touches
+  /// hardware state; cached per device uniqueID (the accepted range cannot change
+  /// without a format swap, which this session never performs).
+  private func acceptedApertureRange(_ device: AVCaptureDevice) -> (min: Double, max: Double)? {
+    guard let nominal = variableApertureRange(device) else { return nil }
+    probeLock.lock()
+    if let cachedID = probeCacheDeviceID, let cachedRange = probeCacheRange, cachedID == device.uniqueID {
+      probeLock.unlock()
+      return cachedRange
+    }
+    probeLock.unlock()
+    // Fixed-index grid walk (AGENTS.md 坑 #10: no element-wise array loops).
+    let gridStep = 0.1
+    let steps = Int(((nominal.max - nominal.min) / gridStep).rounded(.up))
+    var acceptedMax = nominal.min
+    for i in 0...steps {
+      let f = min(nominal.min + Double(i) * gridStep, nominal.max)
+      if supportsExposureModeCustom(device.activeFormat, aperture: Float(f)) {
+        acceptedMax = f
+      } else {
+        break
+      }
+    }
+    probeLock.lock()
+    probeCacheDeviceID = device.uniqueID
+    probeCacheRange = (nominal.min, acceptedMax)
+    probeLock.unlock()
+    if acceptedMax < nominal.max - 1e-9 {
+      print("[CameraEngine][Diag] accepted aperture range: ƒ/\(acceptedMax) (nominal max ƒ/\(nominal.max)) — UI scale will end at the accepted stop")
+    }
+    return (nominal.min, acceptedMax)
+  }
+
   /// The lens's real mechanical aperture (the only aperture a fixed lens has).
   func currentAperture(_ device: AVCaptureDevice) -> Double {
     if #available(iOS 27.0, *) {
@@ -237,15 +286,22 @@ final class ApertureController {
     }
 
     let active = currentAperture(device)
-    if let range = variableApertureRange(device) {
+    if let accepted = acceptedApertureRange(device) {
+      // REPORT THE ACCEPTED RANGE, not the nominal one: min/max is the usable
+      // aperture-priority range — the UI scale ends and the settle clamp both key off
+      // these fields, so an unreachable nominal max would offer stops the hardware
+      // refuses (the ƒ/3.8 bounce-back). Stops outside the accepted subrange are
+      // filtered so Camera Control prominent values stay reachable too.
+      let stops = variableApertureRange(device)?.stops?
+        .filter { $0 >= accepted.min - 1e-9 && $0 <= accepted.max + 1e-9 }
       return Capabilities(
         supportsVariableAperture: true,
-        minAperture: range.min,
-        maxAperture: range.max,
+        minAperture: accepted.min,
+        maxAperture: accepted.max,
         activeAperture: active,
-        // Hardware detents when the format publishes them; otherwise the JS layer derives
-        // a 1/3-stop ladder from min/max (deriveVariableApertures).
-        supportedApertures: (range.stops?.isEmpty == false) ? range.stops : nil,
+        // Hardware detents inside the accepted range when the format publishes them;
+        // otherwise the JS layer derives a 1/3-stop ladder from min/max (deriveVariableApertures).
+        supportedApertures: (stops?.isEmpty == false) ? stops : nil,
         deviceModel: device.localizedName
       )
     }
@@ -292,17 +348,27 @@ final class ApertureController {
       return
     }
 
-    guard let range = variableApertureRange(device) else {
+    guard let accepted = acceptedApertureRange(device) else {
       // Capability flipped away from variable between route and call - honest failure.
       mode = .fixed
       DispatchQueue.main.async { completion(.failure(.apertureUnsupported)) }
       return
     }
+    // Mechanical END STOPS, not rejections: requests beyond the accepted subrange
+    // (nominal max, stale Camera Control echoes) clamp to the nearest reachable stop —
+    // what a physical ring does — instead of failing the settle and bouncing the UI
+    // ring back to the previous stop. The only remaining failure here is a stale probe
+    // (format swapped under us): re-verify the clamped target and drop the cache so the
+    // next capability pass re-probes.
+    let clampedTarget = Float(min(max(fStop, accepted.min), accepted.max))
     // APERTURE PRIORITY GUARD: the format must accept (target aperture + auto shutter +
     // auto ISO). Shutter and ISO are NEVER locked — Apple auto exposure compensates the
     // light change, so .quality still gets full multi-frame fusion (user directive).
-    if !supportsExposureModeCustom(device.activeFormat, aperture: Float(min(max(fStop, range.min), range.max))) {
-      // Combination unsupported on this format - honest failure, no simulation.
+    if !supportsExposureModeCustom(device.activeFormat, aperture: clampedTarget) {
+      probeLock.lock()
+      probeCacheDeviceID = nil
+      probeCacheRange = nil
+      probeLock.unlock()
       mode = .fixed
       DispatchQueue.main.async { completion(.failure(.apertureUnsupported)) }
       return
@@ -314,7 +380,7 @@ final class ApertureController {
       completion(.failure(.apertureUnsupported))
       return
     }
-    let target = Float(min(max(fStop, range.min), range.max))
+    let target = clampedTarget
     let setterSel = NSSelectorFromString("setExposureModeCustomWithLensAperture:duration:ISO:completionHandler:")
     guard device.responds(to: setterSel) else {
       completion(.failure(.apertureUnsupported))
@@ -539,11 +605,21 @@ public final class CameraEngineModule: Module {
     /// TestFlight Beta only: force aperture capability for UI testing.
     /// "real" | "mock-variable" | "mock-fixed". No hardware APIs are invoked in mock
     /// modes; photos are completely unaffected.
+    // TEST BUILDS ONLY. The view's mock machinery only exists under DEBUG/CAMERA18_TESTING
+    // — referencing it unconditionally broke the PRODUCTION build (never compiled until
+    // now). Production: honest no-op rejection; the JS menu can never be revealed there
+    // anyway (testingBuild reports false, the version-gesture gate stays inert).
+    #if DEBUG || CAMERA18_TESTING
     AsyncFunction("setMockApertureMode") { (mode: String, promise: Promise) in
       guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
       view.setMockApertureMode(mode, controller: self.apertureController)
       self.settle(.success(()), promise)
     }
+    #else
+    AsyncFunction("setMockApertureMode") { (_ mode: String, promise: Promise) in
+      promise.reject("ERR_APERTURE_UNSUPPORTED", "Mock aperture is compiled out of production builds.")
+    }
+    #endif
     #endif
 
     AsyncFunction("getDiagnostics") { (promise: Promise) in
@@ -2342,9 +2418,10 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
       let inputExtent = source.extent.integral
       print("[CameraEngine][Diag] pipeline input extent=\(Int(inputExtent.width))x\(Int(inputExtent.height))")
 
-      // Compiled final pipeline (processed-photo normalizer + LUT + fine color + tone).
+      // Compiled final pipeline (processed-photo normalizer + LUT + fine color + tone
+      // + final-only deharsh). The preview path calls apply() WITHOUT finalPhoto.
       var image = source
-      image = CameraDNARenderer.apply(compiled, to: image)
+      image = CameraDNARenderer.apply(compiled, to: image, finalPhoto: true)
       print("[CameraEngine][Diag] after LUT+color extent=\(Int(image.extent.width))x\(Int(image.extent.height))")
 
       let extent = image.extent.integral
@@ -2664,9 +2741,11 @@ enum CameraInputNormalizer {
 ///   Source decode (CIImage float working space) → Normalizer (fused in cube)
 ///   → CIColorCubeWithColorSpace with inputColorSpace = sRGB (the LUTs are calibrated
 ///   in sRGB — preview and final MUST keep this identical) → Tone (CI working space)
-///   → Export sRGB. No implicit per-path color-space differences, no redundant
-///   conversions. Precision: Core Image processes in its float working space end to
-///   end; quantization to 8-bit happens exactly once, inside the final HEIF/JPEG encode.
+///   → FINAL PHOTO ONLY: Deharsh (highlight chroma relief, texture.deharsh; the preview
+///   never runs it — Color/Tone WYSIWYG covers the shared stages) → Export sRGB. No
+///   implicit per-path color-space differences, no redundant conversions. Precision:
+///   Core Image processes in its float working space end to end; quantization to 8-bit
+///   happens exactly once, inside the final HEIF/JPEG encode.
 private enum CameraDNARenderer {
   /// Bump on ANY change to cube compilation or tone application so stale cached cubes
   /// can never survive a renderer change (cache key includes this).
@@ -2680,6 +2759,9 @@ private enum CameraDNARenderer {
     let contrast: Double
     let blackPoint: Double
     let toneCurve: [CIVector]?
+    /// FINAL-PHOTO-ONLY highlight chroma relief strength (texture.deharsh, 0..1). The
+    /// preview never runs it — Color/Tone WYSIWYG keeps to the shared stages.
+    let deharshAmount: Double
     let profileID: String
     let profileRevision: Int
     let normalizerID: String
@@ -2695,8 +2777,9 @@ private enum CameraDNARenderer {
 
   /// Unified rendering pipeline — consumes ONLY a compiled profile (no JSON per frame).
   /// Source → effective cube (normalizer + LUT + fine color) → Exposure → Contrast →
-  /// Black point → Tone curve. Every stage skips itself when neutral.
-  static func apply(_ compiled: CompiledCameraProfile, to source: CIImage) -> CIImage {
+  /// Black point → Tone curve → [final photo only: Deharsh]. Every stage skips itself
+  /// when neutral.
+  static func apply(_ compiled: CompiledCameraProfile, to source: CIImage, finalPhoto: Bool = false) -> CIImage {
     var image = source
 
     if let effective = compiled.effectiveCube {
@@ -2724,6 +2807,39 @@ private enum CameraDNARenderer {
     }
     if let points = compiled.toneCurve {
       image = filter("CIToneCurve", image, Dictionary(uniqueKeysWithValues: points.enumerated().map { ("inputPoint\($0.offset)", $0.element) }))
+    }
+
+    // DEHARSH (仅成片 stage): highlight chroma relief after the tone curve — the last
+    // color-touching stage before export. Sensors clip channel-wise, and the resulting
+    // saturation blowout near white is the "harsh" digital look this stage removes:
+    // as luma approaches clipping the pixel is pulled toward its own luma. LUMA IS
+    // UNTOUCHED (the profile's tone curve owns luminance — no highlight darkening);
+    // only chroma eases, weighted by a ramp that stays at 0 through the mids and rises
+    // over the highlight shoulder. Stock filters only (AGENTS.md: no custom Metal), and
+    // the whole chain self-skips at amount 0 — the deharsh=0 profiles render identically.
+    if finalPhoto, compiled.deharshAmount > 0.0005 {
+      let amount = compiled.deharshAmount
+      let lumaWeights = CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0)
+      let luma = filter("CIColorMatrix", image, [
+        "inputRVector": lumaWeights, "inputGVector": lumaWeights, "inputBVector": lumaWeights,
+      ])
+      let mask = filter("CIToneCurve", luma, [
+        "inputPoint0": CIVector(x: 0, y: 0),
+        "inputPoint1": CIVector(x: 0.30, y: 0),
+        "inputPoint2": CIVector(x: 0.55, y: 0.02),
+        "inputPoint3": CIVector(x: 0.75, y: 0.45),
+        "inputPoint4": CIVector(x: 1, y: 1),
+      ])
+      let desaturated = filter("CIColorControls", image, [
+        kCIInputSaturationKey: CGFloat(max(0.0, 1.0 - amount * 4.0)),
+        kCIInputContrastKey: CGFloat(1.0),
+        kCIInputBrightnessKey: CGFloat(0.0),
+      ])
+      // Mask 1 = take the desaturated pixel (highlights), 0 = keep the original.
+      image = filter("CIBlendWithMask", desaturated, [
+        "inputBackgroundImage": image,
+        "inputMaskImage": mask,
+      ])
     }
 
     return image.cropped(to: source.extent)
@@ -2761,14 +2877,21 @@ private enum CameraDNARenderer {
   private static var profileColorFingerprints: [String: Int] = [:]
   private static let cubeLock = NSLock()
 
-  /// Bump the revision ONLY when a profile's COLOR payload actually changed. setProfile
+  /// Bump the revision ONLY when a profile's RENDERED payload actually changed. setProfile
   /// runs on every RN prop application AND through applyProfile — historically twice per
   /// aperture-drag tick, which rebuilt this 33³ cube on the render queue each time and
   /// leaked one ~0.5 MB cache entry per rebuild. Tone is compiled once with the cube and
   /// read from the CompiledCameraProfile afterwards — never from JSON per frame.
   static func invalidateCompiledProfile(_ profile: [String: Any]) {
     guard let id = profile["id"] as? String else { return }
-    let fingerprint = colorFingerprint(profile["color"])
+    // Color + tone + texture: the compiled profile carries ALL three (cube, tone stages,
+    // final-only deharsh) — a texture-only or tone-only edit (ProfileConfigModal imports)
+    // must bump the revision too, or the cache serves the stale compiled stages.
+    let fingerprint = colorFingerprint([
+      "color": profile["color"] ?? NSNull(),
+      "tone": profile["tone"] ?? NSNull(),
+      "texture": profile["texture"] ?? NSNull(),
+    ])
     cubeLock.lock(); defer { cubeLock.unlock() }
     if let seen = profileColorFingerprints[id], seen == fingerprint { return }
     profileColorFingerprints[id] = fingerprint
@@ -2800,6 +2923,8 @@ private enum CameraDNARenderer {
     let rawCurve = toneCurve(tone["curve"])
     let curve = (rawCurve != nil && !isIdentityToneCurve(rawCurve!)) ? rawCurve : nil
     let toneIsNeutral = abs(exposureEV) <= 0.001 && abs(contrast - 1.0) <= 0.001 && blackPoint <= 0 && curve == nil
+    // FINAL-PHOTO-ONLY stage strength (texture.deharsh, 0..1). Absent = 0 = skipped.
+    let deharshAmount = number(dictionary(profile["texture"]), "deharsh", 0, 0...1)
 
     let revision: Int = {
       cubeLock.lock(); defer { cubeLock.unlock() }
@@ -2833,12 +2958,13 @@ private enum CameraDNARenderer {
       contrast: contrast,
       blackPoint: blackPoint,
       toneCurve: curve,
+      deharshAmount: deharshAmount,
       profileID: id,
       profileRevision: revision,
       normalizerID: normalizer.id,
       normalizerRevision: normalizer.revision,
       rendererVersion: rendererVersion,
-      isIdentity: effectiveCube == nil && toneIsNeutral,
+      isIdentity: effectiveCube == nil && toneIsNeutral && deharshAmount <= 0.0005
     )
 
     cubeLock.lock()

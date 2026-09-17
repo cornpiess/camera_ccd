@@ -10,7 +10,7 @@
 
 - **最新成功构建：TestFlight build 78**（run number 78，commit `fb3076b`，一次通过）。**本轮架构 = 物理镜头路由**（详见下）：capture input 永远是物理镜头，26/35/52 共用物理主摄只动 `videoZoomFactor`，13mm/Tele 才换 input；光圈语义是 **Aperture Manual / Shutter AUTO / ISO AUTO / AF·AWB AUTO**；快门 promise 在 Apple capture 完成即返回，Camera DNA/HEIF/PhotoKit 走后台串行队列并经 `onPhotoProcessed` 事件回传；ORIG 是零渲染直通。**改 Swift 前先读 `AGENTS.md` 坑表（#10–#14），CI 是唯一编译器。**
 - **待真机验证（build 78）**：① 13mm/Tele 切换的 150ms 预览 crossfade 无黑闪、切换后拍照禁窗手感（2.5s watchdog 兜底）；② Tele 档 EXIF 显示真实等效焦距（ladder 真值，不再是 13mm）；③ ORIG 出片为 Apple 原图直存（无二次编码）；④ Profile 切换在可变光圈硬件上真实联动 signatureAperture；⑤ 快门连拍响应（balanced + ZSL/Responsive/Fast Capture 三件套）。
-- **待 iPhone 18 Pro 真机验证**：物理可变光圈全链路（capabilityMode 五条件 + auto 哨兵 + 3s ack 看门狗）——所有 iOS 27 符号都是动态调用，任何 Xcode 26+ 可编译。
+- **待 iPhone 18 Pro 真机验证**：物理可变光圈全链路（capabilityMode 五条件 + auto 哨兵 + 3s ack 看门狗）——所有 iOS 27 符号都是动态调用，任何 Xcode 26+ 可编译。**新增加档量程探针**：capability 曾只验 ƒ/1.48 一点，真机大光圈端 supportsExposureModeCustom 为 false 时 UI 能拖过去、松手被拒回弹到上次确认值（用户报：拖过 ƒ/3.8 弹回 ƒ/1.7）。现 `acceptedApertureRange` 按 0.1 档网格全量程探查（format 级查询，按设备 uniqueID 缓存），getCapabilities 上报**实测可接受子区间**为 min/max（刻度尺端点即硬止挡、Camera Control 滑条同源），settle 越界值夹到端点（机械止挡语义）不再拒绝；探针只判 accepts 与否、从不写硬件。
 - **多机协作网络**：`api.github.com` 直连通常可用；`github.com` 时好时坏，push/pull 失败走 Clash 代理 `127.0.0.1:7890`（完整手法见 `AGENTS.md` 0.1，**必须在沙箱外执行**）。gh CLI 在 `C:\Program Files\GitHub CLI\gh.exe`（同样要挂 `HTTPS_PROXY`）。
 - 出包 = 用户明确要求后触发 `ios-testflight.yml`（`workflow_dispatch`），`gh run watch <id> --exit-status` 监督；CI 连败先读 `AGENTS.md` 1.5。
 
