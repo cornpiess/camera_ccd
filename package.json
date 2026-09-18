@@ -16,6 +16,7 @@
   "dependencies": {
     "@react-native-community/slider": "5.1.2",
     "camera-engine": "file:modules/camera-engine",
+    "monetization": "file:modules/monetization",
     "expo": "^55.0.0",
     "expo-dev-client": "~55.0.14",
     "expo-document-picker": "~55.0.8",

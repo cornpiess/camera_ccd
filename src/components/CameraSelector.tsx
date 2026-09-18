@@ -3,7 +3,7 @@ import { Animated, Dimensions, Linking, Pressable, ScrollView, StyleSheet, Text,
 import * as Haptics from 'expo-haptics';
 import type { CameraProfile } from '../profiles/types';
 import { markerGlyph, profileDisplayName } from './types';
-import { t } from '../i18n';
+import { t, tf } from '../i18n';
 import { SafeGlassView, isGlassAvailable } from './GlassCard';
 import { ProfileConfigModal } from '../calibration/ProfileConfigModal';
 
@@ -34,6 +34,17 @@ export interface CameraSelectorProps {
   /** TEST MODE ONLY: active mock aperture mode, forwarded to the settings sheet. */
   readonly mockApertureMode?: 'real' | 'mock-variable' | 'mock-fixed' | null;
   readonly onSelectMockApertureMode?: (mode: 'real' | 'mock-variable' | 'mock-fixed') => void;
+  /**
+   * Monetization badges (spec §6): computed by the SAME CameraAccessPolicy the
+   * shutter gate uses. Rows are NEVER disabled — an exhausted camera stays
+   * selectable for preview; only its badge reads PRO and tapping that badge opens
+   * the paywall at the moment of purchase intent.
+   */
+  readonly accessForProfile?: (profile: CameraProfile) => { kind: 'unlimited' | 'trial' | 'requiresPro'; remaining?: number };
+  /** Pro status for the footer Pro row; when active the row opens management. */
+  readonly isPro?: boolean;
+  /** Opens the paywall (source 'proBadge' from the badge, 'settings' from the row). */
+  readonly onOpenPro?: (source: 'proBadge' | 'settings') => void;
 }
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -47,6 +58,8 @@ const CAPSULE_TOP = 55;
 const PANEL_TOP = 92;
 // Legal footer pinned under the profile list (用户协议 / 隐私政策 / 支持).
 const FOOTER_HEIGHT = 44;
+// Camera 18 Pro row pinned between the list and the legal footer.
+const PRO_ROW_HEIGHT = 38;
 
 // 协议页面固定挂在 GitHub Pages。open 前按 https + 精确 host/路径形态校验，只放行
 // 本项目自己的三个页面 —— 拼接结果不符合就直接丢弃，绝不交给系统打开。
@@ -97,6 +110,9 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   fixedAperture,
   mockApertureMode,
   onSelectMockApertureMode,
+  accessForProfile,
+  isPro = false,
+  onOpenPro,
 }: CameraSelectorProps) => {
   // `mounted` keeps the tree alive while the close animation pours the panel back.
   const [mounted, setMounted] = useState(visible);
@@ -111,7 +127,7 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   // uses the CAPPED height so the glass still lands exactly on the capsule at progress 0.
   // The legal footer is part of the panel — its height counts toward the morph math.
   const maxPanelHeight = Math.round(screenHeight * 0.62);
-  const panelHeight = Math.min(profiles.length * ROW_HEIGHT, maxPanelHeight) + FOOTER_HEIGHT;
+  const panelHeight = Math.min(profiles.length * ROW_HEIGHT, maxPanelHeight) + FOOTER_HEIGHT + PRO_ROW_HEIGHT;
 
   useEffect(() => {
     animRef.current?.stop();
@@ -253,6 +269,16 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                     ? preferred
                     : null;
                 const rowAperture = fixedValue ?? signatureValue;
+                // Monetization badge from the shared policy: GRIT N renders nothing
+                // (cleanest), remaining trials read "N LEFT", exhausted reads "PRO".
+                const access = accessForProfile?.(profile) ?? null;
+                const badge =
+                  access == null || access.kind === 'unlimited'
+                    ? null
+                    : access.kind === 'trial'
+                      ? tf('trialLeftBadge', access.remaining ?? 0)
+                      : t('trialProBadge');
+                const badgeIsPro = access != null && access.kind === 'requiresPro';
                 return (
                   <Pressable
                     key={profile.id}
@@ -280,6 +306,24 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                         {`ƒ/${rowAperture.toFixed(1).replace(/\.0$/, '')}`}
                       </Text>
                     ) : null}
+                    {badge != null ? (
+                      badgeIsPro && onOpenPro ? (
+                        <Pressable
+                          accessibilityLabel={`Unlock ${displayName} with Camera 18 Pro`}
+                          accessibilityRole="button"
+                          hitSlop={6}
+                          onPress={() => {
+                            Haptics.selectionAsync().catch(() => {});
+                            onOpenPro('proBadge');
+                          }}
+                          style={({ pressed }) => [styles.proBadge, pressed && styles.proBadgePressed]}
+                        >
+                          <Text style={styles.proBadgeText}>{badge}</Text>
+                        </Pressable>
+                      ) : (
+                        <Text style={styles.trialBadge}>{badge}</Text>
+                      )
+                    ) : null}
                     {isActive ? (
                       <View style={[styles.activeDot, { backgroundColor: accent }]} />
                     ) : null}
@@ -302,7 +346,30 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
               })}
               </ScrollView>
               {/* 法务入口（固定底栏，不随列表滚动）：用户协议 / 隐私政策 / 支持。
-                  全 app 没有独立设置页 —— 相机胶囊 → 本面板是唯一菜单表面。 */}
+                  全 app 没有独立设置页 —— 相机胶囊 → 本面板是唯一菜单表面，
+                  Camera 18 Pro 行因此也住在这里（未订阅 → Paywall；已订阅 → 官方管理）。 */}
+              <View style={styles.proRowContainer}>
+                <Pressable
+                  accessibilityLabel={t('proRowLabel')}
+                  accessibilityRole="button"
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    onOpenPro?.('settings');
+                  }}
+                  style={({ pressed }) => [styles.proRow, pressed && styles.proRowPressed]}
+                >
+                  <Text style={styles.proRowName}>{t('proRowLabel')}</Text>
+                  {isPro ? (
+                    <>
+                      <Text style={styles.proRowActive}>{t('proRowActive')}</Text>
+                      <Text style={styles.footerDot}>·</Text>
+                      <Text style={styles.proRowManage}>{t('proRowManage')}</Text>
+                    </>
+                  ) : (
+                    <Text style={styles.proRowChevron}>›</Text>
+                  )}
+                </Pressable>
+              </View>
               <View style={styles.footer}>                {versionLabel ? (
                   <>
                     <Pressable
@@ -427,6 +494,62 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 3.5,
+  },
+  trialBadge: {
+    color: 'rgba(255, 255, 255, 0.45)',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    fontVariant: ['tabular-nums'],
+  },
+  proBadge: {
+    borderRadius: 5,
+    backgroundColor: 'rgba(232, 184, 75, 0.92)',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  proBadgePressed: {
+    opacity: 0.7,
+  },
+  proBadgeText: {
+    color: '#141414',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  proRowContainer: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255, 255, 255, 0.14)',
+  },
+  proRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 38,
+  },
+  proRowPressed: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  proRowName: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  proRowActive: {
+    color: 'rgba(120, 220, 130, 0.95)',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  proRowManage: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  proRowChevron: {
+    color: 'rgba(255, 255, 255, 0.4)',
+    fontSize: 14,
+    fontWeight: '700',
   },
   configButton: {
     width: 30,

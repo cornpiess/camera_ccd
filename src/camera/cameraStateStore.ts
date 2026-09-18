@@ -13,6 +13,13 @@ export interface CameraState {
   lastProfileId: string | null;
   /** Stable Documents path of the latest thumbnail (survives restarts). */
   lastThumbUri?: string | null;
+  /**
+   * Highest onboarding version the user has completed (or skipped). VERSIONED on
+   * purpose — not a bool — so a future onboarding rev ships as version 2 and only
+   * re-appears for users who haven't seen it. Reinstall resets it, which is the
+   * correct first-run behavior (the trial counts live in the Keychain instead).
+   */
+  completedOnboardingVersion?: number | null;
 }
 
 const STATE_FILENAME = 'camera-state.json';
@@ -27,6 +34,8 @@ export async function loadCameraState(): Promise<CameraState> {
     return {
       lastThumbUri: typeof parsed?.lastThumbUri === 'string' ? parsed.lastThumbUri : null,
       lastProfileId: typeof parsed?.lastProfileId === 'string' ? parsed.lastProfileId : null,
+      completedOnboardingVersion:
+        typeof parsed?.completedOnboardingVersion === 'number' ? parsed.completedOnboardingVersion : null,
     };
   } catch {
     return { lastProfileId: null, lastThumbUri: null };

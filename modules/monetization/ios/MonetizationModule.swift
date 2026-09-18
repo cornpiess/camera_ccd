@@ -1,0 +1,326 @@
+import ExpoModulesCore
+import StoreKit
+import Security
+import UIKit
+
+/**
+ * Monetization native side — two independent halves, both deliberately kept OUT of
+ * the capture hot path (all of this is called before the shutter only, or from UI):
+ *
+ * 1. SubscriptionManager (StoreKit 2): products, purchase, restore, entitlements.
+ *    StoreKit transactions are the single source of truth for `isPro` — nothing is
+ *    cached in UserDefaults. Billing Grace Period entitlements stay valid because
+ *    `Transaction.currentEntitlements` includes them.
+ *
+ * 2. CameraTrialStore (Keychain): per-premium-profile used shot counts plus an
+ *    in-memory in-flight reservation set, so a remaining-1 quota cannot be raced
+ *    into multiple saved photos by rapid shutter taps. Reinstall-survivable via the
+ *    Keychain (thisDeviceOnly); it is an honesty measure, not an anti-cheat system.
+ *
+ * The module NEVER touches the camera pipeline; it only answers "may this profile
+ * take a real capture right now" style questions for the JS CameraAccessPolicy.
+ */
+
+// MARK: - Product catalog
+
+/// Product identifiers (App Store Connect subscription group "Camera 18 Pro").
+/// Prices are ALWAYS read from StoreKit (`Product.displayPrice`) — never hardcoded;
+/// the USD figures only exist in App Store Connect / the .storekit test file.
+private let monthlyProductID = "camera18.pro.monthly"
+private let yearlyProductID = "camera18.pro.yearly"
+private let trialLimit = 3
+
+// MARK: - CameraTrialStore (Keychain)
+
+/// Serial, in-memory-cached view over the Keychain-persisted trial document.
+private final class CameraTrialStore {
+  private struct Document: Codable {
+    var version: Int = 1
+    var usedShots: [String: Int] = [:]
+  }
+
+  private let service: String
+  private let account = "trialStore"
+  private let queue = DispatchQueue(label: "camera18.monetization.trial")
+  private var document: Document
+  /// Reservation bookkeeping (memory-only by design: a killed process simply loses
+  /// them; `usedShots` is the only permanent record).
+  private var inFlight: [String: Int] = [:]
+
+  init(service: String) {
+    self.service = service
+    self.document = Self.load(service: service, account: account) ?? Document()
+  }
+
+  private static func load(service: String, account: String) -> Document? {
+    var query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrAccount as String: account,
+      kSecReturnData as String: true,
+      kSecMatchLimit as String: kSecMatchLimitOne,
+    ]
+    var item: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    guard status == errSecSuccess, let data = item as? Data else { return nil }
+    return try? JSONDecoder().decode(Document.self, from: data)
+  }
+
+  private func persist() {
+    guard let data = try? JSONEncoder().encode(document) else { return }
+    let base: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrAccount as String: account,
+    ]
+    let attributes: [String: Any] = [
+      kSecValueData as String: data,
+      kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+    ]
+    var query = base
+    query[kSecReturnData as String] = true
+    var item: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    if status == errSecSuccess {
+      SecItemUpdate(base as CFDictionary, attributes as CFDictionary)
+    } else {
+      SecItemAdd(base.merging(attributes) { _, new in new } as CFDictionary, nil)
+    }
+  }
+
+  private func clamped(_ value: Int) -> Int {
+    return min(max(value, 0), trialLimit)
+  }
+
+  /// Synchronous snapshot of the permanent record (used counts only).
+  func usedShotsSnapshot() -> [String: Int] {
+    return queue.sync { document.usedShots }
+  }
+
+  /// Atomically claims one trial shot: succeeds only while
+  /// `trialLimit - used - inFlight > 0`. The count is only permanent after `commit`.
+  func reserve(profileID: String) -> Bool {
+    return queue.sync {
+      let used = clamped(document.usedShots[profileID] ?? 0)
+      let reserved = inFlight[profileID] ?? 0
+      guard trialLimit - used - reserved > 0 else { return false }
+      inFlight[profileID] = reserved + 1
+      return true
+    }
+  }
+
+  /// A successfully SAVED photo consumed one trial shot (spec: only a saved photo
+  /// consumes; capture/processing/save failures roll back instead).
+  func commit(profileID: String) {
+    queue.sync {
+      let used = clamped(document.usedShots[profileID] ?? 0)
+      document.usedShots[profileID] = clamped(used + 1)
+      if let reserved = inFlight[profileID] {
+        inFlight[profileID] = max(0, reserved - 1)
+      }
+      persist()
+    }
+  }
+
+  /// The capture pipeline failed — give the reserved shot back.
+  func rollback(profileID: String) {
+    queue.sync {
+      if let reserved = inFlight[profileID] {
+        inFlight[profileID] = max(0, reserved - 1)
+      }
+    }
+  }
+
+  /// TESTING BUILDS ONLY: wipe the trial record (developer convenience).
+  func reset() {
+    queue.sync {
+      document = Document()
+      inFlight = [:]
+      persist()
+    }
+  }
+}
+
+// MARK: - Expo module
+
+public final class MonetizationModule: Module {
+  private let trialStore = CameraTrialStore(service: "com.cornpiess.camera18.trials")
+  private var updatesTask: Task<Void, Never>?
+
+  public func definition() -> ModuleDefinition {
+    Name("Monetization")
+
+    Events("onProChanged")
+
+    OnCreate {
+      // Lifetime StoreKit listener: new purchases, renewals, status changes and
+      // refunds all funnel through here while the app runs.
+      self.updatesTask = Task.detached { [weak self] in
+        for await update in Transaction.updates {
+          await self?.handle(transactionResult: update)
+        }
+      }
+    }
+
+    OnDestroy {
+      updatesTask?.cancel()
+    }
+
+    // -- Entitlements -------------------------------------------------------
+
+    /// `isPro` = a verified, currently-valid (incl. Grace Period) entitlement for
+    /// either product. StoreKit is the source of truth; nothing is cached on disk.
+    AsyncFunction("isPro") { (promise: Promise) in
+      Task {
+        let pro = await Self.computeIsPro()
+        self.sendEvent("onProChanged", ["isPro": pro])
+        promise.resolve(pro)
+      }
+    }
+
+    // -- Products ------------------------------------------------------------
+
+    /// Localized products for the paywall. Price strings come from StoreKit only.
+    AsyncFunction("getProducts") { (promise: Promise) in
+      Task {
+        do {
+          let products = try await Product.products(for: [monthlyProductID, yearlyProductID])
+          let payload: [[String: Any]] = products.map { product in
+            [
+              "id": product.id,
+              "displayPrice": product.displayPrice,
+              "period": product.id == yearlyProductID ? "yearly" : "monthly",
+            ]
+          }
+          promise.resolve(payload)
+        } catch {
+          // Store offline / products not configured: the camera stays fully usable.
+          promise.resolve([[String: Any]]())
+        }
+      }
+    }
+
+    // -- Purchase ------------------------------------------------------------
+
+    /// One purchase attempt. Resolves a result OBJECT (never rejects on the
+    /// expected user-visible paths) so the JS side can branch without exceptions:
+    /// {ok:true} | {ok:false, reason:"unverified"|"failed"} | {pending:true} | {cancelled:true}
+    AsyncFunction("purchase") { (productID: String, promise: Promise) in
+      Task {
+        do {
+          let products = try await Product.products(for: [productID])
+          guard let product = products.first else {
+            promise.resolve(["ok": false, "reason": "failed"])
+            return
+          }
+          let result = try await product.purchase()
+          switch result {
+          case .success(let verification):
+            switch verification {
+            case .verified(let transaction):
+              await transaction.finish()
+              let pro = await Self.computeIsPro()
+              self.sendEvent("onProChanged", ["isPro": pro])
+              promise.resolve(["ok": true, "isPro": pro])
+            case .unverified:
+              // Never grant Pro on an unverified transaction.
+              promise.resolve(["ok": false, "reason": "unverified"])
+            }
+          case .pending:
+            promise.resolve(["pending": true])
+          case .userCancelled:
+            promise.resolve(["cancelled": true])
+          @unknown default:
+            promise.resolve(["ok": false, "reason": "failed"])
+          }
+        } catch {
+          promise.resolve(["ok": false, "reason": "failed"])
+        }
+      }
+    }
+
+    /// ONLY from an explicit user tap (never on launch): AppStore.sync() then a
+    /// fresh entitlement pass. {restored:true} when an active subscription exists.
+    AsyncFunction("restorePurchases") { (promise: Promise) in
+      Task {
+        do {
+          try await AppStore.sync()
+        } catch {
+          // Sync can fail offline; currentEntitlements is still the honest answer.
+        }
+        let pro = await Self.computeIsPro()
+        self.sendEvent("onProChanged", ["isPro": pro])
+        promise.resolve(["restored": pro])
+      }
+    }
+
+    /// Official StoreKit manage-subscription sheet (iOS 15+). Rejects softly when
+    /// unavailable; the JS side falls back to the App Store account URL.
+    AsyncFunction("showManageSubscriptions") { (promise: Promise) in
+      if #available(iOS 15.0, *) {
+        Task { @MainActor in
+          let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+          guard let scene = scenes.first(where: { $0.activationStatus == .foregroundActive }) ?? scenes.first else {
+            promise.reject("ERR_MANAGE_UNAVAILABLE", "No active window scene")
+            return
+          }
+          do {
+            try await AppStore.showManageSubscriptions(in: scene)
+            promise.resolve(nil)
+          } catch {
+            promise.reject("ERR_MANAGE_FAILED", error.localizedDescription)
+          }
+        }
+      } else {
+        promise.reject("ERR_MANAGE_UNAVAILABLE", "iOS 15 required")
+      }
+    }
+
+    // -- Trial store ----------------------------------------------------------
+
+    Function("getTrialUsedShots") { () -> [String: Int] in
+      trialStore.usedShotsSnapshot()
+    }
+
+    Function("reserveTrialShot") { (profileID: String) -> Bool in
+      trialStore.reserve(profileID: profileID)
+    }
+
+    Function("commitTrialShot") { (profileID: String) in
+      trialStore.commit(profileID: profileID)
+    }
+
+    Function("rollbackTrialShot") { (profileID: String) in
+      trialStore.rollback(profileID: profileID)
+    }
+
+    // TESTING BUILDS ONLY (mirrors the camera-engine CAMER18_TESTING gate): wipe
+    // the trial record so 3-shot flows can be re-tested without a reinstall.
+    Function("resetTrials") { () -> Bool in
+      #if DEBUG || CAMERA18_TESTING
+      trialStore.reset()
+      return true
+      #else
+      return false
+      #endif
+    }
+  }
+
+  private func handle(transactionResult: VerificationResult<Transaction>) async {
+    guard case .verified(let transaction) = transactionResult else { return }
+    await transaction.finish()
+    let pro = await Self.computeIsPro()
+    sendEvent("onProChanged", ["isPro": pro])
+  }
+
+  private static func computeIsPro() async -> Bool {
+    for await entitlement in Transaction.currentEntitlements {
+      guard case .verified(let transaction) = entitlement else { continue }
+      guard transaction.revocationDate == nil else { continue }
+      if transaction.productID == monthlyProductID || transaction.productID == yearlyProductID {
+        return true
+      }
+    }
+    return false
+  }
+}

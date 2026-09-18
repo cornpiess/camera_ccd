@@ -1,0 +1,88 @@
+{
+  "identifier" : "F11E2A3C-9B4D-4C58-8A21-CAMERA18PRO",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_applicationInternalID" : "com.cornpiess.camera18",
+    "_developerTeamID" : "CAMERA18TEST",
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "CAMERA18_PRO_GROUP",
+      "localizations" : [
+        {
+          "description" : "Unlock every camera character.",
+          "displayName" : "Camera 18 Pro",
+          "locale" : "en_US"
+        }
+      ],
+      "name" : "Camera 18 Pro",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "1.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "CAMERA18_PRO_MONTHLY",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Unlimited access to all 8 camera characters.",
+              "displayName" : "Camera 18 Pro Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "camera18.pro.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Camera 18 Pro Monthly",
+          "subscriptionGroupID" : "CAMERA18_PRO_GROUP",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "9.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "CAMERA18_PRO_YEARLY",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Unlimited access to all 8 camera characters.",
+              "displayName" : "Camera 18 Pro Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "camera18.pro.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Camera 18 Pro Yearly",
+          "subscriptionGroupID" : "CAMERA18_PRO_GROUP",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

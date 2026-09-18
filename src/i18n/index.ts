@@ -75,6 +75,50 @@ const en = {
   legalTerms: 'Terms',
   legalPrivacy: 'Privacy',
   legalSupport: 'Support',
+
+  // Onboarding (3 pages, first launch only)
+  onbApertureTitle: 'Aperture. In Your Hands.',
+  onbApertureSubtitle: 'Continuous aperture control, built for iPhone photography.',
+  onbCharactersTitle: '8 Cameras.\n8 Characters.',
+  onbCharactersSubtitle: 'A different character for every shot.',
+  onbTrialTitle: 'Try Every Camera.',
+  onbTrialGritYours: 'GRIT N is yours.',
+  onbTrialTryOthers: 'Try every other camera with 3 free shots.',
+  onbTrialUnlimited: 'UNLIMITED',
+  onbTrialFreeShots: '3 FREE SHOTS EACH',
+  onbSkip: 'Skip',
+  onbContinue: 'Continue',
+  onbStartShooting: 'Start Shooting',
+
+  // Paywall
+  paywallTitle: 'Unlock Every Camera.',
+  paywallSubtitle: 'Unlimited access to all 8 camera characters.',
+  paywallYearly: 'YEARLY',
+  paywallMonthly: 'MONTHLY',
+  paywallFoundingPrice: 'FOUNDING PRICE',
+  paywallKeepFounding: 'Keep your founding price while subscribed.',
+  paywallUnlockCta: 'Unlock Camera 18 Pro',
+  paywallRestore: 'Restore Purchases',
+  paywallRetry: 'Retry',
+  paywallPending: 'Purchase pending — Pro unlocks once it completes.',
+  paywallVerificationFailed: 'Purchase verification failed. Please try again.',
+  paywallPurchaseFailed: "Couldn't complete the purchase. Please try again.",
+  paywallRestored: 'Purchases restored.',
+  paywallNoSubscription: 'No active subscription found.',
+  paywallLoading: 'Loading…',
+  paywallAutoRenewNote:
+    'Auto-renews until cancelled. Manage or cancel anytime in Settings. New camera characters are included while subscribed.',
+
+  // Trial badges & hints
+  trialLeftBadge: '{n} LEFT',
+  trialProBadge: 'PRO',
+  trialUsedHint: 'Free shots used.',
+  trialUnlockHint: 'Unlock Pro to keep shooting with this camera.',
+
+  // Camera selector Pro row / footer
+  proRowLabel: 'Camera 18 Pro',
+  proRowActive: 'Active',
+  proRowManage: 'Manage',
 };
 
 const zh: Record<keyof typeof en, string> = {
@@ -112,6 +156,45 @@ const zh: Record<keyof typeof en, string> = {
   legalTerms: '用户协议',
   legalPrivacy: '隐私政策',
   legalSupport: '支持',
+
+  onbApertureTitle: '光圈，尽在掌握。',
+  onbApertureSubtitle: '为 iPhone 摄影打造的连续光圈控制。',
+  onbCharactersTitle: '8 台相机。\n8 种性格。',
+  onbCharactersSubtitle: '每一次按下快门，都有不同的性格。',
+  onbTrialTitle: '试试每一台相机。',
+  onbTrialGritYours: 'GRIT N 属于你。',
+  onbTrialTryOthers: '其余每台相机各有 3 次免费试拍。',
+  onbTrialUnlimited: '无限拍',
+  onbTrialFreeShots: '每台 3 次免费试拍',
+  onbSkip: '跳过',
+  onbContinue: '继续',
+  onbStartShooting: '开始拍摄',
+
+  paywallTitle: '解锁全部相机。',
+  paywallSubtitle: '无限使用全部 8 个相机性格。',
+  paywallYearly: '年付',
+  paywallMonthly: '月付',
+  paywallFoundingPrice: '首发价',
+  paywallKeepFounding: '订阅期间一直保留你的首发价。',
+  paywallUnlockCta: '解锁 Camera 18 Pro',
+  paywallRestore: '恢复购买',
+  paywallRetry: '重试',
+  paywallPending: '购买待处理——完成后自动解锁 Pro。',
+  paywallVerificationFailed: '购买验证失败，请重试。',
+  paywallPurchaseFailed: '无法完成购买，请重试。',
+  paywallRestored: '已恢复购买。',
+  paywallNoSubscription: '未找到有效订阅。',
+  paywallLoading: '加载中…',
+  paywallAutoRenewNote: '自动续订，可随时在设置中管理或取消。订阅期间包含新增相机性格。',
+
+  trialLeftBadge: '剩 {n} 张',
+  trialProBadge: 'PRO',
+  trialUsedHint: '免费试拍已用完。',
+  trialUnlockHint: '解锁 Pro，继续用这台相机拍摄。',
+
+  proRowLabel: 'Camera 18 Pro',
+  proRowActive: '已开通',
+  proRowManage: '管理',
 };
 
 const STRINGS: Record<Lang, Record<keyof typeof en, string>> = { en, zh };
@@ -121,4 +204,9 @@ export type StringKey = keyof typeof en;
 /** Look up one string in the launch-time language (English fallback by construction). */
 export function t(key: StringKey): string {
   return STRINGS[appLang][key];
+}
+
+/** Look up a string with `{n}`-style numeric substitution (trial badge counts). */
+export function tf(key: StringKey, n: number): string {
+  return STRINGS[appLang][key].replace('{n}', String(n));
 }

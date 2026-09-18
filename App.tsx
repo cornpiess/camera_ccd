@@ -44,6 +44,11 @@ import {
 import { apertureVisualFactors, applyApertureVisual } from './src/camera/apertureVisualProfile';
 import { t, type StringKey } from './src/i18n';
 import { MAX_RING_PROFILES } from './src/components/RadialProfileSelector';
+import { accessFor } from './src/monetization/CameraAccessPolicy';
+import { TRIAL_LIMIT } from './src/monetization/MonetizationConfig';
+import { SUBSCRIPTIONS_MANAGE_URL } from './src/monetization/MonetizationConfig';
+import { showManageSubscriptions } from './src/monetization/Monetization';
+import { MonetizationProvider, useMonetization } from './src/monetization/MonetizationProvider';
 import { deriveSkin, isLightColor } from './src/theme/skin';
 
 // Profile management provider
@@ -69,6 +74,10 @@ import {
   PermissionRequestView,
   CameraLoadingView,
   CameraErrorView,
+  PaywallModal,
+  OnboardingView,
+  CURRENT_ONBOARDING_VERSION,
+  type PaywallSource,
   getClampedCenter,
   computeRadialSector,
   type Point,
@@ -261,6 +270,22 @@ function CameraAppScreen(): React.JSX.Element {
   // Tracks whether the native session started successfully (used by the AppState recovery path)
   const cameraRunningRef = useRef<boolean>(false);
 
+  // -------------------------------------------------------------
+  // 2b. Monetization state (Camera 18 Pro + per-camera 3-shot trials)
+  // -------------------------------------------------------------
+  const { isPro, trialUsed, reserveTrialShot, commitTrialShot, rollbackTrialShot } = useMonetization();
+  // First-launch onboarding gate (persisted as a VERSION, not a bool).
+  const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
+  // Paywall = user-intent moments ONLY (exhausted shutter press / explicit Pro taps).
+  const [paywall, setPaywall] = useState<{ source: PaywallSource; profileId: string | null } | null>(null);
+  // Light, NON-blocking hint after the LAST trial shot saved (never a surprise paywall).
+  const [trialHintVisible, setTrialHintVisible] = useState<boolean>(false);
+  const trialHintTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // The trial reservation owned by the capture in flight (shutter → saved photo).
+  // Snapshot matches the profile that was active AT SHUTTER TIME, so switching
+  // cameras mid-processing still commits to the right counter.
+  const pendingTrialRef = useRef<{ profileId: string; reservedAt: number } | null>(null);
+
   // Persisted camera memory: last profile + per-profile last user-chosen aperture.
   // Loaded async once on mount; restore happens after both profiles and state are ready.
   const cameraStateRef = useRef<CameraState>({ lastProfileId: null });
@@ -273,6 +298,11 @@ function CameraAppScreen(): React.JSX.Element {
       cameraStateRef.current = state;
       // Restore the latest-shot chip: the thumbnail lives at a STABLE Documents path now.
       if (state.lastThumbUri) setLatestThumbnail(state.lastThumbUri);
+      // Versioned onboarding gate: absent/older version = first launch (or a new
+      // onboarding rev the user hasn't seen). Completing or skipping writes the version.
+      if ((state.completedOnboardingVersion ?? 0) < CURRENT_ONBOARDING_VERSION) {
+        setShowOnboarding(true);
+      }
       setCameraStateLoaded(true);
     }).catch(() => setCameraStateLoaded(true));
     return () => {
@@ -725,12 +755,34 @@ function CameraAppScreen(): React.JSX.Element {
   // or the pipeline failure. Keeping this off the shutter path is the whole point.
   useEffect(() => {
     const sub = addPhotoProcessedListener((event) => {
+      // Trial bookkeeping (spec §3): ONLY a successfully SAVED photo consumes a
+      // free shot. Any pipeline failure rolls the reservation back — the count
+      // must survive failed captures untouched.
+      const pending = pendingTrialRef.current;
       if (!event?.ok) {
         const code = String(event?.errorCode ?? 'unknown');
         recordDiag('error', `capture pipeline: FAILED (${code}): ${String(event?.detail ?? '')}`);
+        if (pending) {
+          pendingTrialRef.current = null;
+          rollbackTrialShot(pending.profileId);
+          recordDiag('info', `trial: rolled back reservation (${pending.profileId})`);
+        }
         if (code === 'ERR_PHOTO_PERMISSION_DENIED') setPhotoPermDenied(true);
         showTransientError(String(event?.detail ?? 'Photo save failed.'));
         return;
+      }
+      if (pending) {
+        pendingTrialRef.current = null;
+        commitTrialShot(pending.profileId);
+        const remaining = TRIAL_LIMIT - (trialUsed[pending.profileId] ?? 0) - 1;
+        recordDiag('info', `trial: committed (${pending.profileId}, remaining=${remaining})`);
+        // The 3rd (last) free shot just saved: a LIGHT, non-blocking hint — the
+        // paywall only appears on the NEXT shutter press with this camera.
+        if (remaining <= 0) {
+          if (trialHintTimerRef.current) clearTimeout(trialHintTimerRef.current);
+          setTrialHintVisible(true);
+          trialHintTimerRef.current = setTimeout(() => setTrialHintVisible(false), 6000);
+        }
       }
       if (event.processingFallback) {
         showTransientError(t('dnaFallbackSaved'));
@@ -768,7 +820,8 @@ function CameraAppScreen(): React.JSX.Element {
       }
     });
     return () => sub.remove();
-  }, [showTransientError]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showTransientError, commitTrialShot, rollbackTrialShot, trialUsed]);
 
   // Profile validation/import/reload errors shown as transient overlay while running
   useEffect(() => {
@@ -902,6 +955,42 @@ function CameraAppScreen(): React.JSX.Element {
 
   const handleCapturePhoto = async () => {
     if (capturePhase === 'capturing') return;
+
+    // -------------------------------------------------------------
+    // Monetization gate (spec §5/§6/§27): runs entirely BEFORE the capture, from
+    // in-memory state — StoreKit/Keychain never touch the hot path after this.
+    // GRIT N (and any future "free" profile) passes straight through.
+    // -------------------------------------------------------------
+    const gateProfile = activeProfile;
+    if (gateProfile) {
+      const access = accessFor(gateProfile.id, isPro, trialUsed, gateProfile);
+      if (access.kind === 'requiresPro') {
+        // Exhausted camera is still selectable for PREVIEW (spec §6); only the
+        // real shutter reveals the paywall — the moment of purchase intent.
+        recordDiag('info', `trial: exhausted (${gateProfile.id}) → paywall`);
+        setPaywall({ source: 'trialExhausted', profileId: gateProfile.id });
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+        return;
+      }
+      if (access.kind === 'trial') {
+        // A stale reservation (timeout with no pipeline event ever arriving) must
+        // not eat the last slot forever: the 20s capture timeout + margin covers it.
+        const stale = pendingTrialRef.current;
+        if (stale && Date.now() - stale.reservedAt > 30_000) {
+          pendingTrialRef.current = null;
+          rollbackTrialShot(stale.profileId);
+        }
+        const reserved = reserveTrialShot(gateProfile.id);
+        if (!reserved) {
+          // Rapid taps raced the last slot — same intent as exhausted.
+          recordDiag('info', `trial: reservation refused (${gateProfile.id}) → paywall`);
+          setPaywall({ source: 'trialExhausted', profileId: gateProfile.id });
+          return;
+        }
+        pendingTrialRef.current = { profileId: gateProfile.id, reservedAt: Date.now() };
+      }
+    }
+
     setCapturePhase('capturing');
 
     // Immediate shutter feedback: white flash + haptic fire on press, while the photo
@@ -941,7 +1030,16 @@ function CameraAppScreen(): React.JSX.Element {
       recordDiag('info', `capture: Apple capture complete (zoom=${result?.appliedZoom?.toFixed(2) ?? '?'} → ${result?.equivalentFocal ?? currentStop?.mm ?? '?'}mm eq); Camera DNA/HEIF/PhotoKit continue in background`);
     } catch (err: unknown) {
       const code = err instanceof CameraEngineError ? err.code : 'unknown';
+      const timedOut = err instanceof Error && err.message.includes('timed out');
       recordDiag('error', `capture: FAILED (${code}): ${err instanceof Error ? err.message : String(err)}`);
+      // A hard capture failure produces no photo → free the reserved trial shot.
+      // The TIMEOUT path keeps the reservation: the photo may still save and land
+      // in onPhotoProcessed, which is the only place that commits or rolls back.
+      if (!timedOut && pendingTrialRef.current) {
+        const pending = pendingTrialRef.current;
+        pendingTrialRef.current = null;
+        rollbackTrialShot(pending.profileId);
+      }
       // A denied add-only photo permission is easy to miss as a 4s banner and reads as
       // "photos don't save" — surface it as a persistent, tappable remediation pill.
       if (code === 'ERR_PHOTO_PERMISSION_DENIED') setPhotoPermDenied(true);
@@ -1009,6 +1107,34 @@ function CameraAppScreen(): React.JSX.Element {
     },
     [selectProfile]
   );
+
+  // The single Pro entry point. Already-subscribed users skip the paywall entirely
+  // and go straight to Apple's official manage-subscription sheet.
+  const handleOpenPro = useCallback(
+    (source: 'proBadge' | 'settings') => {
+      if (isPro && source === 'settings') {
+        showManageSubscriptions().catch(() => {
+          Linking.openURL(SUBSCRIPTIONS_MANAGE_URL).catch(() => {});
+        });
+        return;
+      }
+      setPaywall({ source, profileId: activeProfile?.id ?? null });
+    },
+    [isPro, activeProfile]
+  );
+
+  // Shared-policy badge source for the CameraSelector rows (same function the
+  // shutter gate uses — the badge and the gate can never disagree).
+  const accessForProfile = useCallback(
+    (profile: CameraProfile) => accessFor(profile.id, isPro, trialUsed, profile),
+    [isPro, trialUsed]
+  );
+
+  const handleCompleteOnboarding = useCallback(() => {
+    cameraStateRef.current.completedOnboardingVersion = CURRENT_ONBOARDING_VERSION;
+    saveCameraState({ completedOnboardingVersion: CURRENT_ONBOARDING_VERSION });
+    setShowOnboarding(false);
+  }, []);
 
   const finalizeRadialSelection = useCallback(
     (releaseX?: number, releaseY?: number) => {
@@ -1290,6 +1416,26 @@ function CameraAppScreen(): React.JSX.Element {
             </View>
           )}
 
+          {/* Trial-exhausted hint (spec §7): appears AFTER the 3rd shot saved —
+              light, non-blocking, tappable for the genuinely interested user. The
+              paywall itself only comes on the NEXT shutter press. */}
+          {trialHintVisible && isCameraRunning && !permissionOverlayVisible && (
+            <View style={styles.trialHintContainer} pointerEvents="box-none">
+              <TouchableOpacity
+                accessibilityRole="button"
+                activeOpacity={0.85}
+                onPress={() => {
+                  setTrialHintVisible(false);
+                  setPaywall({ source: 'proBadge', profileId: activeProfile?.id ?? null });
+                }}
+                style={[styles.trialHintPill, { borderColor: skin.border }]}
+              >
+                <Text style={styles.trialHintTitle}>{t('trialUsedHint')}</Text>
+                <Text style={styles.trialHintSubtitle}>{t('trialUnlockHint')}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* Focal-length circles live INSIDE the viewfinder (system-camera style):
               small chips hugging the finder's bottom edge; the bottom band below is
               reserved for the hero aperture ring. box-none so only chips take touches. */}
@@ -1414,6 +1560,9 @@ function CameraAppScreen(): React.JSX.Element {
             fixedAperture={currentAperture}
             mockApertureMode={mockApertureMode}
             onSelectMockApertureMode={applyMockApertureMode}
+            accessForProfile={accessForProfile}
+            isPro={isPro}
+            onOpenPro={handleOpenPro}
           />
 
           {/* 8. Hardware & Lens Calibration Modal (Triggered by 3-finger ~2s hold) */}
@@ -1468,6 +1617,21 @@ function CameraAppScreen(): React.JSX.Element {
               </View>
             ) : null}
           </Modal>
+
+          {/* First-launch onboarding (3 pages; no paywall afterwards by design). */}
+          <OnboardingView
+            visible={showOnboarding}
+            profiles={profiles}
+            apertureRange={apertureVariable ? apertureRange : null}
+            onComplete={handleCompleteOnboarding}
+          />
+
+          {/* Camera 18 Pro paywall — intent-gated only (exhausted shutter / explicit tap). */}
+          <PaywallModal
+            visible={paywall !== null}
+            source={paywall?.source ?? null}
+            onClose={() => setPaywall(null)}
+          />
         </View>
       </ThreeFingerGestureDetector>
     </View>
@@ -1483,7 +1647,9 @@ export default function App(): React.JSX.Element {
   return (
     <StartupErrorBoundary>
       <ProfileProvider>
-        <CameraAppScreen />
+        <MonetizationProvider>
+          <CameraAppScreen />
+        </MonetizationProvider>
       </ProfileProvider>
     </StartupErrorBoundary>
   );
@@ -1541,6 +1707,33 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '600',
+  },
+  trialHintContainer: {
+    position: 'absolute',
+    bottom: 320,
+    left: 16,
+    right: 16,
+    alignItems: 'center',
+    zIndex: 60,
+  },
+  trialHintPill: {
+    backgroundColor: 'rgba(20, 20, 24, 0.94)',
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  trialHintTitle: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  trialHintSubtitle: {
+    color: 'rgba(232, 184, 75, 0.95)',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 3,
   },
   focalInFinder: {
     position: 'absolute',
