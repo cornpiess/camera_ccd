@@ -259,17 +259,16 @@ public final class MonetizationModule: Module {
     AsyncFunction("showManageSubscriptions") { (promise: Promise) in
       if #available(iOS 15.0, *) {
         Task { @MainActor in
-          let scenes: [UIWindowScene] = UIApplication.shared.connectedScenes.compactMap { scene in
-            scene as? UIWindowScene
-          }
-          // Prefer the foreground-active scene; fall back to any connected one.
-          let active = scenes.first { $0.activationStatus == .foregroundActive }
-          guard let scene = active ?? (scenes.count > 0 ? scenes[0] : nil) else {
+          // Single-window iPhone app: the first connected UIWindowScene is THE scene.
+          // (activationStatus deliberately not used — it failed to resolve on the
+          // CI runner SDK and dragged the whole closure's type inference down.)
+          let anyScene = UIApplication.shared.connectedScenes.first { $0 is UIWindowScene }
+          guard let windowScene = anyScene as? UIWindowScene else {
             promise.reject("ERR_MANAGE_UNAVAILABLE", "No active window scene")
             return
           }
           do {
-            try await AppStore.showManageSubscriptions(in: scene)
+            try await AppStore.showManageSubscriptions(in: windowScene)
             promise.resolve(nil)
           } catch {
             promise.reject("ERR_MANAGE_FAILED", error.localizedDescription)
