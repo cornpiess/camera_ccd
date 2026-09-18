@@ -259,8 +259,12 @@ public final class MonetizationModule: Module {
     AsyncFunction("showManageSubscriptions") { (promise: Promise) in
       if #available(iOS 15.0, *) {
         Task { @MainActor in
-          let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-          guard let scene = scenes.first(where: { $0.activationStatus == .foregroundActive }) ?? scenes.first else {
+          let scenes: [UIWindowScene] = UIApplication.shared.connectedScenes.compactMap { scene in
+            scene as? UIWindowScene
+          }
+          // Prefer the foreground-active scene; fall back to any connected one.
+          let active = scenes.first { $0.activationStatus == .foregroundActive }
+          guard let scene = active ?? (scenes.count > 0 ? scenes[0] : nil) else {
             promise.reject("ERR_MANAGE_UNAVAILABLE", "No active window scene")
             return
           }
