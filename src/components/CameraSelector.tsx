@@ -3,6 +3,7 @@ import { Animated, Dimensions, Linking, Pressable, ScrollView, StyleSheet, Text,
 import * as Haptics from 'expo-haptics';
 import type { CameraProfile } from '../profiles/types';
 import { markerGlyph, profileDisplayName } from './types';
+import { t } from '../i18n';
 import { SafeGlassView, isGlassAvailable } from './GlassCard';
 import { ProfileConfigModal } from '../calibration/ProfileConfigModal';
 
@@ -62,6 +63,14 @@ const openLegalPage = (page: string) => {
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
   Linking.openURL(url).catch(() => {});
 };
+
+// Legal footer labels come from the i18n dictionary; the destination pages are the
+// project's GitHub Pages URLs (language-neutral until localized pages exist).
+const LEGAL_LINKS: readonly { readonly page: string; readonly key: 'legalTerms' | 'legalPrivacy' | 'legalSupport' }[] = [
+  { page: LEGAL_PAGES.terms, key: 'legalTerms' },
+  { page: LEGAL_PAGES.privacy, key: 'legalPrivacy' },
+  { page: LEGAL_PAGES.support, key: 'legalSupport' },
+];
 
 /**
  * Liquid-glass camera selector, following Apple's Liquid Glass morph semantics
@@ -308,35 +317,20 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                     <Text style={styles.footerDot}>·</Text>
                   </>
                 ) : null}
-                <Pressable
-                  accessibilityRole="link"
-                  accessibilityLabel="用户协议"
-                  hitSlop={6}
-                  style={({ pressed }) => [styles.footerLink, pressed && styles.footerLinkPressed]}
-                  onPress={() => openLegalPage(LEGAL_PAGES.terms)}
-                >
-                  <Text style={styles.footerText}>用户协议</Text>
-                </Pressable>
-                <Text style={styles.footerDot}>·</Text>
-                <Pressable
-                  accessibilityRole="link"
-                  accessibilityLabel="隐私政策"
-                  hitSlop={6}
-                  style={({ pressed }) => [styles.footerLink, pressed && styles.footerLinkPressed]}
-                  onPress={() => openLegalPage(LEGAL_PAGES.privacy)}
-                >
-                  <Text style={styles.footerText}>隐私政策</Text>
-                </Pressable>
-                <Text style={styles.footerDot}>·</Text>
-                <Pressable
-                  accessibilityRole="link"
-                  accessibilityLabel="支持页面"
-                  hitSlop={6}
-                  style={({ pressed }) => [styles.footerLink, pressed && styles.footerLinkPressed]}
-                  onPress={() => openLegalPage(LEGAL_PAGES.support)}
-                >
-                  <Text style={styles.footerText}>支持</Text>
-                </Pressable>
+                {LEGAL_LINKS.map((link, index) => (
+                  <React.Fragment key={link.key}>
+                    {index > 0 ? <Text style={styles.footerDot}>·</Text> : null}
+                    <Pressable
+                      accessibilityRole="link"
+                      accessibilityLabel={t(link.key)}
+                      hitSlop={6}
+                      style={({ pressed }) => [styles.footerLink, pressed && styles.footerLinkPressed]}
+                      onPress={() => openLegalPage(link.page)}
+                    >
+                      <Text style={styles.footerText}>{t(link.key)}</Text>
+                    </Pressable>
+                  </React.Fragment>
+                ))}
               </View>
             </Animated.View>
           </View>

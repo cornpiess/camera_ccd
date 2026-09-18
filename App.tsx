@@ -42,6 +42,7 @@ import {
   setMockApertureMode,
 } from './src/camera/CameraEngine';
 import { apertureVisualFactors, applyApertureVisual } from './src/camera/apertureVisualProfile';
+import { t, type StringKey } from './src/i18n';
 import { MAX_RING_PROFILES } from './src/components/RadialProfileSelector';
 import { deriveSkin, isLightColor } from './src/theme/skin';
 
@@ -119,27 +120,41 @@ type CapturePhase = 'idle' | 'capturing' | 'failed';
 
 /**
  * User-language error messages (Iteration 4: never expose AVCapture error domains).
+ * All copy flows through the i18n dictionary (en-first, zh secondary).
  */
-const FRIENDLY_ERROR_MESSAGES: Record<string, string> = {
-  ERR_PHOTO_PERMISSION_DENIED: "Couldn't save the photo — allow photo access in Settings.",
-  ERR_CAPTURE_BUSY: 'Still processing the previous photo — one moment.',
-  ERR_CAPTURE_FAILED: "Couldn't capture — try again.",
-  ERR_PROCESSING_FAILED: "Couldn't process the photo.",
-  ERR_SAVE_FAILED: "Couldn't save the photo — check your storage.",
-  ERR_NOT_RUNNING: 'Camera is restarting — try again.',
-  ERR_APERTURE_UNSUPPORTED: 'Variable aperture is not available on this device.',
-  ERR_PERMISSION_DENIED: 'Camera access is required — allow it in Settings.',
-  ERR_CAMERA_UNAVAILABLE: 'Camera unavailable.',
+const FRIENDLY_ERROR_CODES = [
+  'ERR_PHOTO_PERMISSION_DENIED',
+  'ERR_CAPTURE_BUSY',
+  'ERR_CAPTURE_FAILED',
+  'ERR_PROCESSING_FAILED',
+  'ERR_SAVE_FAILED',
+  'ERR_NOT_RUNNING',
+  'ERR_APERTURE_UNSUPPORTED',
+  'ERR_PERMISSION_DENIED',
+  'ERR_CAMERA_UNAVAILABLE',
+] as const;
+
+const FRIENDLY_ERROR_KEYS: Record<(typeof FRIENDLY_ERROR_CODES)[number], StringKey> = {
+  ERR_PHOTO_PERMISSION_DENIED: 'errPhotoPermissionDenied',
+  ERR_CAPTURE_BUSY: 'errCaptureBusy',
+  ERR_CAPTURE_FAILED: 'errCaptureFailed',
+  ERR_PROCESSING_FAILED: 'errProcessingFailed',
+  ERR_SAVE_FAILED: 'errSaveFailed',
+  ERR_NOT_RUNNING: 'errNotRunning',
+  ERR_APERTURE_UNSUPPORTED: 'errApertureUnsupported',
+  ERR_PERMISSION_DENIED: 'errPermissionDenied',
+  ERR_CAMERA_UNAVAILABLE: 'errCameraUnavailable',
 };
 
 function resolveErrorMessage(err: unknown): string {
   if (err instanceof CameraEngineError) {
-    return FRIENDLY_ERROR_MESSAGES[err.code] ?? err.message;
+    const key = (FRIENDLY_ERROR_KEYS as Record<string, StringKey | undefined>)[err.code];
+    return key ? t(key) : err.message;
   }
   const record = err as { code?: string; message?: string } | null;
-  const mapped = record?.code ? FRIENDLY_ERROR_MESSAGES[record.code] : undefined;
-  if (mapped) return mapped;
-  return err instanceof Error ? err.message : 'Something went wrong — try again.';
+  const key = record?.code ? (FRIENDLY_ERROR_KEYS as Record<string, StringKey | undefined>)[record.code] : undefined;
+  if (key) return t(key);
+  return err instanceof Error ? err.message : t('errGeneric');
 }
 
 /**
@@ -470,7 +485,7 @@ function CameraAppScreen(): React.JSX.Element {
       if (isPermissionDeniedError(err)) {
         setPermissionState('denied');
       } else {
-        const errorMsg = err instanceof Error ? err.message : 'Failed to initialize Camera Engine';
+        const errorMsg = err instanceof Error ? err.message : t('initFailed');
         setCameraInitError(errorMsg);
       }
     } finally {
@@ -718,7 +733,7 @@ function CameraAppScreen(): React.JSX.Element {
         return;
       }
       if (event.processingFallback) {
-        showTransientError('Camera DNA processing failed — the original photo was saved.');
+        showTransientError(t('dnaFallbackSaved'));
       }
       recordDiag('info', `capture pipeline: saved (thumb=${Boolean(event.thumbnailUri)}, codec=${event.codec ?? '?'}, eq=${event.equivalentFocal ?? '?'}mm)`);
       if (event.fileUri) setLastCaptureFileUri(event.fileUri);
@@ -1206,16 +1221,16 @@ function CameraAppScreen(): React.JSX.Element {
           )}
 
           {/* Startup state overlays (block all touches beneath) */}
-          {permissionState === 'checking' && <CameraLoadingView message="Preparing camera..." />}
+          {permissionState === 'checking' && <CameraLoadingView message={t('preparingCamera')} />}
           {(permissionState === 'notDetermined' || permissionState === 'denied') && (
             <View style={StyleSheet.absoluteFillObject}>
               <PermissionRequestView
                 statusMessage={
                   permissionState === 'denied'
-                    ? 'Camera access is currently disabled. Enable it in Settings — the camera is only used for the viewfinder and photos.'
-                    : 'Camera 18 simulates classic film cameras. The camera is used for the live viewfinder; photos are saved with add-only photo access.'
+                    ? t('permDeniedStatus')
+                    : t('permExplainer')
                 }
-                primaryLabel={permissionState === 'denied' ? 'Open Settings' : 'Continue'}
+                primaryLabel={permissionState === 'denied' ? t('openSettings') : t('continueLabel')}
                 onRequestPermission={
                   permissionState === 'denied'
                     ? () => {
@@ -1223,7 +1238,7 @@ function CameraAppScreen(): React.JSX.Element {
                       }
                     : handleEnableCamera
                 }
-                secondaryLabel={permissionState === 'denied' ? 'Retry Camera' : undefined}
+                secondaryLabel={permissionState === 'denied' ? t('retryCamera') : undefined}
                 onSecondary={permissionState === 'denied' ? handleEnableCamera : undefined}
               />
             </View>
@@ -1270,9 +1285,7 @@ function CameraAppScreen(): React.JSX.Element {
                 style={[styles.photoPermPill, { borderColor: skin.border }]}
               >
                 <Text style={styles.photoPermIcon}>🖼️</Text>
-                <Text style={styles.photoPermText}>
-                  Photo saving is off — tap to open Settings
-                </Text>
+                <Text style={styles.photoPermText}>{t('photoSaveOff')}</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -1446,11 +1459,11 @@ function CameraAppScreen(): React.JSX.Element {
                   style={styles.photoViewerButton}
                   onPress={() => {
                     Linking.openURL('photos-redirect://').catch(() => {
-                      showTransientError("Can't open the Photos app from this iOS version. Your photo is saved in the library — open Photos from the Home Screen.");
+                      showTransientError(t('photosRedirectFail'));
                     });
                   }}
                 >
-                  <Text style={styles.photoViewerButtonText}>Open in Photos</Text>
+                  <Text style={styles.photoViewerButtonText}>{t('openInPhotos')}</Text>
                 </TouchableOpacity>
               </View>
             ) : null}

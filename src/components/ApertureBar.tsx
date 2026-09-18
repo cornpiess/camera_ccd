@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Animated, PanResponder, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { hexToRgba } from '../theme/skin';
+import { t } from '../i18n';
 import { IrisGlyph } from './IrisGlyph';
 import { ApertureSideView } from './ApertureSideView';
 
@@ -368,7 +369,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
           pointerEvents="none"
         >
           <Text style={[styles.demoBadgeText, accent ? { color: accent } : null]}>
-            {fixedMode ? '固定光圈' : '真实光圈'}
+            {fixedMode ? t('badgeFixedAperture') : t('badgeRealAperture')}
           </Text>
         </View>
       }

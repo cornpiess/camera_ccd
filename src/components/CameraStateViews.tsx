@@ -8,6 +8,7 @@ import {
   SafeAreaView,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { t } from '../i18n';
 
 interface PermissionRequestViewProps {
   onRequestPermission: () => void;
@@ -21,13 +22,15 @@ interface PermissionRequestViewProps {
 
 export const PermissionRequestView: React.FC<PermissionRequestViewProps> = ({
   onRequestPermission,
-  statusMessage = 'Camera 18 simulates classic film cameras. It needs the camera for the viewfinder and photo access (add-only) to save your shots.',
   // Neutral CTA label: App Store review rejects copy that steers users into enabling
   // permissions ("Enable Camera" was rejected once) — keep it neutral ("Continue").
-  primaryLabel = 'Continue',
+  statusMessage,
+  primaryLabel,
   secondaryLabel,
   onSecondary,
 }: PermissionRequestViewProps) => {
+  const resolvedStatus = statusMessage ?? t('permDefaultExplainer');
+  const resolvedPrimary = primaryLabel ?? t('continueLabel');
   const handlePress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     onRequestPermission();
@@ -45,15 +48,15 @@ export const PermissionRequestView: React.FC<PermissionRequestViewProps> = ({
           <Text style={styles.iconGlyph}>📷</Text>
         </View>
 
-        <Text style={styles.title}>Camera Access Required</Text>
-        <Text style={styles.description}>{statusMessage}</Text>
+        <Text style={styles.title}>{t('cameraAccessRequired')}</Text>
+        <Text style={styles.description}>{resolvedStatus}</Text>
 
         <TouchableOpacity
           activeOpacity={0.8}
           onPress={handlePress}
           style={styles.primaryButton}
         >
-          <Text style={styles.primaryButtonText}>{primaryLabel}</Text>
+          <Text style={styles.primaryButtonText}>{resolvedPrimary}</Text>
         </TouchableOpacity>
 
         {secondaryLabel && onSecondary ? (
@@ -71,12 +74,12 @@ interface CameraLoadingViewProps {
 }
 
 export const CameraLoadingView: React.FC<CameraLoadingViewProps> = ({
-  message = 'Initializing Camera Engine...',
+  message,
 }: CameraLoadingViewProps) => {
   return (
     <View style={styles.stateContainer}>
       <ActivityIndicator size="large" color="#FFFFFF" />
-      <Text style={styles.loadingText}>{message}</Text>
+      <Text style={styles.loadingText}>{message ?? t('initializingCamera')}</Text>
     </View>
   );
 };
@@ -102,7 +105,7 @@ export const CameraErrorView: React.FC<CameraErrorViewProps> = ({
           <Text style={styles.iconGlyph}>⚠️</Text>
         </View>
 
-        <Text style={styles.title}>Camera Engine Error</Text>
+        <Text style={styles.title}>{t('cameraEngineError')}</Text>
         <Text style={styles.description}>{error}</Text>
 
         <TouchableOpacity
@@ -110,7 +113,7 @@ export const CameraErrorView: React.FC<CameraErrorViewProps> = ({
           onPress={handleRetry}
           style={styles.primaryButton}
         >
-          <Text style={styles.primaryButtonText}>Retry Camera</Text>
+          <Text style={styles.primaryButtonText}>{t('retryCamera')}</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
