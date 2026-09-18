@@ -949,6 +949,10 @@ public final class CameraEngineView: ExpoView {
           if !self.configured { try self.configureSession() }
           if !self.session.isRunning { self.session.startRunning() }
           self.sessionShouldRun = true
+          // (Re)pin the preview to portrait + re-sync capture after ANY start: an
+          // iOS-side session/connachment cycle can hand back connections whose rotation
+          // was reset (the "landscape picture in the portrait finder" report).
+          self.syncOutputOrientation()
           completion(.success(true))
         } catch let error as CameraEngineError { completion(.failure(error)) }
         catch { completion(.failure(.configurationFailed)) }
@@ -1003,6 +1007,10 @@ public final class CameraEngineView: ExpoView {
     sessionQueue.async {
       guard self.sessionShouldRun, self.configured, !self.session.isRunning else { return }
       self.session.startRunning()
+      // Interruption restarts can hand back REBUILT connections that lost the rotation
+      // we pinned at configure time — without this the preview came back landscape
+      // inside the portrait finder until the next relaunch.
+      self.syncOutputOrientation()
     }
   }
 
@@ -1017,7 +1025,16 @@ public final class CameraEngineView: ExpoView {
 
   private func syncOutputOrientation() {
     sessionQueue.async { [self] in
-      guard configured, session.isRunning, let orientation = currentDeviceOrientation() else { return }
+      guard configured, session.isRunning else { return }
+      // WINDOW METAPHOR INVARIANT (user-confirmed): the PREVIEW feed is portrait
+      // FOREVER. It used to be pinned only at configure time, so any iOS-side
+      // connection rebuild (interruption restart, foreground return) silently lost the
+      // rotation and the portrait finder showed a landscape picture. Re-pin on EVERY
+      // sync pass — applyRotation is no-change guarded, so this costs nothing when the
+      // angle is already right. The CAPTURE connection below keeps its debounced
+      // physical-orientation logic untouched (landscape hold ⇒ landscape photo).
+      _ = applyRotation(.portrait, to: videoOutput.connection(with: .video))
+      guard let orientation = currentDeviceOrientation() else { return }
       let now = CACurrentMediaTime()
       guard now - lastOrientationSyncAt > 0.3 else { return }
       if applyRotation(orientation, to: output.connection(with: .video)) {
