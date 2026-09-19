@@ -189,6 +189,10 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
 
   const dragState = useRef({ startOpenness: 0, active: false });
   const lastDetentRef = useRef<number | null>(null);
+  // A second finger landed during this gesture: move events are ignored while it is
+  // down (dx anchors to the FIRST touch and jumps when it lifts), and the release is
+  // never treated as a tap.
+  const multiTouchRef = useRef(false);
   const [dragging, setDragging] = useState(false);
   // Mirror for stable reads inside effects/handlers.
   const draggingRef = useRef(false);
@@ -235,6 +239,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
         onStartShouldSetPanResponder: () => dragValuesRef.current.interactive,
         onMoveShouldSetPanResponder: () => dragValuesRef.current.interactive,
         onPanResponderGrant: () => {
+          multiTouchRef.current = false;
           dragState.current = { startOpenness: dragValuesRef.current.openness, active: true };
           dragValuesRef.current.setDraggingState(true);
           lastDetentRef.current = detentIndexFor(dragValuesRef.current.currentAperture);
@@ -242,6 +247,16 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
         onPanResponderMove: (_evt, gestureState) => {
           const v = dragValuesRef.current;
           if (!v.interactive || v.hi <= v.lo) return;
+          if (gestureState.numberActiveTouches !== 1) {
+            multiTouchRef.current = true;
+            return;
+          }
+          if (multiTouchRef.current) {
+            // The extra finger lifted: re-anchor to the band's last sane position so
+            // the survivor's dx (anchored to the FIRST touch) doesn't jump the ring.
+            multiTouchRef.current = false;
+            dragState.current.startOpenness = 1 - tRef.current;
+          }
           // dx > 0 (drag right) = ring turns toward open = higher openness = smaller f-number.
           const newOpenness = clamp(dragState.current.startOpenness + gestureState.dx / FULL_DRAG_PX, 0, 1);
           const f = toF(v.logLo + (1 - newOpenness) * v.span);
@@ -266,14 +281,19 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
           dragState.current.active = false;
           dragValuesRef.current.setDraggingState(false);
           // 轻点（几乎没移动）= 刻度⇄侧视图切换；拖动才调光圈。
-          if (dragValuesRef.current.interactive && Math.abs(gestureState.dx) < 4 && Math.abs(gestureState.dy) < 4) {
+          // A gesture that saw a second finger has unreliable dx — never a tap.
+          const wasMultiTouch = multiTouchRef.current;
+          multiTouchRef.current = false;
+          if (!wasMultiTouch && dragValuesRef.current.interactive && Math.abs(gestureState.dx) < 4 && Math.abs(gestureState.dy) < 4) {
             setViewMode((m) => (m === 'scale' ? 'side' : 'scale'));
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
           }
+          // Settles tRef — the last SINGLE-touch band position, sane even after multi-touch.
           settleAtLastPosition();
         },
         onPanResponderTerminate: () => {
           dragState.current.active = false;
+          multiTouchRef.current = false;
           dragValuesRef.current.setDraggingState(false);
           settleAtLastPosition();
         },

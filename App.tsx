@@ -245,6 +245,10 @@ function CameraAppScreen(): React.JSX.Element {
   // Settle sequence guard: only the LATEST settle's callbacks may write state — a
   // slower earlier settle resolving out of order must not overwrite a newer result.
   const apertureSettleSeqRef = useRef<number>(0);
+  // Focal-switch sequence guard (mirrors the aperture settle guard): the LATEST dial
+  // selection wins; a slower earlier switch must not write state after the newer one
+  // (UI showing one lens while the optics sit on another).
+  const focalSelectSeqRef = useRef<number>(0);
 
   // Rear lens inventory → derived focal stops for the dial (13/26/35/52 on virtual dual,
   // +78/156 on triple; single-wide bodies get 26/35/52).
@@ -284,7 +288,11 @@ function CameraAppScreen(): React.JSX.Element {
   // The trial reservation owned by the capture in flight (shutter → saved photo).
   // Snapshot matches the profile that was active AT SHUTTER TIME, so switching
   // cameras mid-processing still commits to the right counter.
-  const pendingTrialRef = useRef<{ profileId: string; reservedAt: number } | null>(null);
+  // Trial reservations in flight, FIFO: the native pipeline is a serial queue, so
+  // onPhotoProcessed events arrive in capture order and settle the OLDEST reservation.
+  // (A single slot broke under quick double-taps: capture 2's reserve overwrote
+  // capture 1's before capture 1's pipeline event settled.)
+  const pendingTrialQueueRef = useRef<Array<{ profileId: string; reservedAt: number }>>([]);
   // Subscription-stable refs for the photo-processed listener: the effect below must
   // NOT re-subscribe on every trial commit (remove + re-add races a native event
   // fired in between — the exact event the trial count depends on). Refs keep the
@@ -772,12 +780,11 @@ function CameraAppScreen(): React.JSX.Element {
       // Trial bookkeeping (spec §3): ONLY a successfully SAVED photo consumes a
       // free shot. Any pipeline failure rolls the reservation back — the count
       // must survive failed captures untouched.
-      const pending = pendingTrialRef.current;
+      const pending = pendingTrialQueueRef.current.shift();
       if (!event?.ok) {
         const code = String(event?.errorCode ?? 'unknown');
         recordDiag('error', `capture pipeline: FAILED (${code}): ${String(event?.detail ?? '')}`);
         if (pending) {
-          pendingTrialRef.current = null;
           rollbackTrialShotRef.current(pending.profileId);
           recordDiag('info', `trial: rolled back reservation (${pending.profileId})`);
         }
@@ -786,7 +793,6 @@ function CameraAppScreen(): React.JSX.Element {
         return;
       }
       if (pending) {
-        pendingTrialRef.current = null;
         commitTrialShotRef.current(pending.profileId);
         const remaining = TRIAL_LIMIT - (trialUsedRef.current[pending.profileId] ?? 0) - 1;
         recordDiag('info', `trial: committed (${pending.profileId}, remaining=${remaining})`);
@@ -925,17 +931,27 @@ function CameraAppScreen(): React.JSX.Element {
    * out of variable mode when one of them is active.
    */
   const handleSelectFocal = useCallback(async (stop: FocalStop) => {
+    const seq = ++focalSelectSeqRef.current;
+    const superseded = () => seq !== focalSelectSeqRef.current;
     const previousMm = currentFocalMm;
     const previousLens = activeLensRef.current;
     try {
       recordDiag('info', `focal: select ${stop.mm}mm lens=${stop.lens} (zoom=${stop.zoom}) from ${previousMm}mm`);
       await CameraEngine.setLens(stop.lens);
+      // A newer dial selection superseded this one — abandon WITHOUT writing any
+      // state; the winner's own writes land when its awaits resolve.
+      if (superseded()) {
+        recordDiag('info', `focal: select ${stop.mm}mm superseded — abandoned`);
+        return;
+      }
       await CameraEngine.setZoomFactor(stop.zoom, stop.mm);
+      if (superseded()) return;
       activeLensRef.current = stop.lens;
       recordDiag('info', `focal: lens=${stop.lens} zoom ${stop.zoom} applied`);
       setCurrentFocalMm(stop.mm);
       // Input swap changes the aperture capability — re-query and sync the ring state.
       const capabilities = await CameraEngine.getCapabilities();
+      if (superseded()) return;
       capabilitiesRef.current = capabilities;
       const variableMode = capabilities.apertureMode === 'variable';
       setApertureVariable(variableMode);
@@ -959,6 +975,9 @@ function CameraAppScreen(): React.JSX.Element {
         confirmedApertureRef.current = fixed;
       }
     } catch (err: unknown) {
+      // The winning selection owns the state now — a stale failure must not yank
+      // the dial back to this (superseded) switch's origin.
+      if (superseded()) return;
       recordDiag('error', `focal: select ${stop.mm}mm FAILED: ${err instanceof Error ? err.message : String(err)}`);
       // Never leave the dial claiming a focal the optics did not reach.
       if (previousMm != null) setCurrentFocalMm(previousMm);
@@ -975,6 +994,9 @@ function CameraAppScreen(): React.JSX.Element {
     // GRIT N (and any future "free" profile) passes straight through.
     // -------------------------------------------------------------
     const gateProfile = activeProfile;
+    // THIS press's own reservation — the catch path rolls back exactly this one,
+    // never a newer capture's (FIFO queue + per-capture handle).
+    let trialReservation: { profileId: string; reservedAt: number } | null = null;
     if (gateProfile) {
       const access = accessFor(gateProfile.id, isPro, trialUsed, gateProfile);
       if (access.kind === 'requiresPro') {
@@ -987,11 +1009,12 @@ function CameraAppScreen(): React.JSX.Element {
       }
       if (access.kind === 'trial') {
         // A stale reservation (timeout with no pipeline event ever arriving) must
-        // not eat the last slot forever: the 20s capture timeout + margin covers it.
-        const stale = pendingTrialRef.current;
-        if (stale && Date.now() - stale.reservedAt > 30_000) {
-          pendingTrialRef.current = null;
-          rollbackTrialShot(stale.profileId);
+        // not eat slots forever: the 20s capture timeout + margin covers it.
+        const now = Date.now();
+        const stale = pendingTrialQueueRef.current.filter((r) => now - r.reservedAt > 30_000);
+        if (stale.length > 0) {
+          pendingTrialQueueRef.current = pendingTrialQueueRef.current.filter((r) => now - r.reservedAt <= 30_000);
+          stale.forEach((r) => rollbackTrialShot(r.profileId));
         }
         const reserved = reserveTrialShot(gateProfile.id);
         if (!reserved) {
@@ -1000,7 +1023,8 @@ function CameraAppScreen(): React.JSX.Element {
           setPaywall({ source: 'trialExhausted', profileId: gateProfile.id });
           return;
         }
-        pendingTrialRef.current = { profileId: gateProfile.id, reservedAt: Date.now() };
+        trialReservation = { profileId: gateProfile.id, reservedAt: now };
+        pendingTrialQueueRef.current.push(trialReservation);
       }
     }
 
@@ -1048,10 +1072,10 @@ function CameraAppScreen(): React.JSX.Element {
       // A hard capture failure produces no photo → free the reserved trial shot.
       // The TIMEOUT path keeps the reservation: the photo may still save and land
       // in onPhotoProcessed, which is the only place that commits or rolls back.
-      if (!timedOut && pendingTrialRef.current) {
-        const pending = pendingTrialRef.current;
-        pendingTrialRef.current = null;
-        rollbackTrialShot(pending.profileId);
+      if (!timedOut && trialReservation) {
+        const idx = pendingTrialQueueRef.current.indexOf(trialReservation);
+        if (idx >= 0) pendingTrialQueueRef.current.splice(idx, 1);
+        rollbackTrialShot(trialReservation.profileId);
       }
       // A denied add-only photo permission is easy to miss as a 4s banner and reads as
       // "photos don't save" — surface it as a persistent, tappable remediation pill.
