@@ -254,10 +254,13 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
             return;
           }
           if (multiTouchRef.current) {
-            // The extra finger lifted: re-anchor to the band's last sane position so
-            // the survivor's dx (anchored to the FIRST touch) doesn't jump the ring.
+            // The extra finger lifted: re-anchor so this move lands exactly on the
+            // band's last sane position. dx is a gesture-CUMULATIVE total (RN PanResponder
+            // keeps adding through the multi-touch window — it never resets when a finger
+            // lands/lifts), so the anchor must ABSORB the full accumulated dx; re-basing
+            // openness alone would replay the entire drag distance as one jump.
             multiTouchRef.current = false;
-            dragState.current.startOpenness = 1 - tRef.current;
+            dragState.current.startOpenness = 1 - tRef.current - gestureState.dx / FULL_DRAG_PX;
           }
           // dx > 0 (drag right) = ring turns toward open = higher openness = smaller f-number.
           const newOpenness = clamp(dragState.current.startOpenness + gestureState.dx / FULL_DRAG_PX, 0, 1);
