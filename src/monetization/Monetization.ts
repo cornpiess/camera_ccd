@@ -1,6 +1,6 @@
 import { requireNativeModule } from 'expo-modules-core';
 import { recordDiag } from '../utils/diagLog';
-import { MONTHLY_PRODUCT_ID, YEARLY_PRODUCT_ID } from './MonetizationConfig';
+import { MONETIZATION_ENABLED, MONTHLY_PRODUCT_ID, YEARLY_PRODUCT_ID } from './MonetizationConfig';
 
 /**
  * Guarded access to the native Monetization module (StoreKit 2 + Keychain trial
@@ -49,14 +49,14 @@ try {
   recordDiag('error', `Monetization native resolution failed: ${err instanceof Error ? err.message : String(err)}`);
 }
 
-export const monetizationNativeAvailable = native !== null;
+export const monetizationNativeAvailable = native !== null && MONETIZATION_ENABLED;
 
 export function fetchIsPro(): Promise<boolean> {
-  return native ? native.isPro() : Promise.resolve(false);
+  return native && MONETIZATION_ENABLED ? native.isPro() : Promise.resolve(false);
 }
 
 export async function fetchProducts(): Promise<StoreProduct[]> {
-  if (!native) return [];
+  if (!native || !MONETIZATION_ENABLED) return [];
   try {
     const raw = await native.getProducts();
     return raw
@@ -117,7 +117,7 @@ export function getTrialUsedShots(): Record<string, number> {
 }
 
 export function reserveTrialShot(profileID: string): boolean {
-  if (!native) return true;
+  if (!native || !MONETIZATION_ENABLED) return true;
   try {
     return native.reserveTrialShot(profileID);
   } catch {
@@ -126,16 +126,18 @@ export function reserveTrialShot(profileID: string): boolean {
 }
 
 export function commitTrialShot(profileID: string): void {
+  if (!native || !MONETIZATION_ENABLED) return;
   try {
-    native?.commitTrialShot(profileID);
+    native.commitTrialShot(profileID);
   } catch {
     // Best-effort: a lost commit only means one extra free shot — never block saving.
   }
 }
 
 export function rollbackTrialShot(profileID: string): void {
+  if (!native || !MONETIZATION_ENABLED) return;
   try {
-    native?.rollbackTrialShot(profileID);
+    native.rollbackTrialShot(profileID);
   } catch {
     // Same leniency as commit.
   }

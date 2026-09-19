@@ -4,6 +4,7 @@ import * as Haptics from 'expo-haptics';
 import type { CameraProfile } from '../profiles/types';
 import { markerGlyph, profileDisplayName } from './types';
 import { t, tf } from '../i18n';
+import { MONETIZATION_ENABLED } from '../monetization/MonetizationConfig';
 import { SafeGlassView, isGlassAvailable } from './GlassCard';
 import { ProfileConfigModal } from '../calibration/ProfileConfigModal';
 
@@ -127,7 +128,10 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   // uses the CAPPED height so the glass still lands exactly on the capsule at progress 0.
   // The legal footer is part of the panel — its height counts toward the morph math.
   const maxPanelHeight = Math.round(screenHeight * 0.62);
-  const panelHeight = Math.min(profiles.length * ROW_HEIGHT, maxPanelHeight) + FOOTER_HEIGHT + PRO_ROW_HEIGHT;
+  // The Pro row leaves the panel entirely in free builds (MONETIZATION_ENABLED off)
+  // — its height must leave the morph math with it or the glass lands short.
+  const proRowHeight = MONETIZATION_ENABLED ? PRO_ROW_HEIGHT : 0;
+  const panelHeight = Math.min(profiles.length * ROW_HEIGHT, maxPanelHeight) + FOOTER_HEIGHT + proRowHeight;
 
   useEffect(() => {
     animRef.current?.stop();
@@ -348,6 +352,7 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
               {/* 法务入口（固定底栏，不随列表滚动）：用户协议 / 隐私政策 / 支持。
                   全 app 没有独立设置页 —— 相机胶囊 → 本面板是唯一菜单表面，
                   Camera 18 Pro 行因此也住在这里（未订阅 → Paywall；已订阅 → 官方管理）。 */}
+              {MONETIZATION_ENABLED ? (
               <View style={styles.proRowContainer}>
                 <Pressable
                   accessibilityLabel={t('proRowLabel')}
@@ -370,6 +375,7 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                   )}
                 </Pressable>
               </View>
+              ) : null}
               <View style={styles.footer}>                {versionLabel ? (
                   <>
                     <Pressable

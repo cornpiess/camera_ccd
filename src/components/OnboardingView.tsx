@@ -3,6 +3,7 @@ import { Animated, Easing, Modal, Pressable, StyleSheet, Text, View } from 'reac
 import * as Haptics from 'expo-haptics';
 import { t } from '../i18n';
 import type { CameraProfile } from '../profiles/types';
+import { MONETIZATION_ENABLED } from '../monetization/MonetizationConfig';
 import { markerGlyph } from './types';
 
 export const CURRENT_ONBOARDING_VERSION = 1;
@@ -33,6 +34,9 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
 }) => {
   const [page, setPage] = useState<number>(0);
   const marker = useRef(new Animated.Value(0)).current;
+  // Free 1.0.0 build (MONETIZATION_ENABLED off): page 3 IS the free-model page —
+  // it ships only with membership enabled, so onboarding runs as 2 pages.
+  const pageCount = MONETIZATION_ENABLED ? 3 : 2;
 
   useEffect(() => {
     if (!visible) return;
@@ -59,7 +63,7 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
 
   const advance = () => {
     Haptics.selectionAsync().catch(() => {});
-    if (page >= 2) {
+    if (page >= pageCount - 1) {
       finish();
     } else {
       setPage(page + 1);
@@ -77,14 +81,14 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
   return (
     <Modal animationType="fade" onRequestClose={finish} statusBarTranslucent visible={visible}>
       <View style={styles.root}>
-        {page < 2 ? (
+        {page < pageCount - 1 ? (
           <Pressable accessibilityLabel={t('onbSkip')} accessibilityRole="button" hitSlop={12} onPress={finish} style={styles.skip}>
             <Text style={styles.skipText}>{t('onbSkip')}</Text>
           </Pressable>
         ) : null}
 
         <View style={styles.dotsRow}>
-          {[0, 1, 2].map((i) => (
+          {Array.from({ length: pageCount }, (_, i) => (
             <View key={i} style={[styles.dot, i === page && styles.dotActive]} />
           ))}
         </View>
@@ -148,7 +152,7 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
           onPress={advance}
           style={({ pressed }) => [styles.cta, pressed && styles.ctaPressed]}
         >
-          <Text style={styles.ctaText}>{page >= 2 ? t('onbStartShooting') : t('onbContinue')}</Text>
+          <Text style={styles.ctaText}>{page >= pageCount - 1 ? t('onbStartShooting') : t('onbContinue')}</Text>
         </Pressable>
       </View>
     </Modal>

@@ -46,7 +46,7 @@ import { t, type StringKey } from './src/i18n';
 import { MAX_RING_PROFILES } from './src/components/RadialProfileSelector';
 import { accessFor } from './src/monetization/CameraAccessPolicy';
 import { TRIAL_LIMIT } from './src/monetization/MonetizationConfig';
-import { SUBSCRIPTIONS_MANAGE_URL } from './src/monetization/MonetizationConfig';
+import { MONETIZATION_ENABLED, SUBSCRIPTIONS_MANAGE_URL } from './src/monetization/MonetizationConfig';
 import { showManageSubscriptions } from './src/monetization/Monetization';
 import { MonetizationProvider, useMonetization } from './src/monetization/MonetizationProvider';
 import { deriveSkin, isLightColor } from './src/theme/skin';
@@ -1112,6 +1112,7 @@ function CameraAppScreen(): React.JSX.Element {
   // and go straight to Apple's official manage-subscription sheet.
   const handleOpenPro = useCallback(
     (source: 'proBadge' | 'settings') => {
+      if (!MONETIZATION_ENABLED) return;
       if (isPro && source === 'settings') {
         showManageSubscriptions().catch(() => {
           Linking.openURL(SUBSCRIPTIONS_MANAGE_URL).catch(() => {});
@@ -1626,9 +1627,10 @@ function CameraAppScreen(): React.JSX.Element {
             onComplete={handleCompleteOnboarding}
           />
 
-          {/* Camera 18 Pro paywall — intent-gated only (exhausted shutter / explicit tap). */}
+          {/* Camera 18 Pro paywall — intent-gated only (exhausted shutter / explicit
+              tap); fully dark while MONETIZATION_ENABLED is off (free 1.0.0 build). */}
           <PaywallModal
-            visible={paywall !== null}
+            visible={MONETIZATION_ENABLED && paywall !== null}
             source={paywall?.source ?? null}
             onClose={() => setPaywall(null)}
           />

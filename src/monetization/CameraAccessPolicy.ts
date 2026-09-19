@@ -1,5 +1,5 @@
 import type { CameraProfile } from '../profiles/types';
-import { TRIAL_LIMIT } from './MonetizationConfig';
+import { MONETIZATION_ENABLED, TRIAL_LIMIT } from './MonetizationConfig';
 
 /**
  * Pure permission layer (spec §5): the ONLY place capture-vs-paywall decisions are
@@ -28,6 +28,8 @@ export function accessFor(
   trialUsed: Record<string, number>,
   profile?: CameraProfile | null,
 ): CameraAccess {
+  // Kill switch (1.0.0 ships as a fully free app): everything is unlimited.
+  if (!MONETIZATION_ENABLED) return { kind: 'unlimited' };
   // Explicit config override wins (future free cameras declare themselves here).
   const tier = (profile as { accessTier?: unknown } | null | undefined)?.accessTier;
   if (tier === 'free' || profileId === FREE_UNLIMITED_PROFILE_ID) {

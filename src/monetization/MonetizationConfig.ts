@@ -5,6 +5,17 @@
  * USD figures live in App Store Connect and Camera18Pro.storekit only.
  */
 
+/**
+ * MASTER KILL SWITCH. Camera 18 ships 1.0.0 as a fully FREE app (no IAP in the
+ * App Store review build). While false, every membership surface is unreachable:
+ * the policy grants unlimited access to all cameras, no paywall/badges/Pro row,
+ * onboarding drops its trial page, and the JS layer short-circuits all native
+ * StoreKit/Keychain calls. The ENTIRE trial/subscription implementation stays in
+ * the tree — a later version re-enables it by flipping this to true (plus
+ * configuring the products in App Store Connect).
+ */
+export const MONETIZATION_ENABLED = false;
+
 export const MONTHLY_PRODUCT_ID = 'camera18.pro.monthly';
 export const YEARLY_PRODUCT_ID = 'camera18.pro.yearly';
 
