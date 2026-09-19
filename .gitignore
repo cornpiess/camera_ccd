@@ -33,7 +33,9 @@ run10_log.txt
 Camera18_LUT_V0.zip
 
 # 相机模拟分析：第三方 App 反编译产物，禁止公开入库（版权风险）
-相机模拟分析/03_反编译代码/
-相机模拟分析/04_引擎证据/
-相机模拟分析/05_API与数据结构/dex内_API与AILook字符串全集.txt
+相机模拟分析/
+# 本地 AI 工具状态 / 历史备份 / 一次性脚本，不入库
+.mimosa/
+.backup-51-profiles/
+.tmp-*
 .zcode/

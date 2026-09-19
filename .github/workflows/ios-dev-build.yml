@@ -90,7 +90,7 @@ jobs:
           echo "bundleIdentifier = $BID"
           case "$BID" in
             com.example.*|"")
-              echo "::error::bundleIdentifier 是占位值「$BID」。Apple 不允许注册 com.example 前缀，请在 app.json 改成自己的反向域名（如 com.<你的标识>.rainbowcamera）"
+              echo "::error::bundleIdentifier is a placeholder (\"$BID\") - Apple rejects com.example prefix."
               fail=1
               ;;
           esac

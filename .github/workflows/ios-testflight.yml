@@ -324,7 +324,7 @@ jobs:
           echo "bundle=$BID version=$BVER build=$BBUILD name=$BNAME display=$BDISPLAY"
 
           if [ "$BBUILD" != "$EXPECTED_BUILD" ]; then
-            echo "::error::CFBundleVersion=$BBUILD，但本次 run number=$EXPECTED_BUILD —— app.config.js 的 IOS_BUILD_NUMBER 注入没生效。ASC 会因 build number 未递增而拒收这个包。"
+            echo "::error::CFBundleVersion=$BBUILD, expected run number=$EXPECTED_BUILD - app.config.js IOS_BUILD_NUMBER injection failed. ASC rejects a non-increasing build number."
             exit 1
           fi
 

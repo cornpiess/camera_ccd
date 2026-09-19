@@ -297,7 +297,7 @@ public final class MonetizationModule: Module {
       trialStore.rollback(profileID: profileID)
     }
 
-    // TESTING BUILDS ONLY (mirrors the camera-engine CAMER18_TESTING gate): wipe
+    // TESTING BUILDS ONLY (mirrors the camera-engine CAMERA18_TESTING gate): wipe
     // the trial record so 3-shot flows can be re-tested without a reinstall.
     Function("resetTrials") { () -> Bool in
       #if DEBUG || CAMERA18_TESTING
@@ -310,7 +310,15 @@ public final class MonetizationModule: Module {
   }
 
   private func handle(transactionResult: VerificationResult<Transaction>) async {
-    guard case .verified(let transaction) = transactionResult else { return }
+    guard case .verified(let transaction) = transactionResult else {
+      // Unverified signature (spoofed receipt etc.): finish WITHOUT granting any
+      // entitlement — otherwise StoreKit 2 re-delivers the same transaction on
+      // every launch and handle() spins on it forever.
+      if case .unverified(let unverified, _) = transactionResult {
+        await unverified.finish()
+      }
+      return
+    }
     await transaction.finish()
     let pro = await Self.computeIsPro()
     sendEvent("onProChanged", ["isPro": pro])
