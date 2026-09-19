@@ -51,8 +51,11 @@ export interface CameraSelectorProps {
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const ROW_HEIGHT = 56;
 const PANEL_MAX_WIDTH = Math.min(320, Math.round(SCREEN_WIDTH * 0.72));
-// The morph starts from the TopBar capsule's geometry (centered capsule, 44pt tall,
-// just below the SafeArea inset) and blooms into the full panel.
+// The morph starts from the TopBar capsule's geometry (LEFT-anchored capsule —
+// 2026-09-19 layout: capsule leads from the top-left, PRO chip holds the right
+// corner, the Dynamic Island owns the center — 44pt tall, just below the
+// SafeArea inset) and blooms into the full panel.
+const CAPSULE_LEFT = 16;
 const CAPSULE_WIDTH = 210;
 const CAPSULE_HEIGHT = 44;
 const CAPSULE_TOP = 55;
@@ -172,10 +175,14 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   if (!mounted || profiles.length === 0) return null;
   // Transform-origin math (RN scales around the center): pin the scaled panel's top edge
   // onto the capsule's top edge at progress 0, landing exactly on the final bounds at 1.
+  // X-axis (left-anchored layout): capsule and panel share the same left margin, so the
+  // progress-0 offset reduces to half the width difference — same translate-then-scale
+  // composition the Y axis has always used.
   const originTranslateY = CAPSULE_TOP + CAPSULE_HEIGHT / 2 - (PANEL_TOP + panelHeight / 2);
+  const originTranslateX = (CAPSULE_WIDTH - PANEL_MAX_WIDTH) / 2;
   const translateX = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, 0],
+    outputRange: [originTranslateX, 0],
     extrapolate: 'clamp',
   });
   const translateY = progress.interpolate({
@@ -435,9 +442,9 @@ const styles = StyleSheet.create({
   },
   morphHost: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
+    // Left-anchored: the panel blooms out of the top-left capsule, not the center.
+    left: CAPSULE_LEFT,
+    alignItems: 'flex-start',
   },
   morphPanel: {
     width: PANEL_MAX_WIDTH,

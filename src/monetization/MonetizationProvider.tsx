@@ -25,6 +25,8 @@ export interface MonetizationContextValue {
   readonly isPro: boolean;
   readonly products: StoreProduct[];
   readonly productsLoaded: boolean;
+  /** Re-fetch products (StoreKit hiccup / offline at first load → Paywall retry). */
+  reloadProducts(): void;
   /** profileId -> permanently consumed trial shots (in-flight reservations excluded). */
   readonly trialUsed: Record<string, number>;
   purchase(productId: string): Promise<PurchaseOutcome>;
@@ -50,16 +52,21 @@ export const MonetizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setTrialUsed(snapshot);
   }, []);
 
-  useEffect(() => {
-    // Launch sequence (spec §18): entitlement check + products + trial snapshot.
-    // All best-effort — a StoreKit failure must never block the camera.
-    void fetchIsPro().then(setIsPro).catch(() => {});
+  const reloadProducts = useCallback(() => {
+    setProductsLoaded(false);
     void fetchProducts()
       .then((list) => {
         setProducts(list);
         setProductsLoaded(true);
       })
       .catch(() => setProductsLoaded(true));
+  }, []);
+
+  useEffect(() => {
+    // Launch sequence (spec §18): entitlement check + products + trial snapshot.
+    // All best-effort — a StoreKit failure must never block the camera.
+    void fetchIsPro().then(setIsPro).catch(() => {});
+    reloadProducts();
     refreshTrialState();
 
     const sub = addProChangedListener((event) => {
@@ -74,13 +81,14 @@ export const MonetizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       sub.remove();
       appStateSub.remove();
     };
-  }, [refreshTrialState]);
+  }, [refreshTrialState, reloadProducts]);
 
   const value = useMemo<MonetizationContextValue>(
     () => ({
       isPro,
       products,
       productsLoaded,
+      reloadProducts,
       trialUsed,
       purchase: nativePurchase,
       restorePurchases: nativeRestore,
@@ -97,7 +105,7 @@ export const MonetizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       },
       refreshTrialState,
     }),
-    [isPro, products, productsLoaded, trialUsed, refreshTrialState],
+    [isPro, products, productsLoaded, reloadProducts, trialUsed, refreshTrialState],
   );
 
   return <MonetizationContext.Provider value={value}>{children}</MonetizationContext.Provider>;

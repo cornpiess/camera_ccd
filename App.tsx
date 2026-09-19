@@ -285,6 +285,16 @@ function CameraAppScreen(): React.JSX.Element {
   // Snapshot matches the profile that was active AT SHUTTER TIME, so switching
   // cameras mid-processing still commits to the right counter.
   const pendingTrialRef = useRef<{ profileId: string; reservedAt: number } | null>(null);
+  // Subscription-stable refs for the photo-processed listener: the effect below must
+  // NOT re-subscribe on every trial commit (remove + re-add races a native event
+  // fired in between — the exact event the trial count depends on). Refs keep the
+  // listener identity stable while the callbacks stay fresh.
+  const commitTrialShotRef = useRef(commitTrialShot);
+  commitTrialShotRef.current = commitTrialShot;
+  const rollbackTrialShotRef = useRef(rollbackTrialShot);
+  rollbackTrialShotRef.current = rollbackTrialShot;
+  const trialUsedRef = useRef(trialUsed);
+  trialUsedRef.current = trialUsed;
 
   // Persisted camera memory: last profile + per-profile last user-chosen aperture.
   // Loaded async once on mount; restore happens after both profiles and state are ready.
@@ -764,7 +774,7 @@ function CameraAppScreen(): React.JSX.Element {
         recordDiag('error', `capture pipeline: FAILED (${code}): ${String(event?.detail ?? '')}`);
         if (pending) {
           pendingTrialRef.current = null;
-          rollbackTrialShot(pending.profileId);
+          rollbackTrialShotRef.current(pending.profileId);
           recordDiag('info', `trial: rolled back reservation (${pending.profileId})`);
         }
         if (code === 'ERR_PHOTO_PERMISSION_DENIED') setPhotoPermDenied(true);
@@ -773,8 +783,8 @@ function CameraAppScreen(): React.JSX.Element {
       }
       if (pending) {
         pendingTrialRef.current = null;
-        commitTrialShot(pending.profileId);
-        const remaining = TRIAL_LIMIT - (trialUsed[pending.profileId] ?? 0) - 1;
+        commitTrialShotRef.current(pending.profileId);
+        const remaining = TRIAL_LIMIT - (trialUsedRef.current[pending.profileId] ?? 0) - 1;
         recordDiag('info', `trial: committed (${pending.profileId}, remaining=${remaining})`);
         // The 3rd (last) free shot just saved: a LIGHT, non-blocking hint — the
         // paywall only appears on the NEXT shutter press with this camera.
@@ -820,8 +830,7 @@ function CameraAppScreen(): React.JSX.Element {
       }
     });
     return () => sub.remove();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showTransientError, commitTrialShot, rollbackTrialShot, trialUsed]);
+  }, [showTransientError]);
 
   // Profile validation/import/reload errors shown as transient overlay while running
   useEffect(() => {
@@ -1768,8 +1777,9 @@ const styles = StyleSheet.create({
   },
   proEntryChip: {
     position: 'absolute',
-    // Same band as the centered camera capsule (top capsule band ≈ 44pt tall).
-    top: Platform.OS === 'ios' ? STATUS_BAR_HEIGHT + 6 : 8,
+    // Same visual band as the top-left camera capsule — mirrors CameraSelector's
+    // CAPSULE_TOP (the morph anchor the capsule geometry is known to match).
+    top: Platform.OS === 'ios' ? 55 : 8,
     right: 16,
     backgroundColor: '#E8B84B',
     borderRadius: 12,

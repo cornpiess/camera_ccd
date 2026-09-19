@@ -69,6 +69,21 @@ npm run prepackage-check
 11. 重启 App → 自动恢复上次的相机模式。
 12. 三指长按 2s 呼出校准面板 → Diagnostic Log 可加载、可复制。
 
+**顶栏新布局（2026-09-19：胶囊左上 + PRO 右上）**
+- 相机胶囊在左上角、PRO 金标在右上角、灵动岛独占中轴——三者互不遮挡；胶囊与 PRO 基线对齐（截图核对，偏差>3pt 回炉）。
+- 点胶囊 → Liquid Glass 面板从左上胶囊位"长大"展开（morph 起点/缩放贴合，无明显穿帮）；收起时缩回胶囊。
+- 长名称相机（如 M-RF）胶囊不顶到灵动岛/PRO；窄屏机型（SE 375pt）三者不挤压。
+
+**会员流程（MONETIZATION_ENABLED=true）**
+- 首次安装 → 3 页 Onboarding（光圈/8 相机/免费模型）→ Start Shooting → 直接进取景器，**不弹 Paywall**；第二次启动不再出现。
+- GRIT N 无限拍、无徽章；其余 7 台各 3 次免费：列表徽章 3/2/1 LEFT → 用尽显示 PRO（可点击）。
+- 只预览/切换相机不扣数；拍摄失败不扣数；成功保存才扣 1 次；快速连按不突破余量。
+- 第 3 张保存后只出轻提示（不阻断）；第 4 次按快门才弹 Paywall。
+- Paywall：年付默认选中、价格来自 StoreKit（沙盒/测试环境实显）、FOUNDING PRICE 徽标可见；购买成功立即解锁 8 台并自动关 Paywall，**不切回 GRIT N**。
+- 已订阅：右上 PRO chip 消失；相机面板 footer 显示 Camera 18 Pro · Active · Manage → 拉起官方管理页。
+- Restore Purchases：恢复成功/未找到订阅两种提示均正确。
+- StoreKit 商品加载失败（如断网开 Paywall）→ 出现 Retry 按钮，重试后价格出现；相机本身不受影响。
+
 **错误兜底**
 13. 任何错误页面文字可读（截图可诊断），**不允许全黑屏**。
 

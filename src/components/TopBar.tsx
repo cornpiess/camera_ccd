@@ -82,7 +82,11 @@ export const TopBar: React.FC<TopBarProps> = ({
               borderRadius={BADGE_RADIUS}
               isInteractive
               tintColor={accent ?? null}
-              style={[styles.badgeGlass, skin ? { borderWidth: 1, borderColor: skin.border } : null]}
+              style={[
+                styles.badgeGlass,
+                styles.badgeGlassOuter,
+                skin ? { borderWidth: 1, borderColor: skin.border } : null,
+              ]}
             >
               <View style={styles.badgeInner}>
                 {accent ? (
@@ -109,11 +113,19 @@ const styles = StyleSheet.create({
   },
   container: {
     flexDirection: 'row',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     alignItems: 'center',
+    // Top-left placement (product decision 2026-09-19): stacking a centered
+    // camera capsule under the centered Dynamic Island read as "two pills".
+    // The capsule now leads the top band from the left; the PRO chip holds the
+    // right corner. maxWidth keeps a long camera name from crowding the chip /
+    // the island's airspace on narrow screens.
     paddingHorizontal: 16,
     paddingVertical: 8,
     height: 56,
+  },
+  badgeGlassOuter: {
+    maxWidth: 240,
   },
   badgeWrapper: {
     borderRadius: BADGE_RADIUS,

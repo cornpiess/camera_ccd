@@ -35,7 +35,7 @@ const MANAGE_FALLBACK_URL = 'https://apps.apple.com/account/subscriptions';
  * end date passes (old binaries stop advertising a dead offer).
  */
 export const PaywallModal: React.FC<PaywallModalProps> = ({ visible, source, onClose }) => {
-  const { isPro, products, productsLoaded, purchase, restorePurchases } = useMonetization();
+  const { isPro, products, productsLoaded, reloadProducts, purchase, restorePurchases } = useMonetization();
   const [selected, setSelected] = useState<string>(YEARLY_PRODUCT_ID);
   const [busy, setBusy] = useState<boolean>(false);
   const [statusLine, setStatusLine] = useState<string | null>(null);
@@ -57,6 +57,9 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({ visible, source, onC
   const founding = useMemo(() => isFoundingPriceActive(), []);
   const yearly = products.find((p) => p.id === YEARLY_PRODUCT_ID) ?? null;
   const monthly = products.find((p) => p.id === MONTHLY_PRODUCT_ID) ?? null;
+  // StoreKit hiccup / offline at load: offer an explicit retry instead of empty
+  // price cards (the camera itself is unaffected — this is paywall-surface only).
+  const productsEmpty = productsLoaded && products.length === 0;
 
   const handlePurchase = useCallback(async () => {
     if (busy) return;
@@ -134,6 +137,16 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({ visible, source, onC
 
           {renderCard('yearly', YEARLY_PRODUCT_ID, yearly?.displayPrice ?? null, selected === YEARLY_PRODUCT_ID)}
           {renderCard('monthly', MONTHLY_PRODUCT_ID, monthly?.displayPrice ?? null, selected === MONTHLY_PRODUCT_ID)}
+
+          {productsEmpty ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => reloadProducts()}
+              style={({ pressed }) => [styles.retryRow, pressed && styles.ctaPressed]}
+            >
+              <Text style={styles.retryText}>{t('paywallRetry')}</Text>
+            </Pressable>
+          ) : null}
 
           <Pressable
             accessibilityRole="button"
@@ -293,6 +306,20 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     marginTop: 12,
+  },
+  retryRow: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    alignItems: 'center',
+    paddingVertical: 12,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  retryText: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 13,
+    fontWeight: '700',
   },
   footerRow: {
     flexDirection: 'row',

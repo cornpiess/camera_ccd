@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -25,7 +25,7 @@ export const ThreeFingerGestureDetector: React.FC<ThreeFingerGestureDetectorProp
   const progressAnim = useRef(new Animated.Value(0)).current;
   const initialTouchPointsRef = useRef<{ x: number; y: number }[]>([]);
 
-  const cancelGesture = () => {
+  const cancelGesture = useCallback(() => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -33,12 +33,11 @@ export const ThreeFingerGestureDetector: React.FC<ThreeFingerGestureDetectorProp
     progressAnim.stopAnimation();
     progressAnim.setValue(0);
     setIsActive(false);
-  };
+  }, [progressAnim]);
 
   // UNMOUNT SAFETY: a gesture caught mid-hold must not leave its timer alive — it would
   // still fire onTriggerCalibration() 2s later against the unmounted tree.
-  useEffect(() => () => cancelGesture(), []);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => cancelGesture(), [cancelGesture]);
 
   const handleTouchStart = (e: GestureResponderEvent) => {
     const touches = e.nativeEvent.touches;
