@@ -8,10 +8,10 @@
 /**
  * MASTER KILL SWITCH. TRUE as of the 1.0.0 review build (product decision
  * 2026-09-19: ship paid from day one — launch prices $2.99/mo and $14.99/yr,
- * raised to ~$3.99/$19.99+ once the product matures, always with "Keep the
- * current price for existing subscribers" so early users keep the launch price).
- * While false every membership surface is unreachable (fully-free build); the
- * trial/subscription implementation stays in the tree either way.
+ * raised to $3.99/mo and $24.99/yr once the product matures, always with "Keep
+ * the current price for existing subscribers" so early users keep the launch
+ * price). While false every membership surface is unreachable (fully-free
+ * build); the trial/subscription implementation stays in the tree either way.
  */
 export const MONETIZATION_ENABLED = true;
 
@@ -23,11 +23,11 @@ export const TRIAL_LIMIT = 3;
 
 /**
  * FOUNDING PRICE window end (UTC). The launch prices ($2.99/mo, $14.99/yr) ARE
- * the founding tier; when the mature pricing ($3.99/mo, $19.99+/yr) is scheduled
- * in App Store Connect (with "Keep the current price for existing subscribers"),
- * set this to the SAME UTC instant so old binaries stop advertising the founding
- * badge. TODO(product): replace the far-future placeholder with the real date
- * when the raise is scheduled.
+ * the founding tier; when the mature pricing ($3.99/mo, $24.99/yr — decided
+ * 2026-09-19) is scheduled in App Store Connect (with "Keep the current price
+ * for existing subscribers"), set this to the SAME UTC instant so old binaries
+ * stop advertising the founding badge. TODO(product): replace the far-future
+ * placeholder with the real date when the raise is scheduled.
  */
 export const FOUNDING_PRICE_END_DATE = '2027-01-01T00:00:00Z';
 
