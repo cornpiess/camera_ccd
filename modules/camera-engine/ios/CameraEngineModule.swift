@@ -820,6 +820,18 @@ public final class CameraEngineView: ExpoView {
 
   deinit {
     interruptionObservers.forEach(NotificationCenter.default.removeObserver)
+    // KVO observers must not outlive the view: AVCaptureDevice is a process-level
+    // singleton, so a dangling videoZoomFactor observer fires into a deallocated view
+    // on the next zoom change (EXC_BAD_ACCESS). stopCamera's teardown may already have
+    // removed these — the nil checks keep removal idempotent.
+    if let slider = apertureSliderObservedObject {
+      slider.removeObserver(self, forKeyPath: "value")
+      apertureSliderObservedObject = nil
+    }
+    if let observed = zoomKvoObservedDevice {
+      observed.removeObserver(self, forKeyPath: "videoZoomFactor")
+      zoomKvoObservedDevice = nil
+    }
     Self.registrationHandler?(self, false)
   }
 
@@ -1409,6 +1421,15 @@ public final class CameraEngineView: ExpoView {
         }
       )
       self.captureDelegates[id] = delegate
+      // PIPELINE WATCHDOG: delegates are otherwise only evicted by onProcessed — a stalled
+      // permission prompt or a lost PhotoKit callback would burn one of the 3 in-flight
+      // seats forever and eventually brick the shutter (ERR_CAPTURE_BUSY). Evict after 60s;
+      // the JS 20s shutter timeout already reported the failure to the user long before.
+      self.sessionQueue.asyncAfter(deadline: .now() + 60) { [weak self] in
+        if self?.captureDelegates.removeValue(forKey: id) != nil {
+          print("[CameraEngine][Diag] pipeline watchdog: evicted stalled delegate \(id) after 60s")
+        }
+      }
       self.output.capturePhoto(with: photoSettings, delegate: delegate)
     }
   }
@@ -2219,6 +2240,14 @@ private enum CameraTempFiles {
     lock.lock(); let stale = current; current = Set(urls); lock.unlock()
     remove(Array(stale.subtracting(urls)))
   }
+  /// Register files at CREATION time — always before the first byte is written. A capture
+  /// that starts while a previous photo is still mid-pipeline runs removeUntrackedFiles(),
+  /// which would otherwise delete the in-flight files: their keep() only lands after the
+  /// PhotoKit save succeeds, seconds later. Tracked-but-failed URLs are harmless — the
+  /// next successful keep() replaces the whole set.
+  static func track(_ urls: [URL]) {
+    lock.lock(); current.formUnion(urls); lock.unlock()
+  }
   static func remove(_ urls: [URL]) { urls.forEach { try? FileManager.default.removeItem(at: $0) } }
   static func removeUntrackedFiles() {
     lock.lock(); let kept = current; lock.unlock()
@@ -2373,6 +2402,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     Self.processingQueue.async { [self] in
       guard !hasCompleted else { return }
       let fileURL = CameraTempFiles.makeFinalURL(pathExtension: "jpg")
+      CameraTempFiles.track([fileURL])
       completionLock.lock(); generatedURLs = [fileURL]; completionLock.unlock()
       do {
         try photoData.write(to: fileURL, options: .atomic)
@@ -2384,6 +2414,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
       // Thumbnail for the in-app chip only — decode-SMALL via ImageIO (never a full
       // 24MP decode), transform-applied so the chip matches the upright bytes.
       let thumbURL = CameraTempFiles.makeThumbURL()
+      CameraTempFiles.track([thumbURL])
       var thumbOK = false
       if let source = CGImageSourceCreateWithData(photoData as CFData, nil) {
         let thumbOptions: [CFString: Any] = [
@@ -2494,6 +2525,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
         codec = "jpeg"
       }
       completionLock.lock(); generatedURLs = [fileURL, thumbURL]; completionLock.unlock()
+      CameraTempFiles.track([fileURL, thumbURL])
 
       do {
         print("[CameraEngine][Diag] export dims=\(extent.width)x\(extent.height) codec=\(codec) bytes=\(encoded.count) quality=0.95")

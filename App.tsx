@@ -749,8 +749,12 @@ function CameraAppScreen(): React.JSX.Element {
       // base = 13 (ultra-wide) / 26 (wide) / the tele stop's own mm. Snap to nearest stop.
       const base = activeLensRef.current === 'ultrawide' ? 13 : activeLensRef.current === 'tele' ? (teleBaseRef.current ?? 65) : 26;
       const mm = base * zoom;
+      // Lens inventory may not have landed yet (a zoom event can arrive during startup
+      // before getAvailableLenses resolves) — reduce on an empty array would throw.
+      if (focalStops.length === 0) return;
       const nearest = focalStops.reduce((best, stop) =>
         Math.abs(stop.mm - mm) < Math.abs(best.mm - mm) ? stop : best,
+        focalStops[0]!,
       );
       setCurrentFocalMm(nearest.mm);
     });
