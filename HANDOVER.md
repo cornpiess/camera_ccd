@@ -6,9 +6,9 @@
 
 ---
 
-## 快照：交接时的当前状态（2026-09-17，commit `cea290f`）
+## 快照：交接时的当前状态（2026-09-20，commit `782d04c`）
 
-- **最新成功构建：TestFlight build 78**（run number 78，commit `fb3076b`）。**build 78 之后代码又前进了一轮（`f513925`→`cea290f`，5 个 feature/fix + 1 个 CI），尚未出包**——下一轮出包（TestFlight 或 App Store）都会覆盖这批改动，**必须真机回归「七」的清单**。本轮改动一览：
+- **最新成功构建：TestFlight build 78**（run number 78，commit `fb3076b`）。**build 78 之后代码已前进多轮（`f513925`→`782d04c`：变现上线批 + 顶栏/chip 批 + 全量 review 修复轮，均未出包）**——下一轮出包（TestFlight 或 App Store）都会覆盖这批改动，**必须真机回归「七」的清单**。改动一览：
   1. **V-MF 正式管线**：`VMF_HN_33_v2.cube`（color.lut, intensity 1.0）+ **仅成片 deharsh 阶段**（新 schema 字段 `texture.deharsh`，高亮去饱和掩罩、luma 不变、Core Image 官方滤镜）；profile 其余参数按用户规格重校（tone 全中性、微调 hueBands、accent #7F756D）。
   2. **光圈量程探针**：capability 曾只验 ƒ/1.48 一点，真机大光圈端 supportsExposureModeCustom 为 false 时松手被拒回弹。现 `acceptedApertureRange` 按 0.1 档网格全量程探查（format 级查询、按设备 uniqueID 缓存），getCapabilities 上报**实测可接受子区间**为 min/max（UI 刻度端点=硬止挡、Camera Control 滑条同源），settle 越界夹到端点。
   3. **连续滑动回弹修复**：手指所有权总闸（`apertureDraggingRef`）+ settle 序号（`apertureSettleSeqRef`）——拖动期间所有非手指写入者（旧 settle 回调/原生回显含 3s 看门狗/签名光圈回读）静默；只挡 UI 写入，簿记照常。
@@ -20,8 +20,23 @@
   9. **CI**：新增 `ios-appstore.yml`（无测试标志的上架流水线，build number = run number + 10000 防撞号）。**生产配置从未被编译过，它的首跑就是生产代码路径的首次真编译验证。**
   10. **回弹真根因 + 全量 review 加固轮（`24586ab` 起，均未出包）**：松手回弹真根因是 settle 坐标系镜像反转（坑 #19）；选择面板改版——行内签名/固定光圈（主题色/默认色）、几何图案常显主题色、⚙ 设置按钮仅测试模式（7 连点 `testSettingsUnlocked`）、mock 选择区移入 ProfileConfigModal（坑 #15 已更新）；review 加固——tone-audit.js 修复（剥 .cube 后缀 + null LUT 直通，8 台全跑通）、CameraEngine 三个事件监听改走守卫解析（native 缺失降级 no-op 不再同步 throw）、**Swift `setMockApertureMode` 剥掉外层 `#if` 使生产"诚实拒绝"分支真正可达（待 CI 构建验证）**、GlassCard ReduceTransparency 全 app 单订阅、三指手势卸载清理定时器、cameraStateStore 保存串行化、Swift 双 hue-band 中心表加注释禁合并（数值差异是刻意的，合并=改渲染）。
   11. **预览横画面修复 + i18n（`2f76605` 起，均未出包）**：取景框偶发 4:3 横画面——videoOutput 连接的竖向钉住从"仅配置时"改为每次 sync 通道重钉（幂等），启动/中断自愈后各补一次同步；**捕获连接的物理朝向逻辑一行未动**（横持拍横照不变，待 CI 构建验证）。i18n：新增 `src/i18n`（en/zh 词典，iOS SettingsManager 检测系统语言、en 兜底、无应用内切换器），用户可见文案全部走 `t()`（错误、权限说明、加载/失败视图、照片保存 pill、照片查看器、光圈徽标、法务栏）；**开发者面板（⚙ 设置、三指校准、启动崩溃页）刻意保持英文**；法务页面本身仍是中文内容（cornpiess.github.io，链接语言无关——美区上架前需补英文法务页）。
+  12. **变现 1.0.0 直接付费 + 顶栏改版（`2464c5c`→`7472090`，未出包）**：`MONETIZATION_ENABLED` 免费直付总开关 + 首发价 $2.99/$14.99（成熟期 $3.99/$24.99 定稿注释保留订阅老用户）；顶栏胶囊移左上角、PRO ✓ chip 右上角（zIndex 命中修复）。ASC 侧待办见 `.workbuddy/memory/` 与记忆索引。
+  13. **全量 review 修复轮（`24903ba`→`782d04c`，5 提交，未出包；每提交前 `npm run verify` 全绿，Swift 侧经双轮对抗审计）**：
+     - `24903ba` 连拍临时文件竞态：`CameraTempFiles.track()` 写盘前登记保留集，二连拍不再删在途文件；启动 zoom 回调空数组 `reduce` 崩溃守卫；view `deinit` 移除 KVO 观察者（AVCaptureDevice 进程级单例，悬垂 observer=变焦即崩）；后处理 delegate 60s 看门狗（权限弹窗/PhotoKit 卡死不再耗尽 3 席位）。
+     - `b2e47cb` 试用预订单槽→FIFO 队列（`pendingTrialQueueRef`，连拍结算不再错配）；焦段切换 seq 守卫（`focalSelectSeqRef`，快速连点不再 UI/镜头错位）；ApertureBar 多指守卫（`numberActiveTouches`+重锚+抑制误轻点）。
+     - `9348d5b` 删 `activeAperture` 死状态（拖动每 move 减半 setState）+ 光圈带 spring `useNativeDriver: true`（动画上 UI 线程）。
+     - `ab2adf3` 两个 workflow 错误分支 `$VAR` 邻接全角字符改 ASCII（#56 同类雷）；storekit 合法 UUID；podspec 补 CoreMotion/AudioToolbox；StoreKit2 unverified 交易 `finish()`（不授权，只防重投）；`相机模拟分析/`（第三方版权资源）、`.mimosa/`、`.backup-51-profiles/`、`.tmp-rm2.py` 移出 git 跟踪（磁盘保留）。
+     - `782d04c` 二轮审计抓出的回归修复：多指重锚必须**吸收累积 dx**——RN 的 `gestureState.dx` 跨手势累积、第二指落下不清零，只重锚 openness 会把全程拖距重放一遍（跳值并提交硬件）。**待普通 iPhone 真机验证（拖光圈途中落第二指再抬起）。**
+  14. **⚠️ 挂起问题清单（用户 2026-09-20 明确指示「都不要修」——下一手未经用户点头不得动这些）**：
+     - **P1-a** Camera Control 硬快门绕过试用门槛 + `onProcessed` 空回调丢事件（`CameraEngineModule.swift:809`）。修法已评估：复用 `zoomEventSink` 三步接线约 15 行；但**硬快门该不该扣试用额度是产品决策**，未定前不动。
+     - **P1-b** `apertureDemoMode`/`apertureSideView` 死开关（`App.tsx:361/367`，只进校准面板显示、不控制任何行为；定光圈机型光圈环永不可拧，与红线 4 的 DEMO 契约有出入）。接线或删=产品决策。
+     - **P2**（窄窗/体验层，均已定位到行）：`keep()` 整体替换集合在多枪并发下可删在途枪文件（修法=拆 inFlight/kept 两集合）；试用 FIFO 在「免费档混拍 / PhotoKit completion 乱序 / timedOut+30s 清扫」下可错位（根治=事件带 `photoSettings.uniqueID` 按 id 配对）；AppState 恢复路径 `setLens`/`setZoomFactor` 并行 fire-and-forget（`App.tsx:597-598`，改链式+bump seq）；权限 `restricted` 态渲染为无提示黑屏（`App.tsx:1305-1309`）；passthrough 缩略图失败时 JS 线程同步复制全尺寸原图当 chip（`App.tsx:805-815`）；`supportsVariableAperture` 半死状态挂在 `apertureVisual` memo deps（`App.tsx:627`）；ProfileConfigModal LUT 滑块不受 busy 保护；PaywallModal isPro 时打开闪一帧 + 恢复购买无等待文案；ApertureBar 的 `dragState.active` 死字段 / 轻点也发同值 settle / `draggingRef` 无 interactive 翻假兜底 / 卸载无动画清理；RadialProfileSelector 退出动画空转 + >8 档参考环不同心；CalibrationModal 粘贴占位符键名写错（`"version"` 应为 `"schemaVersion"`）；MonetizationProvider `trialUsedRef` 死镜像。
+     - 第一轮起 defer 的一致性/健壮性项仍在：FocusIndicator 旧动画不 stop；validation 数值范围+LUT 存在性校验缺失；ProfileProvider 首载失败空态；径向菜单 clamp 几何；模块级 `Dimensions.get`；CameraSelector 胶囊几何硬编码；chip 文件跨会话累积；4 处 unmount 不清 timer；`modules/camera-engine/index.ts` 全仓零引用（可直接删）；a11y 英文硬编码约 10 处；ACCENT `#E8B84B` 散落 6 处；i18n 死 key `proRowLabel`/`proRowActive`；mf50 的 `color.lut` 带后缀（会触发校准面板 MISSING 误报）。
+     - **memo 化短期清单已备好未实施**（TopBar/FocalCircleRow/ShutterButton/ThumbnailPreview/ApertureBar/FocusIndicator + GlassCard；先固定 inline 回调再 memo，拖动帧 render 数约 30+→约 8）。动之前先固定回调，否则白包。
+
 - 架构不变量仍是：**物理镜头路由**（26/35/52 共用物理主摄只动 zoom，13mm/Tele 才换 input）、**Aperture Manual / Shutter AUTO / ISO AUTO**、快门 promise 与后处理解耦（`onPhotoProcessed`）、ORIG 零渲染直通。**改 Swift 前先读 `AGENTS.md` 坑表（#10–#18）与本文档「四」的坑指南，CI 是唯一编译器。**
 - **多机协作网络**：`api.github.com` 直连通常可用；`github.com` 时好时坏，push/pull 失败走 Clash 代理 `127.0.0.1:7890`（完整手法见 `AGENTS.md` 0.1，**必须在沙箱外执行**）。gh CLI 在 `C:\Program Files\GitHub CLI\gh.exe`（同样要挂 `HTTPS_PROXY`）。**⚠️ 推 `.github/workflows/` 的改动必须直推 github.com（挂代理），gh-proxy 镜像服务端用它自己的凭据转发，永远过不了 workflow scope 校验**（坑 #17）。
+- **⚠️ 推送状态（交接时）**：本轮全部工作（review 修复 5 提交 + 本 handover 提交）在交接时**未推送**——2026-09-19/20 push 连续失败（代理 7890 拒连、直连 reset，按 0.2 纪律停止重试交回用户）。接手第一步：`git status -sb` 看 ahead 数，按 `AGENTS.md` 0.1 手动 push；这批里有 `.github/workflows/` 改动，务必挂代理直推。推送后首次出包即批1/批4 Swift 改动的首次编译验证，红了先看 `CameraEngineModule.swift`（track/watchdog/deinit）与 `MonetizationModule.swift`（unverified finish）。
 - 出包 = 用户明确要求后触发 workflow（`workflow_dispatch`），`gh run watch <id> --exit-status` 监督；CI 连败先读 `AGENTS.md` 1.5。上架提审一律用 `ios-appstore.yml` 的构建（build number = run+10000，好认），**不要拿 TestFlight 构建提审**。
 
 ---
