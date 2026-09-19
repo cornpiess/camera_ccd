@@ -1344,6 +1344,23 @@ function CameraAppScreen(): React.JSX.Element {
                 skin={skin}
                 onPress={() => setIsSelectorOpen(true)}
               />
+              {/* Pro entry, top-right (product decision 2026-09-19: the paid tier
+                  must be one visible tap away, not buried in the camera list).
+                  Hidden once subscribed — management lives in the selector footer. */}
+              {MONETIZATION_ENABLED && !isPro ? (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Camera 18 Pro. Unlock every camera."
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    setPaywall({ source: 'settings', profileId: activeProfile?.id ?? null });
+                  }}
+                  style={styles.proEntryChip}
+                >
+                  <Text style={styles.proEntryChipText}>{t('trialProBadge')}</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           )}
 
@@ -1748,6 +1765,22 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 20,
+  },
+  proEntryChip: {
+    position: 'absolute',
+    // Same band as the centered camera capsule (top capsule band ≈ 44pt tall).
+    top: Platform.OS === 'ios' ? STATUS_BAR_HEIGHT + 6 : 8,
+    right: 16,
+    backgroundColor: '#E8B84B',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  proEntryChipText: {
+    color: '#141414',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1,
   },
   transientErrorContainer: {
     position: 'absolute',
