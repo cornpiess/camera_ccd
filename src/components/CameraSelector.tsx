@@ -4,7 +4,6 @@ import * as Haptics from 'expo-haptics';
 import type { CameraProfile } from '../profiles/types';
 import { markerGlyph, profileDisplayName } from './types';
 import { t, tf } from '../i18n';
-import { MONETIZATION_ENABLED } from '../monetization/MonetizationConfig';
 import { SafeGlassView, isGlassAvailable } from './GlassCard';
 import { ProfileConfigModal } from '../calibration/ProfileConfigModal';
 
@@ -42,10 +41,8 @@ export interface CameraSelectorProps {
    * the paywall at the moment of purchase intent.
    */
   readonly accessForProfile?: (profile: CameraProfile) => { kind: 'unlimited' | 'trial' | 'requiresPro'; remaining?: number };
-  /** Pro status for the footer Pro row; when active the row opens management. */
-  readonly isPro?: boolean;
-  /** Opens the paywall (source 'proBadge' from the badge, 'settings' from the row). */
-  readonly onOpenPro?: (source: 'proBadge' | 'settings') => void;
+  /** Opens the paywall from an exhausted camera's PRO badge (top-right chip is the other entry). */
+  readonly onOpenPro?: (source: 'proBadge') => void;
 }
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -62,8 +59,6 @@ const CAPSULE_TOP = 55;
 const PANEL_TOP = 92;
 // Legal footer pinned under the profile list (用户协议 / 隐私政策 / 支持).
 const FOOTER_HEIGHT = 44;
-// Camera 18 Pro row pinned between the list and the legal footer.
-const PRO_ROW_HEIGHT = 38;
 
 // 协议页面固定挂在 GitHub Pages。open 前按 https + 精确 host/路径形态校验，只放行
 // 本项目自己的三个页面 —— 拼接结果不符合就直接丢弃，绝不交给系统打开。
@@ -115,7 +110,6 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   mockApertureMode,
   onSelectMockApertureMode,
   accessForProfile,
-  isPro = false,
   onOpenPro,
 }: CameraSelectorProps) => {
   // `mounted` keeps the tree alive while the close animation pours the panel back.
@@ -131,10 +125,7 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   // uses the CAPPED height so the glass still lands exactly on the capsule at progress 0.
   // The legal footer is part of the panel — its height counts toward the morph math.
   const maxPanelHeight = Math.round(screenHeight * 0.62);
-  // The Pro row leaves the panel entirely in free builds (MONETIZATION_ENABLED off)
-  // — its height must leave the morph math with it or the glass lands short.
-  const proRowHeight = MONETIZATION_ENABLED ? PRO_ROW_HEIGHT : 0;
-  const panelHeight = Math.min(profiles.length * ROW_HEIGHT, maxPanelHeight) + FOOTER_HEIGHT + proRowHeight;
+  const panelHeight = Math.min(profiles.length * ROW_HEIGHT, maxPanelHeight) + FOOTER_HEIGHT;
 
   useEffect(() => {
     animRef.current?.stop();
@@ -357,32 +348,9 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
               })}
               </ScrollView>
               {/* 法务入口（固定底栏，不随列表滚动）：用户协议 / 隐私政策 / 支持。
-                  全 app 没有独立设置页 —— 相机胶囊 → 本面板是唯一菜单表面，
-                  Camera 18 Pro 行因此也住在这里（未订阅 → Paywall；已订阅 → 官方管理）。 */}
-              {MONETIZATION_ENABLED ? (
-              <View style={styles.proRowContainer}>
-                <Pressable
-                  accessibilityLabel={t('proRowLabel')}
-                  accessibilityRole="button"
-                  onPress={() => {
-                    Haptics.selectionAsync().catch(() => {});
-                    onOpenPro?.('settings');
-                  }}
-                  style={({ pressed }) => [styles.proRow, pressed && styles.proRowPressed]}
-                >
-                  <Text style={styles.proRowName}>{t('proRowLabel')}</Text>
-                  {isPro ? (
-                    <>
-                      <Text style={styles.proRowActive}>{t('proRowActive')}</Text>
-                      <Text style={styles.footerDot}>·</Text>
-                      <Text style={styles.proRowManage}>{t('proRowManage')}</Text>
-                    </>
-                  ) : (
-                    <Text style={styles.proRowChevron}>›</Text>
-                  )}
-                </Pressable>
-              </View>
-              ) : null}
+                  全 app 没有独立设置页 —— 相机胶囊 → 本面板是唯一菜单表面。
+                  （Camera 18 Pro 入口已按用户要求从本面板移除，只保留右上角
+                  chip；已订阅用户的管理入口 = 右上角 PRO ✓ chip。） */}
               <View style={styles.footer}>                {versionLabel ? (
                   <>
                     <Pressable
@@ -529,40 +497,6 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '800',
     letterSpacing: 0.8,
-  },
-  proRowContainer: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255, 255, 255, 0.14)',
-  },
-  proRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 38,
-  },
-  proRowPressed: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  proRowName: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  proRowActive: {
-    color: 'rgba(120, 220, 130, 0.95)',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  proRowManage: {
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  proRowChevron: {
-    color: 'rgba(255, 255, 255, 0.4)',
-    fontSize: 14,
-    fontWeight: '700',
   },
   configButton: {
     width: 30,

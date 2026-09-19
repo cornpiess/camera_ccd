@@ -1355,19 +1355,25 @@ function CameraAppScreen(): React.JSX.Element {
               />
               {/* Pro entry, top-right (product decision 2026-09-19: the paid tier
                   must be one visible tap away, not buried in the camera list).
-                  Hidden once subscribed — management lives in the selector footer. */}
-              {MONETIZATION_ENABLED && !isPro ? (
+                  zIndex MUST beat TopBar's SafeAreaView (10) — the full-width
+                  safe area otherwise swallows taps on the chip (RN hit-testing
+                  does not fall through to non-responder siblings below).
+                  Subscribed: chip becomes the manage-subscriptions entry (the
+                  selector's Pro row was removed at the user's request). */}
+              {MONETIZATION_ENABLED ? (
                 <TouchableOpacity
                   accessibilityRole="button"
-                  accessibilityLabel="Camera 18 Pro. Unlock every camera."
+                  accessibilityLabel={isPro ? 'Camera 18 Pro is active. Manage subscription.' : 'Camera 18 Pro. Unlock every camera.'}
                   activeOpacity={0.8}
                   onPress={() => {
                     Haptics.selectionAsync().catch(() => {});
-                    setPaywall({ source: 'settings', profileId: activeProfile?.id ?? null });
+                    handleOpenPro('settings');
                   }}
-                  style={styles.proEntryChip}
+                  style={[styles.proEntryChip, isPro && styles.proEntryChipActive]}
                 >
-                  <Text style={styles.proEntryChipText}>{t('trialProBadge')}</Text>
+                  <Text style={[styles.proEntryChipText, isPro && styles.proEntryChipTextActive]}>
+                    {`${t('trialProBadge')}${isPro ? ' ✓' : ''}`}
+                  </Text>
                 </TouchableOpacity>
               ) : null}
             </View>
@@ -1588,7 +1594,6 @@ function CameraAppScreen(): React.JSX.Element {
             mockApertureMode={mockApertureMode}
             onSelectMockApertureMode={applyMockApertureMode}
             accessForProfile={accessForProfile}
-            isPro={isPro}
             onOpenPro={handleOpenPro}
           />
 
@@ -1781,16 +1786,26 @@ const styles = StyleSheet.create({
     // CAPSULE_TOP (the morph anchor the capsule geometry is known to match).
     top: Platform.OS === 'ios' ? 55 : 8,
     right: 16,
+    zIndex: 30,
+    elevation: 30,
     backgroundColor: '#E8B84B',
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 7,
+  },
+  proEntryChipActive: {
+    backgroundColor: 'rgba(20, 20, 24, 0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(232, 184, 75, 0.85)',
   },
   proEntryChipText: {
     color: '#141414',
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 1,
+  },
+  proEntryChipTextActive: {
+    color: '#E8B84B',
   },
   transientErrorContainer: {
     position: 'absolute',
