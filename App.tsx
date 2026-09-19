@@ -226,7 +226,6 @@ function CameraAppScreen(): React.JSX.Element {
   // API (iOS 27 setExposureModeCustom(lensAperture:)) takes an arbitrary f-number inside
   // [minAperture, maxAperture]; recommended stops are hints, not limits.
   const [supportsVariableAperture, setSupportsVariableAperture] = useState<boolean>(false);
-  const [activeAperture, setActiveAperture] = useState<number>(1.8);
   const [currentAperture, setCurrentAperture] = useState<number>(1.8);
   const [apertureRange, setApertureRange] = useState<{ min: number; max: number } | null>(null);
   const capabilitiesRef = useRef<CameraCapabilities | null>(null);
@@ -461,7 +460,6 @@ function CameraAppScreen(): React.JSX.Element {
           setApertureVariable(variableMode);
           const aperture = capabilities.activeAperture ?? capabilities.activeLensAperture ?? 1.8;
           confirmedApertureRef.current = aperture;
-          setActiveAperture(aperture);
           setCurrentAperture(aperture);
 
           if (variable) {
@@ -488,7 +486,6 @@ function CameraAppScreen(): React.JSX.Element {
         setSupportsVariableAperture(false);
         setApertureVariable(false);
         confirmedApertureRef.current = 1.8;
-        setActiveAperture(1.8);
         setCurrentAperture(1.8);
         setApertureRange(null);
       }
@@ -675,7 +672,6 @@ function CameraAppScreen(): React.JSX.Element {
           setApertureRange(null);
           const fixed = capabilitiesSnapshot.activeAperture ?? 1.8;
           setCurrentAperture(fixed);
-          setActiveAperture(fixed);
           confirmedApertureRef.current = fixed;
         }
       })
@@ -703,7 +699,6 @@ function CameraAppScreen(): React.JSX.Element {
       confirmedApertureRef.current = clamped;
       if (apertureDraggingRef.current) return;
       setCurrentAperture(clamped);
-      setActiveAperture(clamped);
       if (mockApertureModeRef.current === null) {
         // Real variable hardware: the iris may settle on the nearest physical stop —
         // the UI shows the HARDWARE truth, not the request.
@@ -713,7 +708,6 @@ function CameraAppScreen(): React.JSX.Element {
           confirmedApertureRef.current = real;
           if (!apertureDraggingRef.current) {
             setCurrentAperture(real);
-            setActiveAperture(real);
           }
         }
       }
@@ -748,7 +742,6 @@ function CameraAppScreen(): React.JSX.Element {
       confirmedApertureRef.current = f;
       if (apertureDraggingRef.current) return;
       setCurrentAperture(f);
-      setActiveAperture(f);
     });
     const zoomSub = addZoomChangedListener((event) => {
       const zoom = Number(event?.zoom);
@@ -877,7 +870,6 @@ function CameraAppScreen(): React.JSX.Element {
       return;
     }
     setCurrentAperture(aperture);
-    setActiveAperture(aperture);
   };
 
   // Gesture end → ONE hardware commit (aperture-priority: shutter/ISO stay automatic).
@@ -903,7 +895,6 @@ function CameraAppScreen(): React.JSX.Element {
         confirmedApertureRef.current = clamped;
         if (seq !== apertureSettleSeqRef.current || apertureDraggingRef.current) return;
         setCurrentAperture(clamped);
-        setActiveAperture(clamped);
       })
       .catch((err: unknown) => {
         if (seq !== apertureSettleSeqRef.current) return;
@@ -913,7 +904,6 @@ function CameraAppScreen(): React.JSX.Element {
           return;
         }
         setCurrentAperture(confirmedApertureRef.current);
-        setActiveAperture(confirmedApertureRef.current);
         if (err instanceof CameraEngineError && err.code === 'ERR_APERTURE_UNSUPPORTED') {
           setSupportsVariableAperture(false);
           setApertureDemoMode(true);
@@ -971,7 +961,6 @@ function CameraAppScreen(): React.JSX.Element {
         setApertureRange(null);
         const fixed = capabilities.activeAperture ?? 1.8;
         setCurrentAperture(fixed);
-        setActiveAperture(fixed);
         confirmedApertureRef.current = fixed;
       }
     } catch (err: unknown) {

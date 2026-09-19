@@ -168,7 +168,9 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
         // throws Invariant Violation at mount = white-screen crash on device (build 57).
         friction: 20,
         tension: 130,
-        useNativeDriver: false,
+        // Native driver: translateX only feeds a transform — the spring then runs on
+        // the UI thread, keeping the JS thread free during drags (120Hz move events).
+        useNativeDriver: true,
       }).start();
     },
     [translateX, trackWidth, BAND_SPAN],
