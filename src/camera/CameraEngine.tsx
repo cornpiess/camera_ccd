@@ -38,6 +38,8 @@ export type EngineDiagnostics = {
   deviceModel?: string;
   /** Camera Control side button: method names the installed OS actually exposes (runtime enumeration). */
   cameraControlSurface?: string[];
+  /** Gate-by-gate physical-aperture capability diagnostics (native runtime API discovery). */
+  apertureDiag?: Record<string, unknown> | null;
   /** TRUE on local-dev / TestFlight Beta builds: the mock aperture developer menu is available. */
   testingBuild?: boolean;
 };

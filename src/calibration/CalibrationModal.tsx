@@ -99,6 +99,7 @@ export function CalibrationModal({ visible, onClose, apertureDemoMode = false, o
         `iOS: ${d.osVersion}`,
         `Device: ${d.deviceModel ?? '?'}`,
         `Aperture: ${apertureLine}, active ƒ/${d.activeAperture ?? '?'}`,
+        `Aperture diag: ${d.apertureDiag ? JSON.stringify(d.apertureDiag) : '(not reported — OLD BUILD without the runtime-discovery fix)'}`,
         `Aperture Demo mode: ${apertureDemoMode ? 'ON' : 'OFF'}`,
         `Photos add permission: ${d.photoAddAuthorization}${
           d.photoAddAuthorization === 'denied' ? '  → Settings > Privacy & Security > Photos > Add Photos' : ''
