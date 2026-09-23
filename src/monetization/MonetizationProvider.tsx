@@ -10,6 +10,7 @@ import {
   reserveTrialShot as nativeReserve,
   restorePurchases as nativeRestore,
   rollbackTrialShot as nativeRollback,
+  startStoreKit,
   type PurchaseOutcome,
   type RestoreOutcome,
   type StoreProduct,
@@ -54,6 +55,9 @@ export const MonetizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const reloadProducts = useCallback(() => {
     setProductsLoaded(false);
+    // First monetization touch: open the StoreKit session NOW (launch keeps it
+    // closed so the OS network-permission prompt never fires on a cold start).
+    startStoreKit();
     void fetchProducts()
       .then((list) => {
         setProducts(list);

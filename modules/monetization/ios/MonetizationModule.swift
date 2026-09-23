@@ -147,23 +147,44 @@ public final class MonetizationModule: Module {
   private let trialStore = CameraTrialStore(service: "com.cornpiess.camera18.trials")
   private var updatesTask: Task<Void, Never>?
 
+  /// Starts the Transaction.updates listener exactly once (idempotent). Called
+  /// lazily — never at module creation — so a launch without any monetization
+  /// interaction never opens a StoreKit session (and never asks for network).
+  private func startUpdatesListener() {
+    guard updatesTask == nil else { return }
+    updatesTask = Task.detached { [weak self] in
+      for await update in Transaction.updates {
+        await self?.handle(transactionResult: update)
+      }
+    }
+  }
+
   public func definition() -> ModuleDefinition {
     Name("Monetization")
 
     Events("onProChanged")
 
     OnCreate {
-      // Lifetime StoreKit listener: new purchases, renewals, status changes and
-      // refunds all funnel through here while the app runs.
-      self.updatesTask = Task.detached { [weak self] in
-        for await update in Transaction.updates {
-          await self?.handle(transactionResult: update)
-        }
-      }
+      // DELIBERATELY NOT starting the StoreKit Transaction.updates listener here:
+      // opening the StoreKit session at launch is what triggered the OS
+      // network-permission prompt on first run (user-reported on build 90). An
+      // offline-first camera must not touch the network for merely existing. The
+      // listener starts lazily on the first monetization surface (paywall open /
+      // purchase / restore) via startUpdatesListener().
     }
 
     OnDestroy {
       updatesTask?.cancel()
+    }
+
+    /// Idempotent lazy start of the lifetime StoreKit listener (new purchases,
+    /// renewals, status changes, refunds). Exposed as startStoreKit() and called
+    /// by the JS side when the user first touches a monetization surface.
+    AsyncFunction("startStoreKit") { (promise: Promise) in
+      Task {
+        self.startUpdatesListener()
+        promise.resolve(nil)
+      }
     }
 
     // -- Entitlements -------------------------------------------------------
@@ -207,6 +228,9 @@ public final class MonetizationModule: Module {
     /// {ok:true} | {ok:false, reason:"unverified"|"failed"} | {pending:true} | {cancelled:true}
     AsyncFunction("purchase") { (productID: String, promise: Promise) in
       Task {
+        // The user is buying — StoreKit is on the network now anyway; make sure the
+        // lifetime updates listener runs from here on (renewals/refunds mid-run).
+        self.startUpdatesListener()
         do {
           let products = try await Product.products(for: [productID])
           guard let product = products.first else {
@@ -243,6 +267,7 @@ public final class MonetizationModule: Module {
     /// fresh entitlement pass. {restored:true} when an active subscription exists.
     AsyncFunction("restorePurchases") { (promise: Promise) in
       Task {
+        self.startUpdatesListener()
         do {
           try await AppStore.sync()
         } catch {

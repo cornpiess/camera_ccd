@@ -27,6 +27,7 @@ export type PurchaseOutcome =
 export type RestoreOutcome = { restored: boolean };
 
 type NativeMonetization = {
+  startStoreKit(): Promise<null>;
   isPro(): Promise<boolean>;
   getProducts(): Promise<{ id: string; displayPrice: string; period: string }[]>;
   purchase(productID: string): Promise<Record<string, unknown>>;
@@ -50,6 +51,18 @@ try {
 }
 
 export const monetizationNativeAvailable = native !== null && MONETIZATION_ENABLED;
+
+/**
+ * Lazily open the StoreKit session (Transaction.updates listener). The native side
+ * deliberately does NOT start it at launch — that opened a network connection and
+ * triggered the OS network-permission prompt before the user touched anything
+ * monetization-related. Call this the first time a monetization surface appears.
+ */
+export function startStoreKit(): void {
+  if (native && MONETIZATION_ENABLED) {
+    native.startStoreKit().catch(() => {});
+  }
+}
 
 export function fetchIsPro(): Promise<boolean> {
   return native && MONETIZATION_ENABLED ? native.isPro() : Promise.resolve(false);

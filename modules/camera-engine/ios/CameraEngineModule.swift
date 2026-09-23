@@ -159,8 +159,9 @@ final class ApertureController {
     d.setterName = api.setterName
     d.probeName = api.probeName
 
-    // Gate 1: AE-compensation sentinels (without them an aperture change darkens the frame).
-    d.autoSentinelsOk = api.autoDurationSelector != nil && api.autoIsoSelector != nil && autoSentinels() != nil
+    // Gate 1: AE-compensation sentinels (without them an aperture change darkens the
+    // frame). Class getters OR exported constants (dlsym) — either source counts.
+    d.autoSentinelsOk = autoSentinels() != nil
 
     // Gate 2: non-degenerate variable range on the CURRENT activeFormat.
     if let device, let range = variableApertureRange(device) {
@@ -286,7 +287,12 @@ final class ApertureController {
       "setExposureModeCustomWithISO:lensAperture:duration:",
     ]
     let deviceClass: AnyObject = AVCaptureDevice.self
-    var setterName: String? = setterCandidates.first { deviceClass.responds(to: NSSelectorFromString($0)) }
+    // INSTANCE-method probing (build 90 diag lesson): the candidates are instance
+    // methods, but AVCaptureDevice.self.responds(to:) only answers CLASS methods —
+    // every candidate missed and the alphabetical fallback picked
+    // setExposureModeCustomWithDuration:ISO: (NO aperture argument!). Probe the
+    // instance method table instead.
+    var setterName: String? = setterCandidates.first { class_getInstanceMethod(AVCaptureDevice.self, NSSelectorFromString($0)) != nil }
     if setterName == nil {
       // Only signatures we know how to call (3 or 4 args) — anything else would miscast.
       setterName = hits.first { $0.hasPrefix("set") && $0.contains("ExposureModeCustom") && (arity($0) == 3 || arity($0) == 4) }
@@ -298,7 +304,8 @@ final class ApertureController {
       "supportsExposureModeCustomWithLensAperture:duration:iso:",
     ]
     let formatClass: AnyObject = AVCaptureDevice.Format.self
-    var probeName: String? = probeCandidates.first { formatClass.responds(to: NSSelectorFromString($0)) }
+    // Instance-method probe (same build-90 lesson as the setter above).
+    var probeName: String? = probeCandidates.first { class_getInstanceMethod(AVCaptureDevice.Format.self, NSSelectorFromString($0)) != nil }
     if probeName == nil {
       // Only signatures we know how to call (1 or 3 args) — anything else would miscast.
       probeName = hits.first { $0.hasPrefix("supports") && $0.contains("ExposureModeCustom") && (arity($0) == 1 || arity($0) == 3) }
@@ -357,6 +364,9 @@ final class ApertureController {
         typealias Getter = @convention(c) (AnyObject, Selector) -> Float
         let v = unsafeBitCast(imp, to: Getter.self)(AVCaptureDevice.self as AnyObject, curSel)
         if v.isFinite && v > 0 { apertureArg = v }
+      } else if let v = Self.globalFloat("AVCaptureLensApertureCurrent"), v.isFinite, v > 0 {
+        // Exported-constant form (same build-90 lesson as the auto sentinels).
+        apertureArg = v
       }
       if api.probeArity == 3 {
         typealias Check = @convention(c) (AnyObject, Selector, Float, CMTime, Float) -> ObjCBool
@@ -648,23 +658,44 @@ final class ApertureController {
   /// of producing dark photos. No software exposure compensation exists anywhere.
   private func autoSentinels() -> (duration: CMTime, iso: Float)? {
     let api = discoveredApi()
-    guard let durationSel = api.autoDurationSelector, let isoSel = api.autoIsoSelector else { return nil }
     let deviceClass: AnyObject = AVCaptureDevice.self
-    guard deviceClass.responds(to: durationSel), deviceClass.responds(to: isoSel),
-          let durationImp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), durationSel) as IMP?,
-          let isoImp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), isoSel) as IMP?
-    else { return nil }
-    typealias ClassTimeGetter = @convention(c) (AnyObject, Selector) -> CMTime
-    typealias ClassFloatGetter = @convention(c) (AnyObject, Selector) -> Float
-    let duration = unsafeBitCast(durationImp, to: ClassTimeGetter.self)(deviceClass, durationSel)
-    let iso = unsafeBitCast(isoImp, to: ClassFloatGetter.self)(deviceClass, isoSel)
-    // The duration sentinel is a NON-timestamp by design — Apple's "Auto" CMTime constant
-    // is kCMTimeInvalid-shaped (isValid == false). Rejecting it on isValid (old code)
-    // threw away the real sentinel and demoted every real device to fixed. Only guard
-    // against all-zero garbage from a miscast IMP: respond-checked class getters on
-    // their matching selectors return real CMTime/Float storage.
-    guard iso.isFinite, !(duration.value == 0 && duration.timescale == 0 && duration.flags.rawValue == 0) else { return nil }
-    return (duration, iso)
+    var duration: CMTime?
+    var iso: Float?
+    // Tier 1: dedicated class getters IF a future OS ships them as methods.
+    if let durationSel = api.autoDurationSelector, deviceClass.responds(to: durationSel),
+       let imp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), durationSel) as IMP? {
+      typealias ClassTimeGetter = @convention(c) (AnyObject, Selector) -> CMTime
+      duration = unsafeBitCast(imp, to: ClassTimeGetter.self)(deviceClass, durationSel)
+    }
+    if let isoSel = api.autoIsoSelector, deviceClass.responds(to: isoSel),
+       let imp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), isoSel) as IMP? {
+      typealias ClassFloatGetter = @convention(c) (AnyObject, Selector) -> Float
+      iso = unsafeBitCast(imp, to: ClassFloatGetter.self)(deviceClass, isoSel)
+    }
+    // Tier 2: exported C CONSTANTS. Build 90 real-device diag proved the sentinels
+    // are NOT methods at all (no autoISO/autoExposureDuration selector exists) —
+    // Apple ships them as global constants AVCaptureExposureDurationAuto /
+    // AVCaptureISOAuto (per the iOS 27 setter docs). dlsym reads their storage
+    // with zero compile-time symbol references (AGENTS 1.5-A compliant).
+    if duration == nil { duration = Self.globalCMTime("AVCaptureExposureDurationAuto") }
+    if iso == nil { iso = Self.globalFloat("AVCaptureISOAuto") }
+    guard let d = duration, let i = iso, i.isFinite, i != 0 else { return nil }
+    // The duration sentinel is a NON-timestamp by design (kCMTimeInvalid-shaped) —
+    // never validate it with isValid; only reject all-zero garbage from a miscast.
+    if d.value == 0 && d.timescale == 0 && d.flags.rawValue == 0 { return nil }
+    return (d, i)
+  }
+
+  /// Read an exported global Float constant without any compile-time symbol reference.
+  private static func globalFloat(_ name: String) -> Float? {
+    guard let p = dlsym(dlopen(nil, RTLD_LAZY), name) else { return nil }
+    return p.load(as: Float.self)
+  }
+
+  /// Read an exported global CMTime constant (same dlsym strategy as globalFloat).
+  private static func globalCMTime(_ name: String) -> CMTime? {
+    guard let p = dlsym(dlopen(nil, RTLD_LAZY), name) else { return nil }
+    return p.load(as: CMTime.self)
   }
 }
 
