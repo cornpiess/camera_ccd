@@ -46,8 +46,6 @@ export interface ApertureBarProps {
 const BAR_HEIGHT = 96;
 /** Drag distance spanning the whole range — short enough that ƒ/1.5→ƒ/4 is one quick flick. */
 const FULL_DRAG_PX = 400;
-/** Detent grid: one click per 0.1 f-number (ƒ/1.5 → ƒ/1.6 → …), like a tight lens ring. */
-const FSTEPS_PER_TENTH = 10;
 /** Ruler-style scale: 48 ticks per stop — previous count halved for controllability,
   * while the minimum tick width stays 1px so spacing reads looser, not denser. */
 const TICKS_PER_STOP = 48;
@@ -58,10 +56,26 @@ const IRIS_LEFT = 8;
 const SIDE_WIDTH = 170;
 /** The tick BASELINE: horizontally level with the iris glyph's center (the aperture hole). */
 const TICK_BASELINE = BAR_HEIGHT / 2 - 8; // in trackClip coords (clip starts at top: 8)
+/** Signature marker slot width — the marker centers on its aperture via left: x - width/2. */
+const SIGNATURE_MARKER_WIDTH = 18;
 
 const clamp = (x: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, x));
 const toLog = (f: number): number => Math.log2(f);
 const toF = (log: number): number => Math.pow(2, log);
+/**
+ * Detent quantization (user decision 2026-09-23): the ring snaps VALUE + VISUAL to the
+ * 0.1 f-number grid — the detent set is the 0.1 grid clamped to [lo, hi], plus lo itself
+ * as its own first detent when it is off-grid (iPhone 18 Pro main: 1.48, 1.5, 1.6, … 4).
+ * Everything downstream (display, band, coalesced preview, settle commit, EXIF) receives
+ * the snapped figure — what you see is exactly what the shot records.
+ */
+const snapToF = (f: number, lo: number, hi: number): number => {
+  let best = clamp(Math.round(f * 10) / 10, lo, hi);
+  if (Math.abs(lo * 10 - Math.round(lo * 10)) > 0.05 && Math.abs(lo - f) < Math.abs(best - f)) {
+    best = lo;
+  }
+  return Number(best.toFixed(2));
+};
 /**
  * Wide-open endpoint figure (user decision 2026-09-23): the maximum aperture shows
  * its REAL hardware value ("1.48" on the iPhone 18 Pro main), never its 0.1-grid
@@ -83,8 +97,9 @@ const formatF = (f: number, lo: number, variable: boolean): string => {
  *   fixed pointer) + engaged f-value + signature marker. No side view.
  * - Fixed lens: [ iris hole ]  [ side view ]  ƒ/x.x — display-only; no ticks, no drag.
  *
- * - CONTINUOUS (无极): detents are a FEEL only (haptic per 0.1 f-number crossing) —
- *   the value itself never snaps.
+ * - DETENT SNAPPED (user decision 2026-09-23): the value snaps to the 0.1 f-number
+ *   grid (lo kept exact, e.g. 1.48) — display, band, preview and EXIF all step together
+ *   with one haptic click per detent, like a tight mechanical lens ring.
  */
 export const ApertureBar: React.FC<ApertureBarProps> = ({
   minAperture,
@@ -211,8 +226,12 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
     animateBandTo(t);
   }, [openness, translateX, animateBandTo]);
 
-  // One detent per 0.1 f-number — the user-felt "咔嗒" grid (ƒ/1.5, ƒ/1.6, … ƒ/4.0).
-  const detentIndexFor = useCallback((f: number): number => Math.round(f * FSTEPS_PER_TENTH), []);
+  // One DETENT per 0.1 f-number: the ring's value itself snaps (snapToF) — the click
+  // fires on every snapped-figure change, a firmer knock on full stops.
+  const isFullStop = useCallback(
+    (f: number): boolean => Math.abs(f - toF(Math.round(toLog(f)))) < 1e-6,
+    [],
+  );
 
   const dragState = useRef({ startOpenness: 0, active: false });
   const lastDetentRef = useRef<number | null>(null);
@@ -269,7 +288,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
           multiTouchRef.current = false;
           dragState.current = { startOpenness: dragValuesRef.current.openness, active: true };
           dragValuesRef.current.setDraggingState(true);
-          lastDetentRef.current = detentIndexFor(dragValuesRef.current.currentAperture);
+          lastDetentRef.current = dragValuesRef.current.currentAperture;
         },
         onPanResponderMove: (_evt, gestureState) => {
           const v = dragValuesRef.current;
@@ -289,12 +308,14 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
           }
           // dx > 0 (drag right) = ring turns toward open = higher openness = smaller f-number.
           const newOpenness = clamp(dragState.current.startOpenness + gestureState.dx / FULL_DRAG_PX, 0, 1);
-          const f = toF(v.logLo + (1 - newOpenness) * v.span);
-          // Ring feel: a click per 0.1 f-number crossing, a firmer knock on full stops.
-          const detent = detentIndexFor(f);
-          if (detent !== lastDetentRef.current) {
-            const fullStop = Math.abs(f - toF(Math.round(toLog(f)))) < 1e-6;
-            lastDetentRef.current = detent;
+          // DETENT SNAP: the value, the band and every downstream consumer get the
+          // quantized figure — the ring STEPS 1.48 → 1.5 → 1.6 → … instead of sliding
+          // continuously (user-requested 吸附感; haptic fires once per step below).
+          const f = snapToF(toF(v.logLo + (1 - newOpenness) * v.span), v.lo, v.hi);
+          // Ring feel: a click per detent crossing, a firmer knock on full stops.
+          if (f !== lastDetentRef.current) {
+            const fullStop = isFullStop(f);
+            lastDetentRef.current = f;
             if (fullStop) {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
             } else {
@@ -331,7 +352,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
           settleAtLastPosition();
         },
       }),
-    [detentIndexFor, animateBandTo, snapBandTo],
+    [isFullStop, animateBandTo, snapBandTo],
   );
 
   return (
@@ -384,7 +405,11 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
                 />
               </View>
             ))}
-            {/* Signature (recommended) aperture marker for the CURRENT profile */}
+            {/* Signature (recommended) aperture marker for the CURRENT profile.
+                Redesigned 2026-09-23: the old 5×5 PURE-WHITE dot + near-illegible
+                stacked letters read as "a random white bug dot" on the scale (user
+                report). Now: legible horizontal "SIG" + accent-tinted dot that dims
+                at rest and brightens while dragging — clearly a marker, not a defect. */}
             {(() => {
               const sig = signatureAperture;
               if (typeof sig !== 'number' || !Number.isFinite(sig) || !(hi > lo)) return null;
@@ -392,13 +417,23 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
               if (sigLog < logLo - 1e-6 || sigLog > logHi + 1e-6) return null;
               const x = ((sigLog - logLo) / span) * BAND_SPAN;
               return (
-                <View style={[styles.signatureMarker, { left: x }]} pointerEvents="none">
-                  {['S', 'I', 'G'].map((ch) => (
-                    <Text key={ch} style={[styles.signatureLabel, accent ? { color: accent } : null]}>
-                      {ch}
-                    </Text>
-                  ))}
-                  <View style={[styles.signatureTick, accent ? { backgroundColor: accent } : null]} />
+                <View style={[styles.signatureMarker, { left: x - SIGNATURE_MARKER_WIDTH / 2 }]} pointerEvents="none">
+                  <Text
+                    style={[
+                      styles.signatureLabel,
+                      accent ? { color: accent } : null,
+                      dragging && styles.signatureLabelBright,
+                    ]}
+                  >
+                    SIG
+                  </Text>
+                  <View
+                    style={[
+                      styles.signatureTick,
+                      accent ? { backgroundColor: accent } : null,
+                      dragging && styles.signatureTickBright,
+                    ]}
+                  />
                 </View>
               );
             })()}
@@ -495,20 +530,28 @@ const styles = StyleSheet.create({
   signatureMarker: {
     position: 'absolute',
     bottom: TICK_BASELINE,
-    width: 10,
+    width: SIGNATURE_MARKER_WIDTH,
     alignItems: 'center',
   },
-  // SIG letters stacked top-to-bottom (horizontal "SIG" read like "S-G" on the band).
+  // Horizontal legible "SIG" (the old stacked 8px letters were unreadable and the
+  // marker read as a stray white dot, not a marker).
   signatureLabel: {
-    fontSize: 8,
+    fontSize: 7,
     fontWeight: '800',
-    letterSpacing: 0,
-    lineHeight: 9,
+    letterSpacing: 0.6,
+    color: 'rgba(255, 255, 255, 0.62)',
+  },
+  signatureLabelBright: {
+    color: '#FFFFFF',
   },
   signatureTick: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+    marginTop: 1,
+  },
+  signatureTickBright: {
     backgroundColor: '#FFFFFF',
   },
   valueText: {
