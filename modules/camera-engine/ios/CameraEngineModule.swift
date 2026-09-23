@@ -119,6 +119,10 @@ final class ApertureController {
     var matchedSelectors: [String] = []
     var setterName: String?
     var probeName: String?
+    /// Every format's iris range on this device ("min-max WxH"), deduped — diagnoses an
+    /// activeFormat that publishes a PARTIAL iris range (e.g. 2.8–4.0) while another
+    /// format carries the full one (e.g. 1.48–4.0).
+    var formats: [String] = []
 
     var asDictionary: [String: Any] {
       [
@@ -135,6 +139,7 @@ final class ApertureController {
         "matchedSelectors": matchedSelectors,
         "setterName": setterName ?? NSNull(),
         "probeName": probeName ?? NSNull(),
+        "formats": formats,
       ]
     }
   }
@@ -163,6 +168,24 @@ final class ApertureController {
       d.minAperture = range.min
       d.maxAperture = range.max
       d.stopsCount = range.stops?.count ?? 0
+    }
+
+    // Format inventory (fixed-index loop, 坑 #10): every format's iris range + top photo
+    // dimension, deduped — reveals whether the activeFormat carries a PARTIAL range.
+    if let device {
+      var seen = Set<String>()
+      let allFormats = device.formats
+      for i in 0..<allFormats.count {
+        let f = allFormats[i] as NSObject
+        guard let mn = formatFloat(f, "minLensAperture"),
+              let mx = formatFloat(f, "maxLensAperture") else { continue }
+        var dims = ""
+        if #available(iOS 16.0, *), let d0 = allFormats[i].supportedMaxPhotoDimensions.first {
+          dims = " \(d0.width)x\(d0.height)"
+        }
+        seen.insert(String(format: "%.2f-%.2f%@", mn, mx, dims))
+      }
+      d.formats = seen.sorted()
     }
 
     // Gate 3: the setter exists on THIS device.
@@ -215,6 +238,7 @@ final class ApertureController {
     var probeArity = 0
     var autoDurationSelector: Selector?
     var autoIsoSelector: Selector?
+    var apertureCurrentSelector: Selector?
     var matchedSelectors: [String] = []
   }
 
@@ -287,6 +311,9 @@ final class ApertureController {
       ?? hits.first { $0.hasPrefix("autoExposureDuration") || $0.hasPrefix("AutoExposureDuration") }
     let isoName = isoCandidates.first { deviceClass.responds(to: NSSelectorFromString($0)) }
       ?? hits.first { $0.hasPrefix("autoISO") || $0.hasPrefix("AutoISO") }
+    // "Current" aperture sentinel (for the documented generic priority-support query).
+    let apertureCurrentCandidates = ["currentLensAperture", "lensApertureCurrent"]
+    let apertureCurrentName = apertureCurrentCandidates.first { deviceClass.responds(to: NSSelectorFromString($0)) }
 
     let api = ApertureApi(
       setterName: setterName,
@@ -297,6 +324,7 @@ final class ApertureController {
       probeArity: probeName.map(arity) ?? 0,
       autoDurationSelector: durationName.map { NSSelectorFromString($0) },
       autoIsoSelector: isoName.map { NSSelectorFromString($0) },
+      apertureCurrentSelector: apertureCurrentName.map { NSSelectorFromString($0) },
       matchedSelectors: hits
     )
     ApertureController.apiLock.lock()
@@ -307,25 +335,38 @@ final class ApertureController {
     return api
   }
 
-  /// Dynamic availability check for the iOS 27 aperture/exposure combination. Compiled
-  /// against any SDK (responds + IMP cast); only the CURRENT activeFormat answer counts.
-  /// The selector is the RUNTIME-DISCOVERED probe (see discoveredApi) — arity decides
-  /// the C signature: 3 args = (aperture, duration, iso), 1 arg = aperture-only.
-  private func supportsExposureModeCustom(_ format: NSObject, aperture: Float) -> Bool {
+  /// Documented generic aperture-priority query (Apple docs, iOS 27): the intended use
+  /// of supportsExposureModeCustom(lensAperture:duration:iso:) is to ask which AUTO
+  /// COMBINATIONS are supported — pass the Current aperture sentinel plus the Auto
+  /// duration/ISO sentinels for ONE generic "is aperture-priority supported by this
+  /// format" answer. Numeric arguments are only range-checked, and NOT all priority
+  /// combinations are supported: the previous per-stop numeric grid misread "combination
+  /// unsupported" as "every stop unsupported" (build 89: probe span 0 on iPhone 18 Pro).
+  /// If the Current-sentinel getter can't be discovered, an in-range numeric aperture is
+  /// the fallback (range-check passes; combination answer is what matters).
+  private func supportsAperturePriority(_ format: NSObject, nominalMin: Double) -> Bool {
     if #available(iOS 27.0, *) {
       guard let auto = autoSentinels() else { return false }
       let api = discoveredApi()
       guard let sel = api.probeSelector, format.responds(to: sel),
             let method = format.method(for: sel) else { return false }
+      var apertureArg = Float(nominalMin)
+      if let curSel = api.apertureCurrentSelector,
+         AVCaptureDevice.self.responds(to: curSel),
+         let imp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), curSel) as IMP? {
+        typealias Getter = @convention(c) (AnyObject, Selector) -> Float
+        let v = unsafeBitCast(imp, to: Getter.self)(AVCaptureDevice.self as AnyObject, curSel)
+        if v.isFinite && v > 0 { apertureArg = v }
+      }
       if api.probeArity == 3 {
         typealias Check = @convention(c) (AnyObject, Selector, Float, CMTime, Float) -> ObjCBool
         let fn = unsafeBitCast(method, to: Check.self)
-        return fn(format, sel, aperture, auto.duration, auto.iso).boolValue
+        return fn(format, sel, apertureArg, auto.duration, auto.iso).boolValue
       }
       guard api.probeArity == 1 else { return false }
       typealias Check1 = @convention(c) (AnyObject, Selector, Float) -> ObjCBool
       let fn = unsafeBitCast(method, to: Check1.self)
-      return fn(format, sel, aperture).boolValue
+      return fn(format, sel, apertureArg).boolValue
     }
     // Pre-iOS 27 systems never publish variable-aperture formats in practice.
     return false
@@ -413,54 +454,24 @@ final class ApertureController {
     return nil
   }
 
-  // ACCEPTED-RANGE PROBE: capability used to verify only the wide-open end
-  // (range.min), so hardware whose iris+AE combination stops being supported near the
-  // stopped-down end passed the capability gate yet REJECTED settles there — the screen
-  // ring dragged to ƒ/3.8+ fine, then bounced back to the last confirmed stop on
-  // release (user-reported). The probe walks the whole nominal range once per device on
-  // the same 0.1 f-number grid the UI uses for detents and caches the result.
-  private let probeLock = NSLock()
-  private var probeCacheDeviceID: String?
-  private var probeCacheRange: (min: Double, max: Double)?
+  // CAPABILITY PROBE: per Apple's iOS 27 docs the numeric arguments of
+  // supportsExposureModeCustom(lensAperture:duration:iso:) are only range-checked and
+  // "not all priority mode combinations may be supported" — the previous per-stop
+  // numeric grid misread "combination unsupported" as "every stop unsupported"
+  // (build 89: probe span 0 on real iPhone 18 Pro → wrongly demoted to fixed).
 
-  /// The subrange of the nominal iris range the CURRENT format actually accepts for
-  /// aperture-priority (AE-compensated) exposure. Acceptance is assumed contiguous from
-  /// the wide-open end — a physical diaphragm cannot hold ƒ/2.0 but refuse ƒ/2.1 — so
-  /// the scan stops at the first rejection. Format-level query only, never touches
-  /// hardware state; cached per device uniqueID (the accepted range cannot change
-  /// without a format swap, which this session never performs).
+  /// Whether the CURRENT format accepts aperture-priority (aperture locked, shutter and
+  /// ISO auto) at all — the documented generic query, format-level only, never touches
+  /// hardware state. The nominal iris range [min, max] is then the accepted range; the
+  /// settle path clamps to the end stops and any hardware rejection still surfaces
+  /// honestly (ERR_APERTURE_UNSUPPORTED + JS demotion).
   private func acceptedApertureRange(_ device: AVCaptureDevice) -> (min: Double, max: Double)? {
     guard let nominal = variableApertureRange(device) else { return nil }
     // No probe API exists on this OS (runtime discovery found none): the nominal iris
-    // range IS the accepted range — the settle path clamps to the end stops and any
-    // hardware rejection still surfaces honestly (ERR_APERTURE_UNSUPPORTED + JS demotion).
+    // range IS the accepted range.
     guard discoveredApi().probeSelector != nil else { return (nominal.min, nominal.max) }
-    probeLock.lock()
-    if let cachedID = probeCacheDeviceID, let cachedRange = probeCacheRange, cachedID == device.uniqueID {
-      probeLock.unlock()
-      return cachedRange
-    }
-    probeLock.unlock()
-    // Fixed-index grid walk (AGENTS.md 坑 #10: no element-wise array loops).
-    let gridStep = 0.1
-    let steps = Int(((nominal.max - nominal.min) / gridStep).rounded(.up))
-    var acceptedMax = nominal.min
-    for i in 0...steps {
-      let f = min(nominal.min + Double(i) * gridStep, nominal.max)
-      if supportsExposureModeCustom(device.activeFormat, aperture: Float(f)) {
-        acceptedMax = f
-      } else {
-        break
-      }
-    }
-    probeLock.lock()
-    probeCacheDeviceID = device.uniqueID
-    probeCacheRange = (nominal.min, acceptedMax)
-    probeLock.unlock()
-    if acceptedMax < nominal.max - 1e-9 {
-      print("[CameraEngine][Diag] accepted aperture range: ƒ/\(acceptedMax) (nominal max ƒ/\(nominal.max)) — UI scale will end at the accepted stop")
-    }
-    return (nominal.min, acceptedMax)
+    return supportsAperturePriority(device.activeFormat as NSObject, nominalMin: nominal.min)
+      ? (nominal.min, nominal.max) : nil
   }
 
   /// The lens's real mechanical aperture (the only aperture a fixed lens has).
@@ -565,14 +576,10 @@ final class ApertureController {
     // (format swapped under us): re-verify the clamped target and drop the cache so the
     // next capability pass re-probes.
     let clampedTarget = Float(min(max(fStop, accepted.min), accepted.max))
-    // APERTURE PRIORITY GUARD: the format must accept (target aperture + auto shutter +
+    // APERTURE PRIORITY GUARD: the format must accept (aperture locked + auto shutter +
     // auto ISO). Shutter and ISO are NEVER locked — Apple auto exposure compensates the
     // light change, so .quality still gets full multi-frame fusion (user directive).
-    if !supportsExposureModeCustom(device.activeFormat, aperture: clampedTarget) {
-      probeLock.lock()
-      probeCacheDeviceID = nil
-      probeCacheRange = nil
-      probeLock.unlock()
+    if !supportsAperturePriority(device.activeFormat as NSObject, nominalMin: accepted.min) {
       mode = .fixed
       DispatchQueue.main.async { completion(.failure(.apertureUnsupported)) }
       return
@@ -596,15 +603,12 @@ final class ApertureController {
       let imp = device.method(for: setterSel)
       let gate = SettleOnceGate(completion: completion)
       if api.setterArity == 4 {
-        typealias ApertureSetter = @convention(c) (NSObject, Selector, Float, CMTime, Float, ((Error?) -> Void)?) -> Void
+        // Per Apple docs the completion handler receives a TIMESTAMP (CMTime), not an
+        // error — its invocation alone is the ack that the custom exposure was applied.
+        typealias ApertureSetter = @convention(c) (NSObject, Selector, Float, CMTime, Float, ((CMTime) -> Void)?) -> Void
         let fn = unsafeBitCast(imp, to: ApertureSetter.self)
-        fn(device, setterSel, target, auto.duration, auto.iso) { error in
-          if let error = error {
-            gate.settle(.failure(.configurationFailed))
-            print("[CameraEngine] setExposureModeCustom(lensAperture:) rejected: \(error.localizedDescription)")
-          } else {
-            gate.settle(.success(()))
-          }
+        fn(device, setterSel, target, auto.duration, auto.iso) { _ in
+          gate.settle(.success(()))
         }
       } else if api.setterArity == 3 {
         // 3-arg variant has no completion handler — the watchdog below settles the
@@ -654,7 +658,12 @@ final class ApertureController {
     typealias ClassFloatGetter = @convention(c) (AnyObject, Selector) -> Float
     let duration = unsafeBitCast(durationImp, to: ClassTimeGetter.self)(deviceClass, durationSel)
     let iso = unsafeBitCast(isoImp, to: ClassFloatGetter.self)(deviceClass, isoSel)
-    guard duration.isValid, iso.isFinite else { return nil }
+    // The duration sentinel is a NON-timestamp by design — Apple's "Auto" CMTime constant
+    // is kCMTimeInvalid-shaped (isValid == false). Rejecting it on isValid (old code)
+    // threw away the real sentinel and demoted every real device to fixed. Only guard
+    // against all-zero garbage from a miscast IMP: respond-checked class getters on
+    // their matching selectors return real CMTime/Float storage.
+    guard iso.isFinite, !(duration.value == 0 && duration.timescale == 0 && duration.flags.rawValue == 0) else { return nil }
     return (duration, iso)
   }
 }
@@ -2108,7 +2117,7 @@ public final class CameraEngineView: ExpoView {
       let diag = controller.lastCapabilityDiag()
       caps["apertureDiag"] = diag.asDictionary
       if apertureMode == .fixed {
-        let summary = "fixed: sentinels=\(diag.autoSentinelsOk) range=\(diag.rangeOk)(\(diag.minAperture)-\(diag.maxAperture)) setter=\(diag.setterOk) probe=\(diag.probeOk)/\(diag.probeApiExists) span=\(diag.probeSpan) stops=\(diag.stopsCount) matched[\(diag.matchedSelectors.count)]"
+        let summary = "fixed: sentinels=\(diag.autoSentinelsOk) range=\(diag.rangeOk)(\(diag.minAperture)-\(diag.maxAperture)) setter=\(diag.setterOk) probe=\(diag.probeOk)/\(diag.probeApiExists) span=\(diag.probeSpan) stops=\(diag.stopsCount) matched[\(diag.matchedSelectors.count)] formats=\(diag.formats.joined(separator: " | "))"
         NSLog("[CameraEngine][ApertureDiag] %@", summary as NSString)
       }
       if apertureMode == .fixed {
