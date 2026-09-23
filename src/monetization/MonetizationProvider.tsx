@@ -63,10 +63,13 @@ export const MonetizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, []);
 
   useEffect(() => {
-    // Launch sequence (spec §18): entitlement check + products + trial snapshot.
+    // Launch sequence (spec §18): entitlement check + trial snapshot.
     // All best-effort — a StoreKit failure must never block the camera.
+    // NOTE: products are NOT fetched here on purpose. Product.products(for:) is the
+    // only launch-time call that hits the App Store network, and on first run it
+    // triggers the OS network-permission prompt — an offline-first camera must not
+    // ask for network just for existing. The paywall loads products on open instead.
     void fetchIsPro().then(setIsPro).catch(() => {});
-    reloadProducts();
     refreshTrialState();
 
     const sub = addProChangedListener((event) => {
@@ -81,7 +84,7 @@ export const MonetizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       sub.remove();
       appStateSub.remove();
     };
-  }, [refreshTrialState, reloadProducts]);
+  }, [refreshTrialState]);
 
   const value = useMemo<MonetizationContextValue>(
     () => ({

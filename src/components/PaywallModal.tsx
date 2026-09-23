@@ -50,9 +50,13 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({ visible, source, onC
     if (visible) {
       setStatusLine(null);
       setBusy(false);
+      // Products load HERE, not at app launch: Product.products(for:) is the one
+      // StoreKit call that hits the App Store network, and the OS network-permission
+      // prompt must only ever appear when the user actually opens the paywall.
+      if (!productsLoaded) reloadProducts();
       if (source) recordDiag('info', `paywall: presented (source=${source})`);
     }
-  }, [visible, source]);
+  }, [visible, source, productsLoaded, reloadProducts]);
 
   const founding = useMemo(() => isFoundingPriceActive(), []);
   const yearly = products.find((p) => p.id === YEARLY_PRODUCT_ID) ?? null;

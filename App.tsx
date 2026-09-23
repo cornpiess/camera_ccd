@@ -14,6 +14,7 @@ import {
   Modal,
   Platform,
   PanResponder,
+  SafeAreaView,
   Text,
   TouchableOpacity,
   useWindowDimensions,
@@ -1383,20 +1384,24 @@ function CameraAppScreen(): React.JSX.Element {
                   Subscribed: chip becomes the manage-subscriptions entry (the
                   selector's Pro row was removed at the user's request). */}
               {MONETIZATION_ENABLED ? (
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel={isPro ? 'Camera 18 Pro is active. Manage subscription.' : 'Camera 18 Pro. Unlock every camera.'}
-                  activeOpacity={0.8}
-                  onPress={() => {
-                    Haptics.selectionAsync().catch(() => {});
-                    handleOpenPro('settings');
-                  }}
-                  style={[styles.proEntryChip, isPro && styles.proEntryChipActive]}
-                >
-                  <Text style={[styles.proEntryChipText, isPro && styles.proEntryChipTextActive]}>
-                    {`${t('trialProBadge')}${isPro ? ' ✓' : ''}`}
-                  </Text>
-                </TouchableOpacity>
+                <SafeAreaView style={styles.proEntrySafe} pointerEvents="box-none">
+                  <View style={styles.proEntryBand} pointerEvents="box-none">
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel={isPro ? 'Camera 18 Pro is active. Manage subscription.' : 'Camera 18 Pro. Unlock every camera.'}
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        Haptics.selectionAsync().catch(() => {});
+                        handleOpenPro('settings');
+                      }}
+                      style={[styles.proEntryChip, isPro && styles.proEntryChipActive]}
+                    >
+                      <Text style={[styles.proEntryChipText, isPro && styles.proEntryChipTextActive]}>
+                        {`${t('trialProBadge')}${isPro ? ' ✓' : ''}`}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </SafeAreaView>
               ) : null}
             </View>
           )}
@@ -1802,14 +1807,29 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 20,
   },
-  proEntryChip: {
+  // The chip mirrors TopBar's geometry (SafeAreaView + a 56pt band, vertically
+  // centered) so it lines up with the camera capsule BY CONSTRUCTION — no magic
+  // top offset can stay aligned across notches / Dynamic Islands.
+  proEntrySafe: {
     position: 'absolute',
-    // Same visual band as the top-left camera capsule — mirrors CameraSelector's
-    // CAPSULE_TOP (the morph anchor the capsule geometry is known to match).
-    top: Platform.OS === 'ios' ? 55 : 8,
-    right: 16,
+    top: 0,
+    right: 0,
+    // zIndex MUST beat TopBar's SafeAreaView (10) — the full-width safe area
+    // otherwise swallows taps on the chip (RN hit-testing does not fall through
+    // to non-responder siblings below).
     zIndex: 30,
     elevation: 30,
+    backgroundColor: 'transparent',
+    paddingTop: Platform.OS === 'ios' ? 0 : StatusBar.currentHeight ?? 0,
+  },
+  proEntryBand: {
+    height: 56,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    paddingRight: 16,
+    backgroundColor: 'transparent',
+  },
+  proEntryChip: {
     backgroundColor: '#E8B84B',
     borderRadius: 12,
     paddingHorizontal: 12,
