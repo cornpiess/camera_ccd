@@ -62,7 +62,18 @@ const TICK_BASELINE = BAR_HEIGHT / 2 - 8; // in trackClip coords (clip starts at
 const clamp = (x: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, x));
 const toLog = (f: number): number => Math.log2(f);
 const toF = (log: number): number => Math.pow(2, log);
-const formatF = (f: number): string => `ƒ/${f.toFixed(1).replace(/\.0$/, '')}`;
+/**
+ * Wide-open endpoint figure (user decision 2026-09-23): the maximum aperture shows
+ * its REAL hardware value ("1.48" on the iPhone 18 Pro main), never its 0.1-grid
+ * rounding; every other stop keeps the one-decimal ring feel (1.5, 1.6, … 4).
+ * Applies to the variable ring only — a fixed lens keeps its one-decimal figure.
+ */
+const formatF = (f: number, lo: number, variable: boolean): string => {
+  if (variable && Math.abs(f - lo) < 0.025 && Math.abs(lo * 10 - Math.round(lo * 10)) > 0.05) {
+    return `ƒ/${lo.toFixed(2)}`;
+  }
+  return `ƒ/${f.toFixed(1).replace(/\.0$/, '')}`;
+};
 
 /**
  * The aperture strip — the product's hero control. All elements are bound to the ONE
@@ -129,6 +140,13 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   const ticks = useMemo(() => {
     const list: { key: string; x: number; major: boolean; half: boolean; label?: string }[] = [];
     if (!(hi > lo)) return list;
+    // Wide-open endpoint tick: when the range floor is NOT on the 0.1 grid (1.48 on
+    // the iPhone 18 Pro main), it still gets its own labeled tick — the scale then
+    // reads 1.48, 1.5, 1.6, … exactly like the hardware's real figures.
+    const loOnGrid = Math.abs(lo * 10 - Math.round(lo * 10)) < 0.05;
+    if (!loOnGrid) {
+      list.push({ key: 'lo-endpoint', x: 0, major: true, half: false, label: lo.toFixed(2) });
+    }
     const firstTick = Math.ceil(logLo * TICKS_PER_STOP);
     const lastTick = Math.floor(logHi * TICKS_PER_STOP);
     for (let k = firstTick; k <= lastTick; k++) {
@@ -176,6 +194,13 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
     [translateX, trackWidth, BAND_SPAN],
   );
   const tRef = useRef(0);
+  /** Drag-path band placement: 1:1 with the finger (no spring, no latency). */
+  const snapBandTo = useCallback(
+    (t: number) => {
+      translateX.setValue(trackWidth / 2 - t * BAND_SPAN);
+    },
+    [translateX, trackWidth, BAND_SPAN],
+  );
   useEffect(() => {
     // JUMP FIX: while the finger owns the ring, native settle echoes / capability
     // reloads push a DIFFERENT f-number through props; animating to it mid-drag is
@@ -276,10 +301,13 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
             }
           }
-          // The band CHASES the finger through the damped spring (target, not 1:1).
+          // DRAG = 1:1 tracking (setValue, zero latency on the UI thread). The old
+          // damped-spring chase read as "the number moves first, the band catches up
+          // later" (user-reported on real hardware); the mechanical-inertia spring is
+          // now reserved for NON-drag moves (lens swap / capability reload settle).
           const t = clamp((toLog(f) - v.logLo) / v.span, 0, 1);
           tRef.current = t;
-          animateBandTo(t);
+          snapBandTo(t);
           v.onApertureChange(Number(f.toFixed(2)));
         },
         onPanResponderRelease: (_evt, gestureState) => {
@@ -303,7 +331,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
           settleAtLastPosition();
         },
       }),
-    [detentIndexFor, animateBandTo],
+    [detentIndexFor, animateBandTo, snapBandTo],
   );
 
   return (
@@ -329,7 +357,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
           ]}
           numberOfLines={1}
         >
-          {formatF(currentAperture)}
+          {formatF(currentAperture, lo, isVariableAperture)}
         </Text>
       ) : null}
 
@@ -377,7 +405,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
           </Animated.View>
           {/* engaged value rides above the pointer (element 2) */}
           <Text style={[styles.valueText, { top: 3 }, accent ? { color: accent } : null]} numberOfLines={1}>
-            {formatF(currentAperture)}
+            {formatF(currentAperture, lo, isVariableAperture)}
           </Text>
           {/* THE pointer: thin, centered on the tick baseline (= the aperture-hole axis) */}
           <View

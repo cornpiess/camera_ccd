@@ -821,6 +821,13 @@ public final class CameraEngineModule: Module {
       }
     }
 
+    AsyncFunction("setApertureCoalesced") { (fStop: Double, promise: Promise) in
+      guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
+      view.setApertureCoalesced(fStop, controller: self.apertureController) { result in
+        self.settle(result, promise)
+      }
+    }
+
     AsyncFunction("setFocusPoint") { (x: Double, y: Double, promise: Promise) in
       guard let view = self.activeView else { self.reject(promise, .noActiveView); return }
       view.setFocusPoint(x: x, y: y) { result in
@@ -1780,6 +1787,31 @@ public final class CameraEngineView: ExpoView {
           // numerically in sync through this single channel.
           Self.apertureEventSink?(Double(fStop))
         }
+        completion(result)
+      }
+    }
+  }
+
+  /// Drag-PREVIEW aperture (screen ring mid-drag): coalesced to at most one
+  /// lockForConfiguration per 0.12s window (trailing value wins) — the exact path the
+  /// Camera Control slider uses, so the viewfinder reacts live while dragging without
+  /// flooding the session queue. The ring's RELEASE still settles through the
+  /// authoritative single-commit setAperture above.
+  fileprivate func setApertureCoalesced(_ fStop: Double, controller: ApertureController, completion: @escaping (Result<Void, CameraEngineError>) -> Void) {
+    sessionQueue.async {
+      #if DEBUG || CAMERA18_TESTING
+      if controller.mockOverride == .variable {
+        Self.apertureEventSink?(Double(fStop))
+        DispatchQueue.main.async { completion(.success(())) }
+        return
+      }
+      #endif
+      guard let device = self.camera else {
+        completion(.failure(.cameraUnavailable))
+        return
+      }
+      controller.requestCoalescedPhysicalAperture(Float(fStop), on: device) { result in
+        if case .success = result { self.apertureMode = controller.mode }
         completion(result)
       }
     }

@@ -143,13 +143,16 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({ visible, source, onC
           {renderCard('monthly', MONTHLY_PRODUCT_ID, monthly?.displayPrice ?? null, selected === MONTHLY_PRODUCT_ID)}
 
           {productsEmpty ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => reloadProducts()}
-              style={({ pressed }) => [styles.retryRow, pressed && styles.ctaPressed]}
-            >
-              <Text style={styles.retryText}>{t('paywallRetry')}</Text>
-            </Pressable>
+            <View style={styles.retryBlock}>
+              <Text style={styles.retryHint}>{t('paywallOfflineHint')}</Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => reloadProducts()}
+                style={({ pressed }) => [styles.retryRow, pressed && styles.ctaPressed]}
+              >
+                <Text style={styles.retryText}>{t('paywallRetry')}</Text>
+              </Pressable>
+            </View>
           ) : null}
 
           <Pressable
@@ -310,6 +313,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     marginTop: 12,
+  },
+  retryBlock: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  retryHint: {
+    color: 'rgba(255, 255, 255, 0.55)',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 10,
+    marginBottom: 2,
   },
   retryRow: {
     borderRadius: 14,

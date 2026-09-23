@@ -865,17 +865,21 @@ function CameraAppScreen(): React.JSX.Element {
   // -------------------------------------------------------------
   // 8. Hardware Actions: Aperture, Photo Capture
   // -------------------------------------------------------------
-  // Per-move: update the UI ONLY so the marker tracks the finger at touch rate. The
-  // hardware commit happens exactly once per gesture in handleApertureSettle — the old
-  // code called CameraEngine.setAperture on EVERY move event, queueing dozens of
-  // lockForConfiguration commands on the native session queue per drag (capture lag
-  // right after a drag, and a command storm on real variable-aperture hardware).
+  // Per-move: update the UI so the marker tracks the finger at touch rate, AND push a
+  // COALESCED preview to the hardware (native side merges to ≤1 lockForConfiguration
+  // per 0.12s, trailing wins) so the viewfinder brightens/darkens live while dragging.
+  // The authoritative commit still happens exactly once per gesture in
+  // handleApertureSettle — per-move calls are fire-and-forget by design.
   const handleApertureChange = (aperture: number) => {
     if (!apertureVariable) {
       // Fixed devices without the demo ring never move.
       return;
     }
-    setCurrentAperture(aperture);
+    // Idempotence guard: skip the whole-tree re-render when the displayed value
+    // (2-dec display precision) did not change.
+    setCurrentAperture((prev) => (Math.abs(prev - aperture) < 0.005 ? prev : aperture));
+    // Real hardware only (apertureVariable implies it): live coalesced preview.
+    CameraEngine.setApertureCoalesced(aperture).catch(() => {});
   };
 
   // Gesture end → ONE hardware commit (aperture-priority: shutter/ISO stay automatic).

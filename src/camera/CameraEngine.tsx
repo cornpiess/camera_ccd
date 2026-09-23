@@ -102,6 +102,12 @@ type NativeCameraEngine = {
   stopCamera(): Promise<void>;
   capturePhoto(equivalentMM: number): Promise<CapturedPhoto>;
   setAperture(fStop: number): Promise<void>;
+  /**
+   * Drag-preview aperture: coalesced natively (≤1 lockForConfiguration / 0.12s,
+   * trailing value wins) so mid-drag viewfinder updates never flood the session
+   * queue. Release still settles via setAperture (authoritative single commit).
+   */
+  setApertureCoalesced(fStop: number): Promise<void>;
   /** Normalized (0..1) tap position in the video frame; keeps AF/AE continuous around that point. */
   setFocusPoint(x: number, y: number): Promise<void>;
   getCapabilities(): Promise<CameraCapabilities>;
@@ -197,6 +203,7 @@ const unavailableModule: NativeCameraEngine = {
   stopCamera: () => Promise.reject(unavailableError()),
   capturePhoto: () => Promise.reject(unavailableError()),
   setAperture: () => Promise.reject(unavailableError()),
+  setApertureCoalesced: () => Promise.reject(unavailableError()),
   setFocusPoint: () => Promise.reject(unavailableError()),
   getCapabilities: () => Promise.reject(unavailableError()),
   getDiagnostics: () => Promise.reject(unavailableError()),
@@ -232,6 +239,7 @@ export const startCamera = (): Promise<boolean> => typed(NativeModule.startCamer
 export const stopCamera = (): Promise<void> => typed(NativeModule.stopCamera());
 export const capturePhoto = (equivalentMM: number): Promise<CapturedPhoto> => typed(NativeModule.capturePhoto(equivalentMM));
 export const setAperture = (fStop: number): Promise<void> => typed(NativeModule.setAperture(fStop));
+export const setApertureCoalesced = (fStop: number): Promise<void> => typed(NativeModule.setApertureCoalesced(fStop));
 export const setFocusPoint = (x: number, y: number): Promise<void> => typed(NativeModule.setFocusPoint(x, y));
 export const getCapabilities = (): Promise<CameraCapabilities> => typed(NativeModule.getCapabilities());
 export const getDiagnostics = (): Promise<EngineDiagnostics> => typed(NativeModule.getDiagnostics());
@@ -282,6 +290,7 @@ export const CameraEngine = {
   stopCamera,
   capturePhoto,
   setAperture,
+  setApertureCoalesced,
   setFocusPoint,
   getCapabilities,
   getDiagnostics,
@@ -300,6 +309,7 @@ export type CameraEngineHandle = {
   stopCamera: typeof stopCamera;
   capturePhoto: typeof capturePhoto;
   setAperture: typeof setAperture;
+  setApertureCoalesced: typeof setApertureCoalesced;
   setFocusPoint: typeof setFocusPoint;
   getCapabilities: typeof getCapabilities;
   getDiagnostics: typeof getDiagnostics;
@@ -336,6 +346,7 @@ export const CameraEngineView = forwardRef<CameraEngineHandle, CameraEngineViewP
     stopCamera,
     capturePhoto,
     setAperture,
+    setApertureCoalesced,
     setFocusPoint,
     getCapabilities,
     getDiagnostics,
