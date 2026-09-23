@@ -14,6 +14,8 @@ export type CameraCapabilities = {
   deviceModel: string;
   /** Capability-driven aperture mode: variable = real iris; fixed = single mechanical aperture. */
   apertureMode?: 'variable' | 'fixed';
+  /** Gate-by-gate physical-aperture diagnostics (runtime API discovery) — surfaced in the diag log. */
+  apertureDiag?: Record<string, unknown> | null;
   supportsRAW: boolean;
   supportsProRAW: boolean;
   /** Compatibility alias for activeAperture. */

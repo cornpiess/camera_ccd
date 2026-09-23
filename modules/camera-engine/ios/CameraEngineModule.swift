@@ -8,6 +8,7 @@ import CoreMotion
 import AudioToolbox
 import UIKit
 import MetalKit
+import ObjectiveC
 
 // MARK: - Shared GPU context (red line: exactly ONE CIContext for the whole engine)
 /// One Metal device + one CIContext shared by the WYSIWYG preview and the capture pipeline.
@@ -88,44 +89,243 @@ final class ApertureController {
   var mockOverride: ApertureMode?
 #endif
 
-  /// Capability detection: physical iff the CURRENT device + activeFormat satisfy ALL of
-  /// - non-degenerate variable-aperture range (min < max),
-  /// - recommendedLensApertureStops.count > 1 (the system publishes real detents),
-  /// - the exposure setter exists on this OS,
-  /// - the AE-probed ACCEPTED aperture subrange (see acceptedApertureRange) spans
-  ///   ≥ 0.3 f-number — the probe walks the WHOLE range once per device, not just the
-  ///   wide-open end, so formats whose iris+AE support stops short of nominal max
-  ///   report fixed-capable only where the hardware can actually commit.
+  /// Capability detection — RUNTIME-DISCOVERED API surface (see discoveredApi() below for
+  /// why nothing is hardcoded). Variable iff the CURRENT device + activeFormat satisfy ALL of
+  /// - non-degenerate variable-aperture range on the active format (min < max),
+  /// - the exposure setter exists on this device (discovered selector),
+  /// - the live auto sentinels are obtainable (AE must compensate aperture changes),
+  /// - when a format-level probe API exists: the probed ACCEPTED aperture subrange spans
+  ///   ≥ 0.3 f-number. When NO probe API exists on this OS, the span gate is skipped and
+  ///   the nominal range is trusted — the settle path clamps to the end stops and any
+  ///   hardware rejection still surfaces honestly (ERR_APERTURE_UNSUPPORTED + JS demotion).
+  /// recommendedLensApertureStops is NOT a gate anymore: a format that publishes a range
+  /// but no detents is still variable (the JS layer derives a ladder from min/max).
   /// No device names anywhere — a future variable-aperture iPhone needs zero code changes.
+
+  /// Gate-by-gate result of the last capability evaluation, surfaced through
+  /// getCapabilities("apertureDiag") so the in-app diag log shows exactly WHY a real
+  /// device resolved fixed (the previous session had no iPhone 18 Pro to test against).
+  struct CapabilityDiag {
+    var autoSentinelsOk = false
+    var rangeOk = false
+    var setterOk = false
+    var probeOk = false
+    var probeApiExists = false
+    var probeSpan: Double = 0
+    var stopsCount = 0
+    var minAperture: Double = 0
+    var maxAperture: Double = 0
+    var variable = false
+    var matchedSelectors: [String] = []
+    var setterName: String?
+    var probeName: String?
+
+    var asDictionary: [String: Any] {
+      [
+        "autoSentinels": autoSentinelsOk,
+        "range": rangeOk,
+        "setter": setterOk,
+        "probe": probeOk,
+        "probeApiExists": probeApiExists,
+        "probeSpan": probeSpan,
+        "stopsCount": stopsCount,
+        "minAperture": minAperture,
+        "maxAperture": maxAperture,
+        "variable": variable,
+        "matchedSelectors": matchedSelectors,
+        "setterName": setterName ?? NSNull(),
+        "probeName": probeName ?? NSNull(),
+      ]
+    }
+  }
+
+  private let diagLock = NSLock()
+  private var lastDiagStorage = CapabilityDiag()
+
+  func lastCapabilityDiag() -> CapabilityDiag {
+    diagLock.lock(); defer { diagLock.unlock() }
+    return lastDiagStorage
+  }
+
+  func evaluateCapability(for device: AVCaptureDevice?) -> CapabilityDiag {
+    let api = discoveredApi()
+    var d = CapabilityDiag()
+    d.matchedSelectors = api.matchedSelectors
+    d.setterName = api.setterName
+    d.probeName = api.probeName
+
+    // Gate 1: AE-compensation sentinels (without them an aperture change darkens the frame).
+    d.autoSentinelsOk = api.autoDurationSelector != nil && api.autoIsoSelector != nil && autoSentinels() != nil
+
+    // Gate 2: non-degenerate variable range on the CURRENT activeFormat.
+    if let device, let range = variableApertureRange(device) {
+      d.rangeOk = true
+      d.minAperture = range.min
+      d.maxAperture = range.max
+      d.stopsCount = range.stops?.count ?? 0
+    }
+
+    // Gate 3: the setter exists on THIS device.
+    if let sel = api.setterSelector {
+      d.setterOk = device?.responds(to: sel) == true
+    }
+
+    var variable = d.autoSentinelsOk && d.rangeOk && d.setterOk
+    if variable {
+      if api.probeSelector != nil {
+        d.probeApiExists = true
+        if let device, let accepted = acceptedApertureRange(device) {
+          d.probeSpan = accepted.max - accepted.min
+          d.probeOk = d.probeSpan >= 0.3
+          variable = d.probeOk
+        } else {
+          variable = false
+        }
+      }
+      // else: no probe API on this OS → span gate skipped (see doc comment above).
+    }
+    d.variable = variable
+    diagLock.lock(); lastDiagStorage = d; diagLock.unlock()
+    return d
+  }
+
   func capabilityMode(for device: AVCaptureDevice?) -> ApertureMode {
-    // NECESSARY CONDITION: the real autoExposureDuration/autoISO sentinels must be
-    // obtainable — without them AE cannot compensate aperture changes and the frame
-    // darkens (frozen shutter/ISO). Capability = range + stops + setter + probed
-    // accepted subrange + live auto sentinels. All of it, or simulated.
     #if DEBUG || CAMERA18_TESTING
     if let mock = mockOverride { return mock }
     #endif
-    guard autoSentinels() != nil else { return .fixed }
-    guard let device,
-          let range = variableApertureRange(device),
-          (range.stops?.count ?? 0) > 1,
-          device.responds(to: NSSelectorFromString("setExposureModeCustomWithLensAperture:duration:ISO:completionHandler:")),
-          let accepted = acceptedApertureRange(device),
-          accepted.max - accepted.min >= 0.3
-    else { return .fixed }
-    return .variable
+    return evaluateCapability(for: device).variable ? .variable : .fixed
+  }
+
+  // MARK: Runtime API-surface discovery
+  //
+  // The aperture selectors were authored from memory without any iPhone 18 Pro in the
+  // loop (AGENTS 1.5-A trap). TestFlight build 88 — the FIRST run on real hardware —
+  // resolved Fixed, meaning at least one responds(to:) gate failed on-device. From now
+  // on NOTHING is trusted: the REAL selector surface of AVCaptureDevice /
+  // AVCaptureDevice.Format is enumerated once at runtime; the setter / probe /
+  // sentinels are resolved from that surface (the spelling candidates below are only
+  // first guesses, each answers before use). The result is mirrored into matchedSelectors
+  // in the diag payload so the actual on-device API names are readable from the app.
+  private struct ApertureApi {
+    var setterName: String?
+    var setterSelector: Selector?
+    var setterArity = 0
+    var probeName: String?
+    var probeSelector: Selector?
+    var probeArity = 0
+    var autoDurationSelector: Selector?
+    var autoIsoSelector: Selector?
+    var matchedSelectors: [String] = []
+  }
+
+  private static let apiLock = NSLock()
+  private static var cachedApi: ApertureApi?
+
+  private func discoveredApi() -> ApertureApi {
+    ApertureController.apiLock.lock()
+    if let cached = ApertureController.cachedApi {
+      ApertureController.apiLock.unlock()
+      return cached
+    }
+    ApertureController.apiLock.unlock()
+
+    // Enumerate every instance + class method of the two classes that own the iOS 27
+    // aperture surface. Fixed-index loop; the buffer MUST be freed (坑 #10 discipline).
+    var names = Set<String>()
+    func scan(_ cls: AnyClass, classMethods: Bool) {
+      guard let target = classMethods ? object_getClass(cls) : cls else { return }
+      var count: UInt32 = 0
+      if let list = class_copyMethodList(target, &count) {
+        for i in 0..<Int(count) {
+          let c = sel_getName(method_getName(list[i]))
+          names.insert(String(cString: c))
+        }
+        free(list)
+      }
+    }
+    scan(AVCaptureDevice.self, classMethods: false)
+    scan(AVCaptureDevice.self, classMethods: true)
+    scan(AVCaptureDevice.Format.self, classMethods: false)
+
+    let keywords = ["aperture", "Aperture", "ExposureModeCustom", "autoISO", "AutoISO", "autoExposure", "AutoExposure"]
+    let hits = names.filter { s in keywords.contains { s.contains($0) } }.sorted()
+
+    func arity(_ name: String) -> Int { name.filter { $0 == ":" }.count }
+
+    // Setter: device-level method that sets custom exposure WITH a lens aperture.
+    // Candidates first (historical spellings), then anything the surface actually has.
+    let setterCandidates = [
+      "setExposureModeCustomWithLensAperture:duration:ISO:completionHandler:",
+      "setExposureModeCustomWithLensAperture:duration:ISO:",
+      "setExposureModeCustomWithLensAperture:duration:iso:completionHandler:",
+      "setExposureModeCustomWithLensAperture:duration:iso:",
+      "setExposureModeCustomWithISO:lensAperture:duration:",
+    ]
+    let deviceClass: AnyObject = AVCaptureDevice.self
+    var setterName: String? = setterCandidates.first { deviceClass.responds(to: NSSelectorFromString($0)) }
+    if setterName == nil {
+      // Only signatures we know how to call (3 or 4 args) — anything else would miscast.
+      setterName = hits.first { $0.hasPrefix("set") && $0.contains("ExposureModeCustom") && (arity($0) == 3 || arity($0) == 4) }
+    }
+
+    // Probe: format-level "supports…" query with an aperture argument (may not exist at all).
+    let probeCandidates = [
+      "supportsExposureModeCustomWithLensAperture:duration:ISO:",
+      "supportsExposureModeCustomWithLensAperture:duration:iso:",
+    ]
+    let formatClass: AnyObject = AVCaptureDevice.Format.self
+    var probeName: String? = probeCandidates.first { formatClass.responds(to: NSSelectorFromString($0)) }
+    if probeName == nil {
+      // Only signatures we know how to call (1 or 3 args) — anything else would miscast.
+      probeName = hits.first { $0.hasPrefix("supports") && $0.contains("ExposureModeCustom") && (arity($0) == 1 || arity($0) == 3) }
+    }
+
+    // Auto sentinels: class-level getters.
+    let durationCandidates = ["autoExposureDuration", "autoExposureDurationCurrent", "defaultAutoExposureDuration"]
+    let isoCandidates = ["autoISO", "autoISOCurrent", "defaultAutoISO"]
+    let durationName = durationCandidates.first { deviceClass.responds(to: NSSelectorFromString($0)) }
+      ?? hits.first { $0.hasPrefix("autoExposureDuration") || $0.hasPrefix("AutoExposureDuration") }
+    let isoName = isoCandidates.first { deviceClass.responds(to: NSSelectorFromString($0)) }
+      ?? hits.first { $0.hasPrefix("autoISO") || $0.hasPrefix("AutoISO") }
+
+    let api = ApertureApi(
+      setterName: setterName,
+      setterSelector: setterName.map { NSSelectorFromString($0) },
+      setterArity: setterName.map(arity) ?? 0,
+      probeName: probeName,
+      probeSelector: probeName.map { NSSelectorFromString($0) },
+      probeArity: probeName.map(arity) ?? 0,
+      autoDurationSelector: durationName.map { NSSelectorFromString($0) },
+      autoIsoSelector: isoName.map { NSSelectorFromString($0) },
+      matchedSelectors: hits
+    )
+    ApertureController.apiLock.lock()
+    ApertureController.cachedApi = api
+    ApertureController.apiLock.unlock()
+    let summary = "setter=\(setterName ?? "none") probe=\(probeName ?? "none") autoDur=\(durationName ?? "none") autoISO=\(isoName ?? "none") matched[\(hits.count)]=\(hits.joined(separator: ", "))"
+    NSLog("[CameraEngine][ApertureDiag] api discovered: %@", summary as NSString)
+    return api
   }
 
   /// Dynamic availability check for the iOS 27 aperture/exposure combination. Compiled
   /// against any SDK (responds + IMP cast); only the CURRENT activeFormat answer counts.
+  /// The selector is the RUNTIME-DISCOVERED probe (see discoveredApi) — arity decides
+  /// the C signature: 3 args = (aperture, duration, iso), 1 arg = aperture-only.
   private func supportsExposureModeCustom(_ format: NSObject, aperture: Float) -> Bool {
     if #available(iOS 27.0, *) {
-      let sel = NSSelectorFromString("supportsExposureModeCustomWithLensAperture:duration:ISO:")
       guard let auto = autoSentinels() else { return false }
-      guard format.responds(to: sel), let method = format.method(for: sel) else { return false }
-      typealias Check = @convention(c) (AnyObject, Selector, Float, CMTime, Float) -> ObjCBool
-      let fn = unsafeBitCast(method, to: Check.self)
-      return fn(format, sel, aperture, auto.duration, auto.iso).boolValue
+      let api = discoveredApi()
+      guard let sel = api.probeSelector, format.responds(to: sel),
+            let method = format.method(for: sel) else { return false }
+      if api.probeArity == 3 {
+        typealias Check = @convention(c) (AnyObject, Selector, Float, CMTime, Float) -> ObjCBool
+        let fn = unsafeBitCast(method, to: Check.self)
+        return fn(format, sel, aperture, auto.duration, auto.iso).boolValue
+      }
+      guard api.probeArity == 1 else { return false }
+      typealias Check1 = @convention(c) (AnyObject, Selector, Float) -> ObjCBool
+      let fn = unsafeBitCast(method, to: Check1.self)
+      return fn(format, sel, aperture).boolValue
     }
     // Pre-iOS 27 systems never publish variable-aperture formats in practice.
     return false
@@ -231,6 +431,10 @@ final class ApertureController {
   /// without a format swap, which this session never performs).
   private func acceptedApertureRange(_ device: AVCaptureDevice) -> (min: Double, max: Double)? {
     guard let nominal = variableApertureRange(device) else { return nil }
+    // No probe API exists on this OS (runtime discovery found none): the nominal iris
+    // range IS the accepted range — the settle path clamps to the end stops and any
+    // hardware rejection still surfaces honestly (ERR_APERTURE_UNSUPPORTED + JS demotion).
+    guard discoveredApi().probeSelector != nil else { return (nominal.min, nominal.max) }
     probeLock.lock()
     if let cachedID = probeCacheDeviceID, let cachedRange = probeCacheRange, cachedID == device.uniqueID {
       probeLock.unlock()
@@ -381,8 +585,8 @@ final class ApertureController {
       return
     }
     let target = clampedTarget
-    let setterSel = NSSelectorFromString("setExposureModeCustomWithLensAperture:duration:ISO:completionHandler:")
-    guard device.responds(to: setterSel) else {
+    let api = discoveredApi()
+    guard let setterSel = api.setterSelector, device.responds(to: setterSel) else {
       completion(.failure(.apertureUnsupported))
       return
     }
@@ -390,16 +594,28 @@ final class ApertureController {
       try device.lockForConfiguration()
       defer { device.unlockForConfiguration() }
       let imp = device.method(for: setterSel)
-      typealias ApertureSetter = @convention(c) (NSObject, Selector, Float, CMTime, Float, ((Error?) -> Void)?) -> Void
-      let fn = unsafeBitCast(imp, to: ApertureSetter.self)
       let gate = SettleOnceGate(completion: completion)
-      fn(device, setterSel, target, auto.duration, auto.iso) { error in
-        if let error = error {
-          gate.settle(.failure(.configurationFailed))
-          print("[CameraEngine] setExposureModeCustom(lensAperture:) rejected: \(error.localizedDescription)")
-        } else {
-          gate.settle(.success(()))
+      if api.setterArity == 4 {
+        typealias ApertureSetter = @convention(c) (NSObject, Selector, Float, CMTime, Float, ((Error?) -> Void)?) -> Void
+        let fn = unsafeBitCast(imp, to: ApertureSetter.self)
+        fn(device, setterSel, target, auto.duration, auto.iso) { error in
+          if let error = error {
+            gate.settle(.failure(.configurationFailed))
+            print("[CameraEngine] setExposureModeCustom(lensAperture:) rejected: \(error.localizedDescription)")
+          } else {
+            gate.settle(.success(()))
+          }
         }
+      } else if api.setterArity == 3 {
+        // 3-arg variant has no completion handler — the watchdog below settles the
+        // promise; the next getCapabilities re-reads the hardware truth for display.
+        typealias ApertureSetter = @convention(c) (NSObject, Selector, Float, CMTime, Float) -> Void
+        let fn = unsafeBitCast(imp, to: ApertureSetter.self)
+        fn(device, setterSel, target, auto.duration, auto.iso)
+      } else {
+        // Discovered setter with a signature we cannot call safely — honest failure.
+        gate.settle(.failure(.apertureUnsupported))
+        return
       }
       DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
         // The optimistic UI already shows the chosen f-stop; getCapabilities re-reads
@@ -427,8 +643,8 @@ final class ApertureController {
   /// real auto sentinels, physical aperture control FAILS with a clear error instead
   /// of producing dark photos. No software exposure compensation exists anywhere.
   private func autoSentinels() -> (duration: CMTime, iso: Float)? {
-    let durationSel = NSSelectorFromString("autoExposureDuration")
-    let isoSel = NSSelectorFromString("autoISO")
+    let api = discoveredApi()
+    guard let durationSel = api.autoDurationSelector, let isoSel = api.autoIsoSelector else { return nil }
     let deviceClass: AnyObject = AVCaptureDevice.self
     guard deviceClass.responds(to: durationSel), deviceClass.responds(to: isoSel),
           let durationImp = class_getMethodImplementation(object_getClass(AVCaptureDevice.self), durationSel) as IMP?,
@@ -1887,6 +2103,14 @@ public final class CameraEngineView: ExpoView {
       controller.mode = apertureMode
       self.apertureMode = apertureMode
       caps["apertureMode"] = apertureMode == .variable ? "variable" : "fixed"
+      // Gate-by-gate capability diagnostics: the in-app diag log (⚙ test panel) and
+      // NSLog (Mac Console.app) both carry WHY the device resolved its mode.
+      let diag = controller.lastCapabilityDiag()
+      caps["apertureDiag"] = diag.asDictionary
+      if apertureMode == .fixed {
+        let summary = "fixed: sentinels=\(diag.autoSentinelsOk) range=\(diag.rangeOk)(\(diag.minAperture)-\(diag.maxAperture)) setter=\(diag.setterOk) probe=\(diag.probeOk)/\(diag.probeApiExists) span=\(diag.probeSpan) stops=\(diag.stopsCount) matched[\(diag.matchedSelectors.count)]"
+        NSLog("[CameraEngine][ApertureDiag] %@", summary as NSString)
+      }
       if apertureMode == .fixed {
         let fixedAperture = controller.currentAperture(device)
         caps["minAperture"] = Double(fixedAperture)

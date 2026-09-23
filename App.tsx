@@ -443,6 +443,11 @@ function CameraAppScreen(): React.JSX.Element {
       try {
         const capabilities: CameraCapabilities = await CameraEngine.getCapabilities();
         capabilitiesRef.current = capabilities;
+        if (capabilities.apertureDiag) {
+          // Real-device forensics (⚙ test panel → View diag log): which capability gate
+          // failed and the actual iOS 27 aperture API names the runtime discovered.
+          recordDiag('info', `apertureDiag: ${JSON.stringify(capabilities.apertureDiag)}`);
+        }
         if (capabilities) {
           // iOS 27 quirk guard: a fixed-aperture lens that still publishes a near-degenerate
           // lens-aperture range must NOT flip the ring into hardware mode — with a tiny span
