@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { t } from '../i18n';
@@ -64,6 +64,26 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({ visible, source, onC
   // StoreKit hiccup / offline at load: offer an explicit retry instead of empty
   // price cards (the camera itself is unaffected — this is paywall-surface only).
   const productsEmpty = productsLoaded && products.length === 0;
+
+  // AUTO-RETRY (user-reported 2026-09-24): on the FIRST paywall open the OS
+  // network-permission dialog appears mid-request and that fetch fails even though
+  // the user then grants permission — the price cards stayed empty until a manual
+  // Retry tap. Two automatic backoff reloads (800ms / 2.5s) swallow that failure
+  // window; the manual Retry button only remains after both come back empty.
+  const autoRetryRef = useRef(0);
+  useEffect(() => {
+    if (!visible) {
+      autoRetryRef.current = 0;
+      return;
+    }
+    if (!productsEmpty || autoRetryRef.current >= 2) return;
+    const delay = autoRetryRef.current === 0 ? 800 : 2500;
+    const timer = setTimeout(() => {
+      autoRetryRef.current += 1;
+      reloadProducts();
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [visible, productsEmpty, reloadProducts]);
 
   const handlePurchase = useCallback(async () => {
     if (busy) return;

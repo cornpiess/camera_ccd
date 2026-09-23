@@ -2896,6 +2896,8 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
           "appliedZoom": self.appliedZoom,
           "equivalentFocal": self.equivalentFocalMM,
           "codec": codec,
+          // Shutter-time iris reading for on-device triage (EXIF FNumber source).
+          "apertureAtShutter": self.apertureAtShutter,
         ]))
       }
     }
@@ -2939,11 +2941,17 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
     }
     // FNumber truth: Apple's capture EXIF carries the LENS NOMINAL aperture (always
     // ƒ/1.48 on the iPhone 18 Pro main) and never reflects the variable iris stop the
-    // photo was actually taken at — stamp the shutter-time reading instead. Same
-    // no-importable-constant class as the focal key; the literal is "FNumber".
+    // photo was actually taken at — stamp the shutter-time reading instead. Apple
+    // Photos' info panel reads the APEX ApertureValue too, so BOTH must be written
+    // (writing FNumber alone left Photos showing ƒ/1.48 — build 94 report). Same
+    // no-importable-constant class as the focal key; the literals are "FNumber" and
+    // "ApertureValue".
     if apertureAtShutter > 0.5 && apertureAtShutter < 32 {
       // Plausibility band (ƒ/0.5–ƒ/32): a sentinel/garbage reading never reaches EXIF.
-      exif["FNumber" as CFString] = (apertureAtShutter * 100).rounded() / 100
+      let rounded = (apertureAtShutter * 100).rounded() / 100
+      exif["FNumber" as CFString] = rounded
+      // APEX aperture value = 2·log2(F) — the format Photos' display pipeline prefers.
+      exif["ApertureValue" as CFString] = (2.0 * (log2(rounded) * 100).rounded() / 100)
     }
     // The rendered pixels are ALREADY upright (orientation applied during CIImage decode),
     // but the carried-over EXIF block still says "rotated" — Photos honors that tag and
