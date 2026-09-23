@@ -146,6 +146,17 @@ private final class CameraTrialStore {
 public final class MonetizationModule: Module {
   private let trialStore = CameraTrialStore(service: "com.cornpiess.camera18.trials")
   private var updatesTask: Task<Void, Never>?
+  // Cold-start entitlement cache (user requirement 2026-09-24: the app opens with ZERO
+  // StoreKit/network activity — the OS network-permission prompt must only appear when
+  // the user touches a monetization surface). A plain bool, not a secret: UserDefaults
+  // is fine. Refreshed by every authoritative pass (paywall open / purchase / restore /
+  // renewal events) once the StoreKit session is open.
+  private let proCacheKey = "monetization.isPro.cached"
+
+  private var cachedIsPro: Bool {
+    get { UserDefaults.standard.bool(forKey: proCacheKey) }
+    set { UserDefaults.standard.set(newValue, forKey: proCacheKey) }
+  }
 
   /// Starts the Transaction.updates listener exactly once (idempotent). Called
   /// lazily — never at module creation — so a launch without any monetization
@@ -156,6 +167,13 @@ public final class MonetizationModule: Module {
       for await update in Transaction.updates {
         await self?.handle(transactionResult: update)
       }
+    }
+    // The session is open (network is in play from here on) — calibrate the local
+    // cache once so a returning subscriber is recognized without any further taps.
+    Task { [weak self] in
+      let pro = await Self.computeIsPro()
+      self?.cachedIsPro = pro
+      self?.sendEvent("onProChanged", ["isPro": pro])
     }
   }
 
@@ -190,10 +208,20 @@ public final class MonetizationModule: Module {
     // -- Entitlements -------------------------------------------------------
 
     /// `isPro` = a verified, currently-valid (incl. Grace Period) entitlement for
-    /// either product. StoreKit is the source of truth; nothing is cached on disk.
+    /// either product. COLD-START ZERO-NETWORK CONTRACT: while the StoreKit session
+    /// is closed (no monetization surface touched yet) this answers from the LOCAL
+    /// cache only — Transaction.currentEntitlements itself initializes the StoreKit
+    /// session and pops the OS network-permission dialog (the onboarding-time prompt
+    /// the user reported). Once the session is open, every call is the authoritative
+    /// pass and refreshes the cache.
     AsyncFunction("isPro") { (promise: Promise) in
+      guard self.updatesTask != nil else {
+        promise.resolve(self.cachedIsPro)
+        return
+      }
       Task {
         let pro = await Self.computeIsPro()
+        self.cachedIsPro = pro
         self.sendEvent("onProChanged", ["isPro": pro])
         promise.resolve(pro)
       }
@@ -244,6 +272,7 @@ public final class MonetizationModule: Module {
             case .verified(let transaction):
               await transaction.finish()
               let pro = await Self.computeIsPro()
+              self.cachedIsPro = pro
               self.sendEvent("onProChanged", ["isPro": pro])
               promise.resolve(["ok": true, "isPro": pro])
             case .unverified:
@@ -274,6 +303,7 @@ public final class MonetizationModule: Module {
           // Sync can fail offline; currentEntitlements is still the honest answer.
         }
         let pro = await Self.computeIsPro()
+        self.cachedIsPro = pro
         self.sendEvent("onProChanged", ["isPro": pro])
         promise.resolve(["restored": pro])
       }
@@ -346,6 +376,7 @@ public final class MonetizationModule: Module {
     }
     await transaction.finish()
     let pro = await Self.computeIsPro()
+    cachedIsPro = pro
     sendEvent("onProChanged", ["isPro": pro])
   }
 
