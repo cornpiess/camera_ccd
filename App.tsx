@@ -1543,9 +1543,10 @@ function CameraAppScreen(): React.JSX.Element {
                 onApertureSettle={handleApertureSettle}
                 onDragStateChange={setApertureDraggingRef}
                 fixedMode={!apertureVariable}
-                signatureAperture={activeProfile?.aperture?.preferred ?? null}
-                accent={skin.accent}
-              />
+                  signatureAperture={activeProfile?.aperture?.preferred ?? null}
+                  accent={skin.accent}
+                  chrome={skin.chrome}
+                />
               }
 
               {/* Bottom Actions Row: Recent Thumbnail & Shutter Button */}

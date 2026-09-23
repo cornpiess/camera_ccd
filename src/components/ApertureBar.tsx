@@ -41,6 +41,11 @@ export interface ApertureBarProps {
   readonly fixedMode?: boolean;
   /** Camera identity accent — pointer line, value and iris rim wear the camera skin. */
   readonly accent?: string;
+  /**
+   * The strip's host background (skin.chrome) — the window-edge fade overlays must
+   * match it to read as "ticks dissolve at the edge" instead of colored blocks.
+   */
+  readonly chrome?: string;
 }
 
 const BAR_HEIGHT = 96;
@@ -58,6 +63,8 @@ const SIDE_WIDTH = 170;
 const TICK_BASELINE = BAR_HEIGHT / 2 - 8; // in trackClip coords (clip starts at top: 8)
 /** Signature marker slot width — the marker centers on its aperture via left: x - width/2. */
 const SIGNATURE_MARKER_WIDTH = 18;
+/** Window-edge fade band width (3 stepped bands per side ≈ a 21px dissolve). */
+const FADE_BAND_W = 7;
 
 const clamp = (x: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, x));
 const toLog = (f: number): number => Math.log2(f);
@@ -112,6 +119,7 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
   onDragStateChange,
   fixedMode = false,
   accent,
+  chrome = '#000000',
 }) => {
   const { width: screenWidth } = useWindowDimensions();
   const topInset = 8;
@@ -447,6 +455,23 @@ export const ApertureBar: React.FC<ApertureBarProps> = ({
             pointerEvents="none"
             style={[styles.pointer, { left: trackWidth / 2 - 0.75 }, accent ? { backgroundColor: accent } : null]}
           />
+          {/* Window-edge fade (user-reported "white dots" 2026-09-23): ticks and labels
+              scroll into the window through a HARD overflow-hidden edge — a half-clipped
+              label ("1.48" reduced to lone character strokes) reads as stray white marks.
+              Stepped-opacity bands in the HOST background color dissolve content at both
+              edges (no gradient dependency; static views, zero per-frame cost). */}
+          {[0, 1, 2].map((i) => (
+            <React.Fragment key={`fade-${i}`}>
+              <View
+                pointerEvents="none"
+                style={[styles.edgeFade, { left: i * FADE_BAND_W, width: FADE_BAND_W, backgroundColor: chrome, opacity: 1 - i / 3 }]}
+              />
+              <View
+                pointerEvents="none"
+                style={[styles.edgeFade, { right: i * FADE_BAND_W, width: FADE_BAND_W, backgroundColor: chrome, opacity: 1 - i / 3 }]}
+              />
+            </React.Fragment>
+          ))}
         </View>
       ) : null}
 
@@ -581,6 +606,11 @@ const styles = StyleSheet.create({
     height: 30,
     borderRadius: 0.75,
     backgroundColor: '#FFFFFF',
+  },
+  edgeFade: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
   },
   iris: {
     position: 'absolute',
