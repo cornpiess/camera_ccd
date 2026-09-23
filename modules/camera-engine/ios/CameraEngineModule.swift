@@ -1672,11 +1672,18 @@ public final class CameraEngineView: ExpoView {
       let baseEquivalentMM: Double = self.camera?.deviceType == .builtInWideAngleCamera ? 26.0 : 13.0
       let requestedMM = equivalentFocalMMRequest > 0 ? equivalentFocalMMRequest : self.currentEquivalentMM
       let equivalentFocalMM = requestedMM > 0 ? requestedMM : Int((baseEquivalentMM * appliedZoom).rounded())
+      // Real iris position at shutter time (variable lens) — stamped over Apple's
+      // nominal-lens FNumber in the encoded EXIF. Fixed lenses read their one true stop.
+      let apertureAtShutter = self.apertureControllerRef.map { controller -> Double in
+        guard let device = self.camera else { return 0 }
+        return controller.currentAperture(device)
+      } ?? 0
       let id = photoSettings.uniqueID
       let delegate = PhotoCaptureDelegate(
         compiled: self.compiledSnapshot(.processedPhoto),
         appliedZoom: appliedZoom,
         equivalentFocalMM: equivalentFocalMM,
+        apertureAtShutter: apertureAtShutter,
         onCaptured: onCaptured,
         onProcessed: { [weak self] result, detail in
           self?.sessionQueue.async { self?.captureDelegates.removeValue(forKey: id) }
@@ -2634,10 +2641,17 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
   /// shots read correctly in Photos.
   private let appliedZoom: Double
   private let equivalentFocalMM: Int
-  init(compiled: CameraDNARenderer.CompiledCameraProfile?, appliedZoom: Double, equivalentFocalMM: Int, onCaptured: @escaping (Result<Void, CameraEngineError>) -> Void, onProcessed: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
+  /// Aperture ACTUALLY engaged at shutter time (variable iris). Apple's photo EXIF
+  /// stamps the LENS NOMINAL figure (FNumber = lensAperture = ƒ/1.48) regardless of
+  /// setExposureModeCustom(lensAperture:) — no API promise to the contrary (checked
+  /// against the iOS 27 AVCapturePhoto/setExposureModeCustom docs). Overwritten with
+  /// this reading below so Photos shows the f-stop the photo was really taken at.
+  private let apertureAtShutter: Double
+  init(compiled: CameraDNARenderer.CompiledCameraProfile?, appliedZoom: Double, equivalentFocalMM: Int, apertureAtShutter: Double, onCaptured: @escaping (Result<Void, CameraEngineError>) -> Void, onProcessed: @escaping (Result<[String: Any], CameraEngineError>, String?) -> Void) {
     self.compiled = compiled
     self.appliedZoom = appliedZoom
     self.equivalentFocalMM = equivalentFocalMM
+    self.apertureAtShutter = apertureAtShutter
     self.onCaptured = onCaptured
     self.onProcessed = onProcessed
   }
@@ -2795,6 +2809,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
         colorSpace: colorSpace,
         quality: 0.95,
         equivalentFocalMM: equivalentFocalMM,
+        apertureAtShutter: apertureAtShutter,
         type: "public.heif" as CFString,
       )
       let fileURL: URL
@@ -2811,6 +2826,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
           colorSpace: colorSpace,
           quality: 0.95,
           equivalentFocalMM: equivalentFocalMM,
+          apertureAtShutter: apertureAtShutter,
           type: "public.jpeg" as CFString,
         ) else {
           finish(.failure(.processingFailed))
@@ -2905,7 +2921,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
   // carried over untouched. CIContext.jpegRepresentation would drop all of it. The native
   // lens focal in that metadata ignores crop zoom, so FocalLengthIn35mmFilm is overwritten
   // with base×zoom — what the Photos app displays as the shot's focal length.
-  private static func encodedRepresentation(_ image: CIImage, metadata: [AnyHashable: Any]?, colorSpace: CGColorSpace, quality: Double, equivalentFocalMM: Int, type: CFString) -> Data? {
+  private static func encodedRepresentation(_ image: CIImage, metadata: [AnyHashable: Any]?, colorSpace: CGColorSpace, quality: Double, equivalentFocalMM: Int, apertureAtShutter: Double, type: CFString) -> Data? {
     guard let cgImage = sharedContext.createCGImage(image, from: image.extent, format: CIFormat.RGBA8, colorSpace: colorSpace) else { return nil }
     let output = NSMutableData()
     guard let destination = CGImageDestinationCreateWithData(output, type, 1, nil) else { return nil }
@@ -2920,6 +2936,14 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
       // ImageIO exposes no Swift-importable constant for this EXIF key (same class as the
       // 'Orientation' literal below — run 35): the key literally is "FocalLengthIn35mmFilm".
       exif["FocalLengthIn35mmFilm" as CFString] = equivalentFocalMM
+    }
+    // FNumber truth: Apple's capture EXIF carries the LENS NOMINAL aperture (always
+    // ƒ/1.48 on the iPhone 18 Pro main) and never reflects the variable iris stop the
+    // photo was actually taken at — stamp the shutter-time reading instead. Same
+    // no-importable-constant class as the focal key; the literal is "FNumber".
+    if apertureAtShutter > 0.5 && apertureAtShutter < 32 {
+      // Plausibility band (ƒ/0.5–ƒ/32): a sentinel/garbage reading never reaches EXIF.
+      exif["FNumber" as CFString] = (apertureAtShutter * 100).rounded() / 100
     }
     // The rendered pixels are ALREADY upright (orientation applied during CIImage decode),
     // but the carried-over EXIF block still says "rotated" — Photos honors that tag and
