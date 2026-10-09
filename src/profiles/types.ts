@@ -10,6 +10,8 @@ export interface ApertureSettings {
   readonly starZone?: number;
 }
 export interface ProfileUi {
+  /** Public camera character copy, separate from the stable camera identity. */
+  readonly look?: Readonly<Record<'en' | 'zh', { readonly title: string; readonly description: string; readonly subject: string }>>;
   readonly shortName: string;
   /** Light accent color (≈5% of the visual budget); never a brand color, never large fills. */
   readonly accent: string;
@@ -43,6 +45,8 @@ export interface ToneSettings {
 export interface HueBandAdjustments { readonly hue: number; readonly saturation: number; readonly luminance: number }
 export type HueBands = Readonly<Record<HueBandName, HueBandAdjustments>>;
 export interface GlobalColorAdjustments {
+  /** Luma-preserving RGB offsets for shadow/highlight character, fused into the LUT. */
+  readonly splitTone?: { readonly shadows: readonly [number, number, number]; readonly highlights: readonly [number, number, number] };
   readonly saturation: number;
   readonly temperature: number;
   readonly tint: number;

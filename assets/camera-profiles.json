@@ -14,8 +14,8 @@
         "colorNoiseReduction": 0.14
       },
       "tone": {
-        "exposure": 0.02,
-        "contrast": 1.05,
+        "exposure": 0.04,
+        "contrast": 1.04,
         "blackPoint": 0.008,
         "curve": [
           [
@@ -24,11 +24,11 @@
           ],
           [
             0.25,
-            0.245
+            0.27
           ],
           [
             0.5,
-            0.505
+            0.515
           ],
           [
             0.75,
@@ -36,45 +36,45 @@
           ],
           [
             1,
-            0.995
+            0.99
           ]
         ],
         "exposureBias": 0
       },
       "color": {
         "saturation": 1.03,
-        "temperature": 0,
-        "tint": 0,
+        "temperature": 100,
+        "tint": 1,
         "hueBands": {
           "red": {
-            "hue": 0,
-            "saturation": 1.06,
+            "hue": -2,
+            "saturation": 1.08,
             "luminance": 1.01
           },
           "orange": {
-            "hue": 0,
-            "saturation": 1.02,
+            "hue": -1,
+            "saturation": 1.01,
             "luminance": 1.02
           },
           "yellow": {
-            "hue": -1,
-            "saturation": 1.01,
-            "luminance": 1.01
+            "hue": -4,
+            "saturation": 1.03,
+            "luminance": 1.02
           },
           "green": {
-            "hue": -4,
-            "saturation": 1,
-            "luminance": 1
+            "hue": -12,
+            "saturation": 1.04,
+            "luminance": 0.99
           },
           "cyan": {
-            "hue": 0,
-            "saturation": 1,
+            "hue": -4,
+            "saturation": 0.96,
             "luminance": 1
           },
           "blue": {
-            "hue": 0,
+            "hue": -4,
             "saturation": 1.05,
-            "luminance": 0.99
+            "luminance": 0.98
           },
           "magenta": {
             "hue": 0,
@@ -83,21 +83,34 @@
           }
         },
         "lut": "ricoh-positive",
-        "lutIntensity": 0.55
+        "lutIntensity": 0.82,
+        "splitTone": {
+          "shadows": [
+            -0.01,
+            0.008,
+            0.004
+          ],
+          "highlights": [
+            0.018,
+            0.005,
+            -0.018
+          ]
+        }
       },
       "texture": {
         "grain": {
-          "amount": 0.01,
-          "size": 0.3
+          "amount": 0.045,
+          "size": 1.15
         },
         "vignette": {
-          "amount": 0.015,
-          "radius": 0.85
+          "amount": 0.1,
+          "radius": 0.75
         },
         "halation": {
           "amount": 0,
           "radius": 0.2
-        }
+        },
+        "deharsh": 0.025
       },
       "id": "ricoh_positive",
       "name": "GRIT P",
@@ -110,11 +123,22 @@
         "markerStyle": "line",
         "labelStyle": "minimal",
         "glassTintStrength": 0.06,
-        "icon": "ricoh-gr"
+        "icon": "ricoh-gr",
+        "look": {
+          "en": {
+            "title": "Vivid Slide",
+            "description": "Rich reds · golden greens",
+            "subject": "Sunlight / travel"
+          },
+          "zh": {
+            "title": "鲜活正片",
+            "description": "鲜红 · 黄绿 · 清晰反差",
+            "subject": "晴天 / 旅行"
+          }
+        }
       },
       "developmentReference": {
-        "note": "Expert-calibrated six-camera core (2026-09-13): Camera Character over Heavy Filter. Full-parameter JSON available; tone guardrails enforced by scripts/tone-audit.js.",
-        "calibration": "expert-provided initial parameters"
+        "note": "2026-10-09 character revision: functional hue bands, luma-preserving split tone, final-only monochrome grain. Inspired by public Dazz/Gloam descriptions; not their proprietary recipes."
       }
     },
     {
@@ -130,90 +154,103 @@
         "colorNoiseReduction": 0.14
       },
       "tone": {
-        "exposure": 0.05,
-        "contrast": 1.02,
-        "blackPoint": 0.006,
+        "exposure": 0.03,
+        "contrast": 1.01,
+        "blackPoint": 0.004,
         "curve": [
           [
             0,
-            0.015
+            0.035
           ],
           [
             0.25,
-            0.275
+            0.29
           ],
           [
             0.5,
-            0.525
+            0.52
           ],
           [
             0.75,
-            0.785
+            0.775
           ],
           [
             1,
-            0.99
+            0.97
           ]
         ],
         "exposureBias": 0
       },
       "color": {
-        "saturation": 0.94,
-        "temperature": 0,
-        "tint": 0,
+        "saturation": 0.91,
+        "temperature": -180,
+        "tint": 1,
         "hueBands": {
           "red": {
-            "hue": 3,
-            "saturation": 0.95,
+            "hue": 7,
+            "saturation": 0.93,
             "luminance": 1.02
           },
           "orange": {
             "hue": 1,
-            "saturation": 0.97,
-            "luminance": 1.03
+            "saturation": 0.98,
+            "luminance": 1.035
           },
           "yellow": {
-            "hue": 0,
-            "saturation": 0.95,
+            "hue": -6,
+            "saturation": 0.91,
             "luminance": 1.02
           },
           "green": {
-            "hue": 5,
-            "saturation": 0.96,
-            "luminance": 0.98
+            "hue": 15,
+            "saturation": 0.86,
+            "luminance": 0.92
           },
           "cyan": {
-            "hue": 2,
-            "saturation": 0.96,
-            "luminance": 0.99
+            "hue": 4,
+            "saturation": 0.88,
+            "luminance": 0.98
           },
           "blue": {
-            "hue": -1,
-            "saturation": 0.92,
-            "luminance": 1
+            "hue": -9,
+            "saturation": 0.77,
+            "luminance": 1.02
           },
           "magenta": {
-            "hue": 1,
-            "saturation": 0.95,
-            "luminance": 1.01
+            "hue": 3,
+            "saturation": 0.87,
+            "luminance": 1
           }
         },
         "lut": "ricoh-negative",
-        "lutIntensity": 0.55
+        "lutIntensity": 0.9,
+        "splitTone": {
+          "shadows": [
+            -0.035,
+            0.016,
+            0.027
+          ],
+          "highlights": [
+            0.021,
+            0.008,
+            -0.015
+          ]
+        }
       },
       "texture": {
         "grain": {
-          "amount": 0.015,
-          "size": 0.35
+          "amount": 0.07,
+          "size": 1.15
         },
         "vignette": {
-          "amount": 0.01,
-          "radius": 0.88
+          "amount": 0.075,
+          "radius": 0.75
         },
         "halation": {
           "amount": 0,
           "radius": 0.2
-        }
+        },
+        "deharsh": 0.025
       },
       "id": "ricoh_negative",
       "name": "GRIT N",
@@ -226,11 +263,22 @@
         "markerStyle": "dot",
         "labelStyle": "minimal",
         "glassTintStrength": 0.06,
-        "icon": "ricoh-gr"
+        "icon": "ricoh-gr",
+        "look": {
+          "en": {
+            "title": "Cool Negative",
+            "description": "Teal greens · faded reds",
+            "subject": "Everyday / streets"
+          },
+          "zh": {
+            "title": "冷调负片",
+            "description": "蓝绿 · 柔红 · 奶油高光",
+            "subject": "日常 / 街头"
+          }
+        }
       },
       "developmentReference": {
-        "note": "Expert-calibrated six-camera core (2026-09-13): Camera Character over Heavy Filter. Full-parameter JSON available; tone guardrails enforced by scripts/tone-audit.js.",
-        "calibration": "expert-provided initial parameters"
+        "note": "2026-10-09 character revision: functional hue bands, luma-preserving split tone, final-only monochrome grain. Inspired by public Dazz/Gloam descriptions; not their proprietary recipes."
       }
     },
     {
@@ -246,13 +294,13 @@
         "colorNoiseReduction": 0.18
       },
       "tone": {
-        "exposure": 0.04,
-        "contrast": 0.99,
-        "blackPoint": 0.005,
+        "exposure": 0.02,
+        "contrast": 0.98,
+        "blackPoint": 0.003,
         "curve": [
           [
             0,
-            0.01
+            0.018
           ],
           [
             0.25,
@@ -260,52 +308,52 @@
           ],
           [
             0.5,
-            0.515
+            0.5
           ],
           [
             0.75,
-            0.77
+            0.76
           ],
           [
             1,
-            0.99
+            0.97
           ]
         ],
         "exposureBias": 0
       },
       "color": {
-        "saturation": 1.02,
-        "temperature": 10,
-        "tint": 3,
+        "saturation": 1,
+        "temperature": 420,
+        "tint": 7,
         "hueBands": {
           "red": {
-            "hue": -1,
-            "saturation": 0.98,
+            "hue": 2,
+            "saturation": 0.96,
             "luminance": 1.02
           },
           "orange": {
             "hue": -2,
-            "saturation": 1.01,
-            "luminance": 1.05
+            "saturation": 1,
+            "luminance": 1.025
           },
           "yellow": {
-            "hue": -2,
-            "saturation": 0.96,
+            "hue": -7,
+            "saturation": 0.89,
             "luminance": 1.02
           },
           "green": {
-            "hue": 0,
-            "saturation": 0.96,
+            "hue": -3,
+            "saturation": 0.82,
             "luminance": 1
           },
           "cyan": {
-            "hue": 0,
-            "saturation": 0.98,
+            "hue": -3,
+            "saturation": 0.9,
             "luminance": 1
           },
           "blue": {
-            "hue": 0,
-            "saturation": 0.97,
+            "hue": -4,
+            "saturation": 0.88,
             "luminance": 1
           },
           "magenta": {
@@ -315,21 +363,34 @@
           }
         },
         "lut": "canon-g7x2",
-        "lutIntensity": 0.55
+        "lutIntensity": 0.73,
+        "splitTone": {
+          "shadows": [
+            -0.008,
+            0.004,
+            0.009
+          ],
+          "highlights": [
+            0.023,
+            0.006,
+            -0.018
+          ]
+        }
       },
       "texture": {
         "grain": {
-          "amount": 0.005,
-          "size": 0.3
+          "amount": 0.018,
+          "size": 1.15
         },
         "vignette": {
-          "amount": 0.01,
-          "radius": 0.9
+          "amount": 0.045,
+          "radius": 0.75
         },
         "halation": {
           "amount": 0,
           "radius": 0.2
-        }
+        },
+        "deharsh": 0.055
       },
       "id": "canon_portrait",
       "name": "SKIN C",
@@ -342,11 +403,22 @@
         "markerStyle": "dot",
         "labelStyle": "minimal",
         "glassTintStrength": 0.06,
-        "icon": "canon-compact"
+        "icon": "canon-compact",
+        "look": {
+          "en": {
+            "title": "Warm Portrait",
+            "description": "Peach skin · soft highlights",
+            "subject": "People / cafés"
+          },
+          "zh": {
+            "title": "暖调人像",
+            "description": "蜜桃肤色 · 温润亮部",
+            "subject": "人像 / 咖啡馆"
+          }
+        }
       },
       "developmentReference": {
-        "note": "Expert-calibrated six-camera core (2026-09-13): Camera Character over Heavy Filter. Full-parameter JSON available; tone guardrails enforced by scripts/tone-audit.js.",
-        "calibration": "expert-provided initial parameters"
+        "note": "2026-10-09 character revision: functional hue bands, luma-preserving split tone, final-only monochrome grain. Inspired by public Dazz/Gloam descriptions; not their proprietary recipes."
       }
     },
     {
@@ -362,21 +434,21 @@
         "colorNoiseReduction": 0.14
       },
       "tone": {
-        "exposure": -0.02,
-        "contrast": 1.06,
-        "blackPoint": 0.01,
+        "exposure": 0.02,
+        "contrast": 1.035,
+        "blackPoint": 0.008,
         "curve": [
           [
             0,
-            0.012
+            0.025
           ],
           [
             0.25,
-            0.262
+            0.275
           ],
           [
             0.5,
-            0.49
+            0.51
           ],
           [
             0.75,
@@ -384,68 +456,81 @@
           ],
           [
             1,
-            0.99
+            0.98
           ]
         ],
         "exposureBias": 0
       },
       "color": {
         "saturation": 0.86,
-        "temperature": -10,
-        "tint": -2,
+        "temperature": -260,
+        "tint": 0,
         "hueBands": {
           "red": {
             "hue": -2,
-            "saturation": 0.9,
-            "luminance": 1
-          },
-          "orange": {
-            "hue": -1,
             "saturation": 0.94,
             "luminance": 1.01
           },
+          "orange": {
+            "hue": -1,
+            "saturation": 1.02,
+            "luminance": 1.04
+          },
           "yellow": {
-            "hue": -2,
-            "saturation": 0.9,
+            "hue": -7,
+            "saturation": 0.8,
             "luminance": 1
           },
           "green": {
-            "hue": -2,
-            "saturation": 0.89,
-            "luminance": 0.99
+            "hue": -8,
+            "saturation": 0.79,
+            "luminance": 0.97
           },
           "cyan": {
-            "hue": -1,
+            "hue": -6,
             "saturation": 0.92,
-            "luminance": 0.99
+            "luminance": 0.98
           },
           "blue": {
-            "hue": -2,
-            "saturation": 0.9,
+            "hue": -10,
+            "saturation": 0.88,
             "luminance": 0.98
           },
           "magenta": {
             "hue": 0,
-            "saturation": 0.8,
+            "saturation": 0.78,
             "luminance": 1
           }
         },
         "lut": "fuji-classic-chrome",
-        "lutIntensity": 0.55
+        "lutIntensity": 0.82,
+        "splitTone": {
+          "shadows": [
+            -0.02,
+            0.008,
+            0.023
+          ],
+          "highlights": [
+            0.012,
+            0.004,
+            -0.008
+          ]
+        }
       },
       "texture": {
         "grain": {
-          "amount": 0.02,
-          "size": 0.35
+          "amount": 0.06,
+          "size": 1.15
         },
         "vignette": {
-          "amount": 0.015,
-          "radius": 0.86
+          "amount": 0.095,
+          "radius": 0.75
         },
         "halation": {
           "amount": 0,
           "radius": 0.2
-        }
+        },
+        "deharsh": 0.025
       },
       "id": "fuji_classic_chrome",
       "name": "CC",
@@ -458,11 +543,22 @@
         "markerStyle": "line",
         "labelStyle": "minimal",
         "glassTintStrength": 0.06,
-        "icon": "fuji-rangefinder"
+        "icon": "fuji-rangefinder",
+        "look": {
+          "en": {
+            "title": "Quiet Chrome",
+            "description": "Muted color · slate blues",
+            "subject": "Architecture / overcast"
+          },
+          "zh": {
+            "title": "青灰纪实",
+            "description": "低饱和 · 沉稳蓝 · 青灰暗部",
+            "subject": "建筑 / 阴天"
+          }
+        }
       },
       "developmentReference": {
-        "note": "Expert-calibrated six-camera core (2026-09-13): Camera Character over Heavy Filter. Full-parameter JSON available; tone guardrails enforced by scripts/tone-audit.js.",
-        "calibration": "expert-provided initial parameters"
+        "note": "2026-10-09 character revision: functional hue bands, luma-preserving split tone, final-only monochrome grain. Inspired by public Dazz/Gloam descriptions; not their proprietary recipes."
       }
     },
     {
@@ -478,90 +574,103 @@
         "colorNoiseReduction": 0.14
       },
       "tone": {
-        "exposure": 0,
-        "contrast": 1.08,
+        "exposure": 0.04,
+        "contrast": 1.035,
         "blackPoint": 0.01,
         "curve": [
           [
             0,
-            0.014
+            0.022
           ],
           [
             0.25,
-            0.262
+            0.28
           ],
           [
             0.5,
-            0.485
+            0.525
           ],
           [
             0.75,
-            0.81
+            0.815
           ],
           [
             1,
-            0.995
+            0.985
           ]
         ],
         "exposureBias": 0
       },
       "color": {
-        "saturation": 0.96,
-        "temperature": 0,
-        "tint": -1,
+        "saturation": 0.98,
+        "temperature": 220,
+        "tint": -2,
         "hueBands": {
           "red": {
-            "hue": -1,
-            "saturation": 0.98,
+            "hue": -5,
+            "saturation": 1.08,
             "luminance": 1
           },
           "orange": {
             "hue": -2,
-            "saturation": 0.96,
+            "saturation": 0.98,
             "luminance": 1.02
           },
           "yellow": {
-            "hue": -3,
-            "saturation": 0.95,
+            "hue": -8,
+            "saturation": 1.04,
             "luminance": 1
           },
           "green": {
-            "hue": 5,
-            "saturation": 0.95,
-            "luminance": 0.98
+            "hue": 10,
+            "saturation": 1.02,
+            "luminance": 0.92
           },
           "cyan": {
-            "hue": 2,
-            "saturation": 1.02,
+            "hue": 5,
+            "saturation": 0.87,
             "luminance": 0.98
           },
           "blue": {
-            "hue": -1,
-            "saturation": 0.96,
+            "hue": -3,
+            "saturation": 0.85,
             "luminance": 0.99
           },
           "magenta": {
-            "hue": 2,
-            "saturation": 1.03,
-            "luminance": 1.01
+            "hue": 3,
+            "saturation": 0.95,
+            "luminance": 1
           }
         },
         "lut": "fuji-classic-negative",
-        "lutIntensity": 0.5
+        "lutIntensity": 0.82,
+        "splitTone": {
+          "shadows": [
+            -0.018,
+            0.022,
+            0.005
+          ],
+          "highlights": [
+            0.025,
+            0.006,
+            -0.023
+          ]
+        }
       },
       "texture": {
         "grain": {
-          "amount": 0.025,
-          "size": 0.35
+          "amount": 0.085,
+          "size": 1.5
         },
         "vignette": {
-          "amount": 0.015,
-          "radius": 0.86
+          "amount": 0.13,
+          "radius": 0.75
         },
         "halation": {
           "amount": 0,
           "radius": 0.2
-        }
+        },
+        "deharsh": 0.025
       },
       "id": "fuji_classic_negative",
       "name": "NC",
@@ -574,11 +683,22 @@
         "markerStyle": "line",
         "labelStyle": "minimal",
         "glassTintStrength": 0.06,
-        "icon": "fuji-rangefinder"
+        "icon": "fuji-rangefinder",
+        "look": {
+          "en": {
+            "title": "Retro Negative",
+            "description": "Warm light · forest greens",
+            "subject": "Life / golden hour"
+          },
+          "zh": {
+            "title": "复古浓负",
+            "description": "暖亮部 · 深绿 · 浓郁红",
+            "subject": "生活 / 夕阳"
+          }
+        }
       },
       "developmentReference": {
-        "note": "Expert-calibrated six-camera core (2026-09-13): Camera Character over Heavy Filter. Full-parameter JSON available; tone guardrails enforced by scripts/tone-audit.js.",
-        "calibration": "expert-provided initial parameters"
+        "note": "2026-10-09 character revision: functional hue bands, luma-preserving split tone, final-only monochrome grain. Inspired by public Dazz/Gloam descriptions; not their proprietary recipes."
       }
     },
     {
@@ -594,9 +714,9 @@
         "colorNoiseReduction": 0.1
       },
       "tone": {
-        "exposure": 0.02,
-        "contrast": 1.03,
-        "blackPoint": 0.008,
+        "exposure": 0.035,
+        "contrast": 1.035,
+        "blackPoint": 0.01,
         "curve": [
           [
             0,
@@ -604,15 +724,15 @@
           ],
           [
             0.25,
-            0.235
+            0.265
           ],
           [
             0.5,
-            0.505
+            0.525
           ],
           [
             0.75,
-            0.785
+            0.79
           ],
           [
             1,
@@ -622,62 +742,75 @@
         "exposureBias": 0
       },
       "color": {
-        "saturation": 0.99,
-        "temperature": 5,
-        "tint": 2,
+        "saturation": 1,
+        "temperature": 180,
+        "tint": 3,
         "hueBands": {
           "red": {
-            "hue": -1,
-            "saturation": 1.03,
+            "hue": -4,
+            "saturation": 1.07,
             "luminance": 0.99
           },
           "orange": {
             "hue": -1,
             "saturation": 1,
-            "luminance": 1.02
+            "luminance": 1.025
           },
           "yellow": {
-            "hue": -2,
+            "hue": -4,
             "saturation": 0.96,
             "luminance": 1
           },
           "green": {
-            "hue": 1,
-            "saturation": 0.93,
-            "luminance": 0.99
+            "hue": -4,
+            "saturation": 0.87,
+            "luminance": 0.97
           },
           "cyan": {
-            "hue": 0,
-            "saturation": 0.96,
-            "luminance": 1
+            "hue": -3,
+            "saturation": 0.9,
+            "luminance": 0.98
           },
           "blue": {
-            "hue": 0,
+            "hue": -6,
             "saturation": 0.95,
-            "luminance": 0.99
+            "luminance": 0.98
           },
           "magenta": {
             "hue": 0,
-            "saturation": 1.02,
+            "saturation": 0.96,
             "luminance": 1
           }
         },
         "lut": "leica-m9",
-        "lutIntensity": 0.5
+        "lutIntensity": 0.85,
+        "splitTone": {
+          "shadows": [
+            -0.012,
+            0.006,
+            0.008
+          ],
+          "highlights": [
+            0.016,
+            0.003,
+            -0.013
+          ]
+        }
       },
       "texture": {
         "grain": {
           "amount": 0.025,
-          "size": 0.35
+          "size": 1.15
         },
         "vignette": {
-          "amount": 0.015,
-          "radius": 0.86
+          "amount": 0.12,
+          "radius": 0.75
         },
         "halation": {
           "amount": 0,
           "radius": 0.2
-        }
+        },
+        "deharsh": 0.025
       },
       "id": "leica_m9",
       "name": "M-RF",
@@ -690,11 +823,22 @@
         "markerStyle": "line",
         "labelStyle": "minimal",
         "glassTintStrength": 0.06,
-        "icon": "leica-rangefinder"
+        "icon": "leica-rangefinder",
+        "look": {
+          "en": {
+            "title": "Classic CCD",
+            "description": "Deep reds · sculpted contrast",
+            "subject": "Streets / stories"
+          },
+          "zh": {
+            "title": "经典 CCD",
+            "description": "浓红 · 厚实暗部 · 通透层次",
+            "subject": "街头 / 人文"
+          }
+        }
       },
       "developmentReference": {
-        "note": "Expert-calibrated six-camera core (2026-09-13): Camera Character over Heavy Filter. Full-parameter JSON available; tone guardrails enforced by scripts/tone-audit.js.",
-        "calibration": "expert-provided initial parameters"
+        "note": "2026-10-09 character revision: functional hue bands, luma-preserving split tone, final-only monochrome grain. Inspired by public Dazz/Gloam descriptions; not their proprietary recipes."
       }
     },
     {
@@ -712,14 +856,14 @@
         "colorNoiseReduction": 0
       },
       "tone": {
-        "exposure": 0.0,
-        "contrast": 1.0,
-        "blackPoint": 0.0,
+        "exposure": 0,
+        "contrast": 1,
+        "blackPoint": 0,
         "exposureBias": 0,
         "curve": [
           [
-            0.0,
-            0.0
+            0,
+            0
           ],
           [
             0.18,
@@ -734,54 +878,54 @@
             0.795
           ],
           [
-            1.0,
+            1,
             0.985
           ]
         ]
       },
       "color": {
-        "saturation": 1.0,
+        "saturation": 1,
         "temperature": 0,
         "tint": 0,
         "hueBands": {
           "red": {
             "hue": 0.5,
             "saturation": 0.99,
-            "luminance": 1.0
+            "luminance": 1
           },
           "orange": {
-            "hue": -1.0,
+            "hue": -1,
             "saturation": 0.99,
             "luminance": 1.01
           },
           "yellow": {
             "hue": -0.5,
             "saturation": 0.98,
-            "luminance": 1.0
+            "luminance": 1
           },
           "green": {
-            "hue": 1.0,
+            "hue": 1,
             "saturation": 0.98,
-            "luminance": 1.0
+            "luminance": 1
           },
           "cyan": {
-            "hue": 0.0,
+            "hue": 0,
             "saturation": 0.99,
-            "luminance": 1.0
+            "luminance": 1
           },
           "blue": {
             "hue": -0.5,
             "saturation": 0.98,
-            "luminance": 1.0
+            "luminance": 1
           },
           "magenta": {
             "hue": 0.5,
             "saturation": 0.99,
-            "luminance": 1.0
+            "luminance": 1
           }
         },
         "lut": "VMF_HN_33_v2.cube",
-        "lutIntensity": 1.0
+        "lutIntensity": 1
       },
       "texture": {
         "grain": {
@@ -804,7 +948,19 @@
         "dialStyle": "snap",
         "personality": "gentle",
         "labelStyle": "minimal",
-        "markerStyle": "ring"
+        "markerStyle": "ring",
+        "look": {
+          "en": {
+            "title": "Soft Natural",
+            "description": "Fine color · smooth highlights",
+            "subject": "Portraits / landscapes"
+          },
+          "zh": {
+            "title": "细腻自然",
+            "description": "自然肤色 · 柔顺高光",
+            "subject": "人像 / 风景"
+          }
+        }
       }
     },
     {
@@ -910,7 +1066,19 @@
         "dialStyle": "snap",
         "personality": "neutral",
         "labelStyle": "minimal",
-        "markerStyle": "ring"
+        "markerStyle": "ring",
+        "look": {
+          "en": {
+            "title": "Original",
+            "description": "Untouched color · no rendering",
+            "subject": "True-to-life / reference"
+          },
+          "zh": {
+            "title": "自然原图",
+            "description": "系统原色 · 零风格处理",
+            "subject": "真实记录 / 对照"
+          }
+        }
       },
       "passthrough": true
     }

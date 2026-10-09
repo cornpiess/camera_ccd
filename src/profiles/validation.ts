@@ -39,6 +39,16 @@ const pushProfileErrors = (v: unknown, e: (message: string) => void): void => {
       if (v.ui[k] !== undefined && (typeof v.ui[k] !== 'string' || v.ui[k] === '')) e(`ui.${k} must be a non-empty string`);
     }
     optNum(v.ui, 'glassTintStrength', 'ui', e, [0, 1]);
+    if (v.ui.look !== undefined) {
+      if (!obj(v.ui.look)) e('ui.look must be an object');
+      else for (const lang of ['en', 'zh']) {
+        const copy = v.ui.look[lang];
+        if (!obj(copy)) e(`ui.look.${lang} must be an object`);
+        else for (const key of ['title', 'description', 'subject']) {
+          if (typeof copy[key] !== 'string' || copy[key].trim() === '') e(`ui.look.${lang}.${key} must be a non-empty string`);
+        }
+      }
+    }
   }
   nums(v.raw, ['sharpness','detail','localToneMap','luminanceNoiseReduction','colorNoiseReduction'], 'raw', e);
   if (!obj(v.tone)) e('tone must be an object'); else {
@@ -66,6 +76,15 @@ const pushProfileErrors = (v: unknown, e: (message: string) => void): void => {
     ['saturation','temperature','tint'].forEach(k => { if (typeof color[k] !== 'number' || !Number.isFinite(color[k])) e(`color.${k} must be a finite number`); });
     if (color.lut !== undefined && color.lut !== null && typeof color.lut !== 'string') e('color.lut must be a string or null');
     optNum(color, 'lutIntensity', 'color', e, [0, 1]);
+    if (color.splitTone !== undefined) {
+      if (!obj(color.splitTone)) e('color.splitTone must be an object');
+      else for (const key of ['shadows', 'highlights']) {
+        const offset = color.splitTone[key];
+        if (!Array.isArray(offset) || offset.length !== 3 || offset.some(n => typeof n !== 'number' || !Number.isFinite(n) || Math.abs(n) > 0.12)) {
+          e(`color.splitTone.${key} must contain three finite RGB offsets between -0.12 and 0.12`);
+        }
+      }
+    }
     if (!obj(color.hueBands)) e('color.hueBands must be an object'); else {
       const hueBands = color.hueBands;
       HUE_BAND_NAMES.forEach(b => nums(hueBands[b], ['hue','saturation','luminance'], `color.hueBands.${b}`, e));

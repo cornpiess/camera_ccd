@@ -3109,7 +3109,8 @@ enum CameraInputNormalizer {
 /// Production renderer for preview and final output:
 ///   Input Normalizer (fused into the cube) → ONE effective 33³ cube → Tone stages.
 /// Camera 18 does NOT redo Apple's ISP: no noise reduction, no sharpening, no unsharp
-/// mask, no local tone mapping, no grain, no halation, no vignette, no starburst.
+/// mask or local tone mapping. Shared vignette + final-only monochrome grain/deharsh;
+/// no halation, no fake optical starburst or software depth blur.
 ///
 /// COLOR PIPELINE CONTRACT (fixed; do not introduce per-path divergence):
 ///   Source decode (CIImage float working space) → Normalizer (fused in cube)
@@ -3123,7 +3124,7 @@ enum CameraInputNormalizer {
 private enum CameraDNARenderer {
   /// Bump on ANY change to cube compilation or tone application so stale cached cubes
   /// can never survive a renderer change (cache key includes this).
-  static let rendererVersion = 2
+  static let rendererVersion = 3
 
   /// Per-frame render state: everything expensive (cube, tone interpretation) is
   /// resolved ONCE at compile time; the frame loop consumes only this struct.
@@ -3136,6 +3137,10 @@ private enum CameraDNARenderer {
     /// FINAL-PHOTO-ONLY highlight chroma relief strength (texture.deharsh, 0..1). The
     /// preview never runs it — Color/Tone WYSIWYG keeps to the shared stages.
     let deharshAmount: Double
+    let grainAmount: Double
+    let grainSize: Double
+    let vignetteAmount: Double
+    let vignetteRadius: Double
     let profileID: String
     let profileRevision: Int
     let normalizerID: String
@@ -3158,7 +3163,7 @@ private enum CameraDNARenderer {
 
   /// Unified rendering pipeline — consumes ONLY a compiled profile (no JSON per frame).
   /// Source → effective cube (normalizer + LUT + fine color) → Exposure → Contrast →
-  /// Black point → Tone curve → [final photo only: Deharsh]. Every stage skips itself
+  /// Black point → Tone curve → [final only: Deharsh] → Vignette → [final only: Grain]. Every stage skips itself
   /// when neutral.
   static func apply(_ compiled: CompiledCameraProfile, to source: CIImage, finalPhoto: Bool = false) -> CIImage {
     var image = source
@@ -3223,6 +3228,32 @@ private enum CameraDNARenderer {
       ])
     }
 
+    // Shared, resolution-relative corner falloff: same framing in preview and photo.
+    if compiled.vignetteAmount > 0.0005 {
+      let extent = source.extent
+      image = filter("CIVignetteEffect", image, [
+        "inputCenter": CIVector(x: extent.midX, y: extent.midY),
+        "inputRadius": min(extent.width, extent.height) * CGFloat(compiled.vignetteRadius),
+        "inputIntensity": compiled.vignetteAmount,
+      ])
+    }
+    // Final only: monochrome soft-light grain around neutral gray. No subject blur
+    // and no random noise shimmering in the live viewfinder. Size scales with resolution.
+    if finalPhoto, compiled.grainAmount > 0.0005,
+       let random = CIFilter(name: "CIRandomGenerator")?.outputImage {
+      let extent = source.extent
+      let scale = max(1.0, min(extent.width, extent.height) / 1600.0 * CGFloat(compiled.grainSize))
+      let offset = CGAffineTransform(translationX: CGFloat.random(in: -512...512), y: CGFloat.random(in: -512...512))
+      let noise = random.transformed(by: offset).transformed(by: CGAffineTransform(scaleX: scale, y: scale)).cropped(to: extent)
+      let amount = CGFloat(compiled.grainAmount)
+      let monochrome = CIVector(x: amount, y: 0, z: 0, w: 0)
+      let grain = filter("CIColorMatrix", noise, [
+        "inputRVector": monochrome, "inputGVector": monochrome, "inputBVector": monochrome,
+        "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+        "inputBiasVector": CIVector(x: 0.5 - amount / 2, y: 0.5 - amount / 2, z: 0.5 - amount / 2, w: 1),
+      ])
+      image = filter("CISoftLightBlendMode", grain, ["inputBackgroundImage": image])
+    }
     return image.cropped(to: source.extent)
   }
 
@@ -3306,6 +3337,10 @@ private enum CameraDNARenderer {
     let toneIsNeutral = abs(exposureEV) <= 0.001 && abs(contrast - 1.0) <= 0.001 && blackPoint <= 0 && curve == nil
     // FINAL-PHOTO-ONLY stage strength (texture.deharsh, 0..1). Absent = 0 = skipped.
     let deharshAmount = number(dictionary(profile["texture"]), "deharsh", 0, 0...1)
+    let texture = dictionary(profile["texture"])
+    let grain = dictionary(texture["grain"]), vignette = dictionary(texture["vignette"])
+    let grainAmount = number(grain, "amount", 0, 0...0.2)
+    let vignetteAmount = number(vignette, "amount", 0, 0...0.5)
 
     let revision: Int = {
       cubeLock.lock(); defer { cubeLock.unlock() }
@@ -3323,14 +3358,29 @@ private enum CameraDNARenderer {
     if let hit = compiledCache[key] { cubeLock.unlock(); return hit }
     cubeLock.unlock()
 
-    // Effective cube: normalizer (identity today) fused ahead of the base LUT inside
-    // the SAME single 33³ cube — never a second per-frame cube pass. A profile without
-    // a LUT but with non-neutral HSL still compiles via the legacy hue-band cube.
+    // Color stages (including split tone) are fused into ONE cube. No-LUT profiles
+    // start from an identity base; completely neutral profiles stay filter-free.
     let effectiveCube: (dimension: Int, data: Data)?
     if let lutName = color["lut"] as? String, let baseLUT = LUTLoader.load(lutName) {
       effectiveCube = buildEffectiveCube(profile: profile, base: baseLUT, normalizer: normalizer)
     } else {
-      effectiveCube = hueBandCube(dictionary(color["hueBands"]))
+      // No-LUT profiles use the same color chain, including global adjustments.
+      let colorIsNeutral = number(color, "saturation", 1, 0...4) == 1
+        && number(color, "temperature", 0, -4500...5500) == 0
+        && number(color, "tint", 0, -200...200) == 0
+        && hueBandCube(dictionary(color["hueBands"])) == nil
+        && splitToneOffsets(color).allSatisfy { abs($0) < 0.00001 }
+      if colorIsNeutral {
+        effectiveCube = nil
+      } else {
+        let dimension = 33
+        var identity = [Float]()
+        identity.reserveCapacity(dimension * dimension * dimension * 4)
+        for blue in 0..<dimension { for green in 0..<dimension { for red in 0..<dimension {
+          identity.append(contentsOf: [Float(red) / 32, Float(green) / 32, Float(blue) / 32, 1])
+        } } }
+        effectiveCube = buildEffectiveCube(profile: profile, base: (dimension, dataFromFloats(identity)), normalizer: normalizer)
+      }
     }
 
     let compiled = CompiledCameraProfile(
@@ -3340,12 +3390,16 @@ private enum CameraDNARenderer {
       blackPoint: blackPoint,
       toneCurve: curve,
       deharshAmount: deharshAmount,
+      grainAmount: grainAmount,
+      grainSize: number(grain, "size", 1, 0.5...3),
+      vignetteAmount: vignetteAmount,
+      vignetteRadius: number(vignette, "radius", 0.75, 0.3...1.5),
       profileID: id,
       profileRevision: revision,
       normalizerID: normalizer.id,
       normalizerRevision: normalizer.revision,
       rendererVersion: rendererVersion,
-      isIdentity: effectiveCube == nil && toneIsNeutral && deharshAmount <= 0.0005
+      isIdentity: effectiveCube == nil && toneIsNeutral && deharshAmount <= 0.0005 && grainAmount <= 0.0005 && vignetteAmount <= 0.0005
     )
 
     cubeLock.lock()
@@ -3416,12 +3470,14 @@ private enum CameraDNARenderer {
     let bandNames = ["red", "orange", "yellow", "green", "cyan", "blue", "magenta"]
     let bandCenters: [Double] = [0, 30, 57, 117, 182, 230, 302]
     let adjustments = zip(bandNames, bandCenters).map { name, center -> (Double, Double, Double, Double) in
-      let band = dictionary(color["hueBands"])
+      let band = dictionary(dictionary(color["hueBands"])[name])
       return (center, number(band, "hue", 0, -180...180), number(band, "saturation", 1, 0...4), number(band, "luminance", 1, 0...4))
     }
     let needsHSL = adjustments.contains { abs($0.1) > 0.0001 || abs($0.2 - 1) > 0.0001 || abs($0.3 - 1) > 0.0001 }
+    let split = splitToneOffsets(color)
+    let needsSplit = split.contains { abs($0) > 0.00001 }
 
-    if needsTemp || sat != 1.0 || needsHSL {
+    if needsTemp || sat != 1.0 || needsHSL || needsSplit {
       for index in 0..<count {
         let o = index * 4
         var r = Double(values[o]), g = Double(values[o + 1]), b = Double(values[o + 2])
@@ -3457,6 +3513,20 @@ private enum CameraDNARenderer {
           let rgb = hslToRGB(hsl.h, hsl.s, hsl.l)
           r = rgb.0; g = rgb.1; b = rgb.2
         }
+        if needsSplit {
+          let luma = min(1.0, max(0.0, 0.2126 * r + 0.7152 * g + 0.0722 * b))
+          // Smooth masks leave black/white neutral and protect warm skin colors.
+          let hsl = rgbToHSL(min(1, max(0, r)), min(1, max(0, g)), min(1, max(0, b)))
+          let skin = max(0.0, 1.0 - circularDistance(hsl.h, 30) / 35) * min(1.0, hsl.s * 3)
+          let protection = 1.0 - 0.65 * skin
+          let shadow = (1 - smoothStep(0.08, 0.55, luma)) * smoothStep(0, 0.08, luma) * protection
+          let highlight = smoothStep(0.45, 0.95, luma) * (1 - smoothStep(0.95, 1, luma)) * protection
+          let dr = split[0] * shadow + split[3] * highlight
+          let dg = split[1] * shadow + split[4] * highlight
+          let db = split[2] * shadow + split[5] * highlight
+          let biasLuma = 0.2126 * dr + 0.7152 * dg + 0.0722 * db
+          r += dr - biasLuma; g += dg - biasLuma; b += db - biasLuma
+        }
         values[o] = Float(min(1.0, max(0.0, r)))
         values[o + 1] = Float(min(1.0, max(0.0, g)))
         values[o + 2] = Float(min(1.0, max(0.0, b)))
@@ -3475,6 +3545,22 @@ private enum CameraDNARenderer {
   private static func dataFromFloats(_ floats: [Float]) -> Data {
     var copy = floats
     return copy.withUnsafeBytes { Data($0) }
+  }
+
+  private static func splitToneOffsets(_ color: [String: Any]) -> [Double] {
+    let split = dictionary(color["splitTone"])
+    return ["shadows", "highlights"].flatMap { key -> [Double] in
+      guard let values = split[key] as? [NSNumber], values.count == 3 else { return [0, 0, 0] }
+      return values.map { value in
+        let offset = value.doubleValue
+        return offset.isFinite ? min(0.12, max(-0.12, offset)) : 0
+      }
+    }
+  }
+
+  private static func smoothStep(_ low: Double, _ high: Double, _ value: Double) -> Double {
+    let t = min(1.0, max(0.0, (value - low) / (high - low)))
+    return t * t * (3 - 2 * t)
   }
 
   private static func number(_ values: [String: Any], _ key: String, _ fallback: Double, _ range: ClosedRange<Double>) -> Double {

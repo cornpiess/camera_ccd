@@ -1,6 +1,6 @@
 // Tone guardrails + perceptual audit（专家方案 §5/§15）
 // 对 assets/camera-profiles.json 的每台相机做：
-//  1. 护栏硬检查：blackPoint ≤ 0.012；完整管线（HSL cube→LUT×intensity→tone）下
+//  1. 护栏硬检查：blackPoint ≤ 0.012；颜色管线（LUT→全局→HSL→分离色调→tone）下
 //     25% gray ≥ 0.20、50% gray ∈ 0.44~0.56，越界报 warning/error。
 //  2. OKLab 感知统计：平均/最大 ΔE、饱和度比、肤色饱和比、灰漂移——用于发现
 //     "这只 LUT 明显比别只浓两倍"，不做艺术判断。
@@ -67,6 +67,7 @@ const oklabDist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 
 const satOf = ([r, g, b]) => { const mx = Math.max(r, g, b), mn = Math.min(r, g, b); return mx < 1e-6 ? 0 : (mx - mn) / mx; };
 
 function applyPipeline(profile, rgb) {
+  if (profile.passthrough) return [...rgb];
   const c = profile.color;
   // LUT 缺失（如 ORIG 的 null）或加载失败：原生管线会跳过 cube 阶段直通——
   // 审计同样按直通处理，而不是解构 null 崩掉整个审计。
@@ -82,12 +83,37 @@ function applyPipeline(profile, rgb) {
   const sat = c.saturation ?? 1;
   const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
   r = luma + (r - luma) * sat; g = luma + (g - luma) * sat; b = luma + (b - luma) * sat;
+  let [h,s,l] = rgbToHSL([r,g,b].map(clamp));
+  let shift=0, saturation=1, luminance=1, sum=0;
+  const centers = [0,30,57,117,182,230,302];
+  ['red','orange','yellow','green','cyan','blue','magenta'].forEach((name,index)=>{
+    const band = c.hueBands?.[name] ?? {};
+    const weight = Math.max(0,1-circularDistance(h,centers[index])/42);
+    const smooth=weight*weight*(3-2*weight);
+    shift += (band.hue ?? 0)*smooth;
+    saturation += ((band.saturation ?? 1)-1)*smooth;
+    luminance += ((band.luminance ?? 1)-1)*smooth;
+    sum += smooth;
+  });
+  if(sum>0){h=(h+shift/sum+360)%360;s=clamp(s*saturation);l=clamp(l*luminance);}
+  [r,g,b] = hslToRGB(h,s,l);
+  if(c.splitTone){
+    const y=clamp(.2126*r+.7152*g+.0722*b);
+    const [h,s]=rgbToHSL([r,g,b]);
+    const skin=Math.max(0,1-circularDistance(h,30)/35)*Math.min(1,s*3);
+    const protect=1-.65*skin;
+    const sw=(1-smoothStep(.08,.55,y))*smoothStep(0,.08,y)*protect;
+    const hw=smoothStep(.45,.95,y)*(1-smoothStep(.95,1,y))*protect;
+    const bias=c.splitTone.shadows.map((v,k)=>v*sw+c.splitTone.highlights[k]*hw);
+    const biasY=.2126*bias[0]+.7152*bias[1]+.0722*bias[2];
+    [r,g,b]=[r,g,b].map((v,k)=>clamp(v+bias[k]-biasY));
+  }
   // tone: exposure → contrast → black point → curve
   let v = [r, g, b].map((x) => x * Math.pow(2, profile.tone.exposure ?? 0));
   v = v.map((x) => (x - 0.5) * (profile.tone.contrast ?? 1) + 0.5);
   const bp = profile.tone.blackPoint ?? 0;
   if (bp > 0) { const s = 1 / (1 - bp); v = v.map((x) => x * s - bp * s); }
-  // 5-pt monotone cubic (same as native renderer's interpolation family)
+  // CPU approximation of CIToneCurve for offline guardrails; native pixels need device QA.
   v = v.map((x) => curve5(profile.tone.curve, Math.min(1, Math.max(0, x))));
   return v.map((x) => Math.min(1, Math.max(0, x)));
 }
@@ -101,6 +127,28 @@ function curve5(pts, x) {
 }
 const lutCache = (() => { const cache = {}; return (name) => (cache[name] ??= loadLUT(name)); })();
 
+const clamp=x=>Math.min(1,Math.max(0,x));
+const circularDistance=(a,b)=>{const d=Math.abs(a-b)%360;return Math.min(d,360-d);};
+const smoothStep=(low,high,v)=>{const t=clamp((v-low)/(high-low));return t*t*(3-2*t);};
+function rgbToHSL([r,g,b]){
+  const max=Math.max(r,g,b),min=Math.min(r,g,b),d=max-min,l=(max+min)/2;
+  if(d<.00001)return [0,0,l];
+  const s=l>.5?d/(2-max-min):d/(max+min);
+  let h=max===r?(g-b)/d+(g<b?6:0):max===g?(b-r)/d+2:(r-g)/d+4;
+  return [h*60,s,l];
+}
+function hslToRGB(h,s,l){
+  if(s<.00001)return [l,l,l];
+  const q=l<.5?l*(1+s):l+s-l*s,p=2*l-q;
+  return [h/360+1/3,h/360,h/360-1/3].map(t=>{
+    if(t<0)t+=1;if(t>1)t-=1;
+    return t<1/6?p+(q-p)*6*t:t<.5?q:t<2/3?p+(q-p)*(2/3-t)*6:p;
+  });
+}
+
+module.exports = { applyPipeline, rgbToHSL, linearToOKLab, oklabDist, s2l };
+if (require.main === module) {
+
 const SKINS = [[0.937, 0.784, 0.686], [0.855, 0.639, 0.494], [0.616, 0.416, 0.298]];
 let issues = 0;
 console.log("相机".padEnd(24), "BP", "25%→", "50%→", "ΔEavg", "ΔEmax", "Sat比", "肤Sat比");
@@ -108,8 +156,9 @@ for (const p of doc.profiles) {
   const flags = [];
   if ((p.tone.blackPoint ?? 0) > 0.012) flags.push("BP>0.012");
   // neutral tone probes through the full pipeline
-  const g25 = applyPipeline(p, [0.25, 0.25, 0.25])[0];
-  const g50 = applyPipeline(p, [0.5, 0.5, 0.5])[0];
+  const luminance = rgb => .2126*rgb[0]+.7152*rgb[1]+.0722*rgb[2];
+  const g25 = luminance(applyPipeline(p, [0.25, 0.25, 0.25]));
+  const g50 = luminance(applyPipeline(p, [0.5, 0.5, 0.5]));
   if (g25 < 0.20) flags.push("25%灰<0.20");
   if (g50 < 0.44 || g50 > 0.56) flags.push(`50%灰${g50.toFixed(2)}越界`);
   // perceptual stats over a 5³ grid
@@ -137,3 +186,4 @@ for (const p of doc.profiles) {
 }
 console.log(issues ? `\n${issues} 台相机触发护栏/统计警告` : "\n全部通过护栏");
 process.exit(issues ? 1 : 0);
+}

@@ -57,6 +57,15 @@ step('npm run verify（typecheck + lint + doctor）', () => {
   must(/\d+\/\d+ checks passed/.test(r.stdout), 'doctor 检查未全部通过');
 });
 
+// Shared camera-character regression checks (CPU reference, not native pixel QA).
+step('camera look regression + tone guardrails', () => {
+  for (const script of ['scripts/look-check.js', 'scripts/tone-audit.js']) {
+    const r = run('node', [script]);
+    must(r.code === 0, `${script} failed:\n${r.stdout}\n${r.stderr}`);
+    console.log(r.stdout.trim());
+  }
+});
+
 // 2. iOS 离线导出 + 模块数基线
 step('expo export（bundle 完整性 + 模块数基线）', () => {
   try {
