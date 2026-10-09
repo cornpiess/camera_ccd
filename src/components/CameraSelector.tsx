@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions, Linking, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Animated, Linking, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import type { CameraProfile } from '../profiles/types';
 import { markerGlyph, profileDisplayName } from './types';
-import { t, tf } from '../i18n';
+import { appLang, t, tf } from '../i18n';
+import { IrisGlyph } from './IrisGlyph';
 import { SafeGlassView, isGlassAvailable } from './GlassCard';
 import { ProfileConfigModal } from '../calibration/ProfileConfigModal';
 
@@ -45,9 +46,8 @@ export interface CameraSelectorProps {
   readonly onOpenPro?: (source: 'proBadge') => void;
 }
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
-const ROW_HEIGHT = 56;
-const PANEL_MAX_WIDTH = Math.min(320, Math.round(SCREEN_WIDTH * 0.72));
+const CARD_GAP = 10;
+const GRID_PADDING = 12;
 // The morph starts from the TopBar capsule's geometry (LEFT-anchored capsule —
 // 2026-09-19 layout: capsule leads from the top-left, PRO chip holds the right
 // corner, the Dynamic Island owns the center — 44pt tall, just below the
@@ -58,7 +58,7 @@ const CAPSULE_HEIGHT = 44;
 const CAPSULE_TOP = 55;
 const PANEL_TOP = 92;
 // Legal footer pinned under the profile list (用户协议 / 隐私政策 / 支持).
-const FOOTER_HEIGHT = 44;
+const FOOTER_HEIGHT = 56;
 
 // 协议页面固定挂在 GitHub Pages。open 前按 https + 精确 host/路径形态校验，只放行
 // 本项目自己的三个页面 —— 拼接结果不符合就直接丢弃，绝不交给系统打开。
@@ -118,14 +118,21 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
   // Per-camera configuration entry (⚙) restored in the liquid-glass list.
   const [configProfileId, setConfigProfileId] = useState<string | null>(null);
-  const { height: screenHeight } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight, fontScale } = useWindowDimensions();
+  const panelWidth = Math.min(460, screenWidth - CAPSULE_LEFT * 2);
+  const cardWidth = (panelWidth - GRID_PADDING * 2 - CARD_GAP) / 2;
+  const cardHeight = Math.round((cardWidth < 148 ? 224 : 196) * Math.max(1, Math.min(fontScale, 1.4)));
+  const headerHeight = Math.round((apertureMode === 'fixed' ? 100 : 76) * Math.max(1, Math.min(fontScale, 1.4)));
+  const footerHeight = FOOTER_HEIGHT * Math.max(1, Math.min(fontScale, 1.4));
   // Keep the active camera visible when the list overflows (24+ profiles).
   const scrollRef = useRef<ScrollView>(null);
   // 24+ profiles overflow the screen: cap the panel and scroll the rows. The morph math
   // uses the CAPPED height so the glass still lands exactly on the capsule at progress 0.
   // The legal footer is part of the panel — its height counts toward the morph math.
-  const maxPanelHeight = Math.round(screenHeight * 0.62);
-  const panelHeight = Math.min(profiles.length * ROW_HEIGHT, maxPanelHeight) + FOOTER_HEIGHT;
+  const panelHeight = Math.min(
+    Math.ceil(profiles.length / 2) * (cardHeight + CARD_GAP) + GRID_PADDING * 2 + headerHeight + footerHeight,
+    screenHeight - PANEL_TOP - 28,
+  );
 
   useEffect(() => {
     animRef.current?.stop();
@@ -158,10 +165,11 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
     if (!visible) return;
     const activeIndex = profiles.findIndex((p) => p.id === activeProfileId);
     if (activeIndex > 0) {
-      const y = Math.max(0, activeIndex * ROW_HEIGHT - panelHeight / 2 + ROW_HEIGHT / 2);
+      const viewportHeight = panelHeight - headerHeight - footerHeight;
+      const y = Math.max(0, Math.floor(activeIndex / 2) * (cardHeight + CARD_GAP) - viewportHeight / 2 + cardHeight / 2);
       scrollRef.current?.scrollTo({ y, animated: false });
     }
-  }, [visible, activeProfileId, profiles, panelHeight]);
+  }, [visible, activeProfileId, profiles, panelHeight, cardHeight, headerHeight, footerHeight]);
 
   if (!mounted || profiles.length === 0) return null;
   // Transform-origin math (RN scales around the center): pin the scaled panel's top edge
@@ -170,7 +178,7 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   // progress-0 offset reduces to half the width difference — same translate-then-scale
   // composition the Y axis has always used.
   const originTranslateY = CAPSULE_TOP + CAPSULE_HEIGHT / 2 - (PANEL_TOP + panelHeight / 2);
-  const originTranslateX = (CAPSULE_WIDTH - PANEL_MAX_WIDTH) / 2;
+  const originTranslateX = (CAPSULE_WIDTH - panelWidth) / 2;
   const translateX = progress.interpolate({
     inputRange: [0, 1],
     outputRange: [originTranslateX, 0],
@@ -183,7 +191,7 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
   });
   const scaleX = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [CAPSULE_WIDTH / PANEL_MAX_WIDTH, 1],
+    outputRange: [CAPSULE_WIDTH / panelWidth, 1],
     extrapolate: 'clamp',
   });
   const scaleY = progress.interpolate({
@@ -229,7 +237,7 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
         <Animated.View
           style={[
             styles.morphPanel,
-            { height: panelHeight, transform: [{ translateX }, { translateY }, { scaleX }, { scaleY }] },
+            { width: panelWidth, height: panelHeight, transform: [{ translateX }, { translateY }, { scaleX }, { scaleY }] },
           ]}
           pointerEvents={visible ? 'auto' : 'none'}
         >
@@ -247,30 +255,41 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
             <Animated.View
               style={[styles.content, { opacity: contentOpacity, transform: [{ scale: contentScale }] }]}
             >
+              <View style={[styles.header, { height: headerHeight }]}>
+                <Text style={styles.title} maxFontSizeMultiplier={1.4}>{t('selectorTitle')}</Text>
+                <Text style={styles.subtitle} maxFontSizeMultiplier={1.4}>{t('selectorSubtitle')}</Text>
+                {apertureMode === 'fixed' ? <Text style={styles.fixedNote} maxFontSizeMultiplier={1.4}>{t('fixedLensNote')}</Text> : null}
+              </View>
               <ScrollView
                 ref={scrollRef}
                 style={styles.list}
+                contentContainerStyle={styles.grid}
                 nestedScrollEnabled
                 showsVerticalScrollIndicator={false}
+                onContentSizeChange={() => {
+                  const index = profiles.findIndex(p => p.id === activeProfileId);
+                  if (!visible || index < 0) return;
+                  const viewport = panelHeight - headerHeight - footerHeight;
+                  scrollRef.current?.scrollTo({ y: Math.max(0, Math.floor(index / 2) * (cardHeight + CARD_GAP) - viewport / 2 + cardHeight / 2), animated: false });
+                }}
               >
               {profiles.map((profile) => {
                 const isActive = profile.id === activeProfileId;
                 const accent = profile.ui?.accent || '#FFFFFF';
                 const displayName = profileDisplayName(profile);
                 const preferred = profile.aperture?.preferred;
-                // Row aperture reflects the SESSION's iris mode: variable → the profile's
-                // signature stop (the ring snaps there on selection), wearing the camera's
-                // own accent; fixed → the ONE mechanical aperture, default color for every
-                // row (the lens cannot differ per camera). ORIG has no signature → no text.
+                const look = profile.ui.look?.[appLang];
+                // The recommended stop describes the camera character. The header
+                // explains fixed hardware; ORIG uses the actual lens aperture when known.
                 const fixedValue =
                   apertureMode === 'fixed' && typeof fixedAperture === 'number' && Number.isFinite(fixedAperture) && fixedAperture > 0
                     ? fixedAperture
                     : null;
                 const signatureValue =
-                  apertureMode !== 'fixed' && typeof preferred === 'number' && Number.isFinite(preferred)
+                  typeof preferred === 'number' && Number.isFinite(preferred) && preferred > 0
                     ? preferred
                     : null;
-                const rowAperture = fixedValue ?? signatureValue;
+                const rowAperture = signatureValue ?? fixedValue;
                 // Monetization badge from the shared policy: GRIT N renders nothing
                 // (cleanest), remaining trials read "N LEFT", exhausted reads "PRO".
                 const access = accessForProfile?.(profile) ?? null;
@@ -286,35 +305,44 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                     key={profile.id}
                     accessibilityRole="button"
                     accessibilityState={{ selected: isActive }}
-                    accessibilityLabel={`${displayName}${isActive ? ', selected' : ''}${
+                    accessibilityLabel={`${displayName}, ${look?.title ?? ''}, ${look?.description ?? ''}${isActive ? ', selected' : ''}${
                       rowAperture != null
-                        ? `, ${fixedValue != null ? 'aperture' : 'recommended'} ƒ/${rowAperture}`
+                        ? `, ${signatureValue != null ? t('recommendedAperture') : t('originalAperture')} ƒ/${rowAperture}`
                         : ''
                     }`}
                     onPress={() => handleSelect(profile)}
-                    style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                    style={({ pressed }) => [styles.card, { width: cardWidth, height: cardHeight }, isActive && { borderColor: accent, backgroundColor: 'rgba(255,255,255,0.09)' }, pressed && styles.rowPressed]}
                   >
+                    <View style={styles.cardTop}>
                     <Text style={[styles.rowGlyph, { color: accent }]}>
                       {markerGlyph(profile.ui?.markerStyle)}
                     </Text>
-                    <Text style={[styles.rowName, isActive && styles.rowNameActive]} numberOfLines={1}>
+                    <Text style={[styles.rowName, isActive && styles.rowNameActive]} numberOfLines={1} maxFontSizeMultiplier={1.4}>
                       {displayName}
                     </Text>
-                    {rowAperture != null ? (
-                      <Text
-                        style={[styles.rowAperture, fixedValue == null && { color: accent }]}
-                        numberOfLines={1}
-                      >
-                        {`ƒ/${rowAperture.toFixed(1).replace(/\.0$/, '')}`}
-                      </Text>
-                    ) : null}
+                    {isActive ? <Text style={[styles.selectedMark, { color: accent }]}>✓</Text> : null}
+                    </View>
+                    <Text style={styles.lookTitle} numberOfLines={2} maxFontSizeMultiplier={1.4}>{look?.title ?? displayName}</Text>
+                    <Text style={styles.lookDescription} numberOfLines={2} maxFontSizeMultiplier={1.4}>{look?.description ?? profile.ui.personality ?? ''}</Text>
+                    <Text style={[styles.subject, { color: accent }]} numberOfLines={1} maxFontSizeMultiplier={1.4}>{look?.subject ?? ''}</Text>
+                    <View style={styles.cardBottom}>
+                      <View style={styles.apertureBlock}>
+                        <Text style={styles.apertureLabel} numberOfLines={2} maxFontSizeMultiplier={1.4}>{signatureValue != null ? t('recommendedAperture') : t('originalCapture')}</Text>
+                        <Text style={[styles.rowAperture, { color: signatureValue != null ? accent : '#FFFFFF' }]} numberOfLines={1} maxFontSizeMultiplier={1.4}>
+                          {rowAperture != null ? `ƒ/${rowAperture.toFixed(1).replace(/\.0$/, '')}` : '—'}
+                        </Text>
+                      </View>
+                      {signatureValue != null && cardWidth >= 148 && fontScale <= 1.2 ? <IrisGlyph size={36} openness={Math.max(0, Math.min(1, (4 - signatureValue) / (4 - 1.48)))} accent={accent} /> : null}
+                    </View>
+                    <View style={styles.badgeRow}>
                     {badge != null ? (
                       badgeIsPro && onOpenPro ? (
                         <Pressable
                           accessibilityLabel={`Unlock ${displayName} with Camera 18 Pro`}
                           accessibilityRole="button"
                           hitSlop={6}
-                          onPress={() => {
+                          onPress={(event) => {
+                            event.stopPropagation();
                             Haptics.selectionAsync().catch(() => {});
                             onOpenPro('proBadge');
                           }}
@@ -326,15 +354,13 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                         <Text style={styles.trialBadge}>{badge}</Text>
                       )
                     ) : null}
-                    {isActive ? (
-                      <View style={[styles.activeDot, { backgroundColor: accent }]} />
-                    ) : null}
                     {settingsVisible ? (
                       <Pressable
                         accessibilityLabel={`Configure ${displayName}`}
                         accessibilityRole="button"
                         hitSlop={8}
-                        onPress={() => {
+                        onPress={(event) => {
+                          event.stopPropagation();
                           Haptics.selectionAsync().catch(() => {});
                           setConfigProfileId(profile.id);
                         }}
@@ -343,6 +369,7 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                         <Text style={[styles.configGlyph, { color: accent }]}>⚙</Text>
                       </Pressable>
                     ) : null}
+                    </View>
                   </Pressable>
                 );
               })}
@@ -351,7 +378,7 @@ export const CameraSelector: React.FC<CameraSelectorProps> = ({
                   全 app 没有独立设置页 —— 相机胶囊 → 本面板是唯一菜单表面。
                   （Camera 18 Pro 入口已按用户要求从本面板移除，只保留右上角
                   chip；已订阅用户的管理入口 = 右上角 PRO ✓ chip。） */}
-              <View style={styles.footer}>                {versionLabel ? (
+              <View style={[styles.footer, { minHeight: footerHeight }]}>                {versionLabel ? (
                   <>
                     <Pressable
                       accessibilityLabel={`Version ${versionLabel}`}
@@ -415,7 +442,6 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   morphPanel: {
-    width: PANEL_MAX_WIDTH,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.35,
@@ -436,17 +462,25 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingVertical: 6,
+    position: 'relative',
   },
+  header: { paddingHorizontal: 18, paddingTop: 16, gap: 5 },
+  title: { color: '#FFFFFF', fontSize: 19, fontWeight: '700' },
+  subtitle: { color: 'rgba(255,255,255,0.6)', fontSize: 12 },
+  fixedNote: { color: 'rgba(255,255,255,0.55)', fontSize: 10, lineHeight: 14 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: CARD_GAP, padding: GRID_PADDING },
+  card: { borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(8,8,12,0.28)', padding: 12 },
+  cardTop: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 9 },
+  selectedMark: { fontSize: 12, fontWeight: '800' },
+  lookTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '700', marginBottom: 5 },
+  lookDescription: { color: 'rgba(255,255,255,0.68)', fontSize: 11, lineHeight: 16 },
+  subject: { fontSize: 10, marginTop: 6 },
+  cardBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto', paddingTop: 8 },
+  apertureBlock: { flex: 1 },
+  apertureLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 8, letterSpacing: 0.7, marginBottom: 2 },
+  badgeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 22, marginTop: 4 },
   list: {
     flex: 1,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: ROW_HEIGHT,
-    paddingHorizontal: 18,
-    gap: 12,
   },
   rowPressed: {
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
@@ -459,7 +493,7 @@ const styles = StyleSheet.create({
   rowName: {
     flex: 1,
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: '600',
   },
   rowNameActive: {
@@ -467,14 +501,9 @@ const styles = StyleSheet.create({
   },
   rowAperture: {
     color: 'rgba(255, 255, 255, 0.45)',
-    fontSize: 11,
+    fontSize: 24,
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
-  },
-  activeDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
   },
   trialBadge: {
     color: 'rgba(255, 255, 255, 0.45)',

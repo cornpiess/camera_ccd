@@ -32,6 +32,12 @@ function detectLang(): Lang {
 export const appLang: Lang = detectLang();
 
 const en = {
+  selectorTitle: 'Choose your look',
+  selectorSubtitle: 'Eight characters. One shutter.',
+  recommendedAperture: 'SIGNATURE APERTURE',
+  fixedLensNote: 'Fixed lens · recommendations are a style guide',
+  originalCapture: 'ORIGINAL CAPTURE',
+  originalAperture: 'Lens aperture',
   // Shutter / pipeline errors (user language, never AVCapture domains)
   errPhotoPermissionDenied: "Couldn't save the photo — allow photo access in Settings.",
   errCaptureBusy: 'Still processing the previous photo — one moment.',
@@ -123,6 +129,12 @@ const en = {
 };
 
 const zh: Record<keyof typeof en, string> = {
+  selectorTitle: '选择你的相机性格',
+  selectorSubtitle: '八种影像性格，一按即得。',
+  recommendedAperture: '推荐光圈',
+  fixedLensNote: '当前镜头为固定光圈 · 推荐值仅作风格参考',
+  originalCapture: '原图直出',
+  originalAperture: '镜头实际光圈',
   errPhotoPermissionDenied: '无法保存照片——请在设置中允许照片访问。',
   errCaptureBusy: '上一张还在处理中，请稍候。',
   errCaptureFailed: '拍摄失败，请重试。',
